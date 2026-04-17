@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: "DM Sans", "Noto Sans SC", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+  background-color: #f0ebe3;
+  -webkit-font-smoothing: antialiased;
+  color: #1c1917;
+}
+
+/* Geist Mono — loaded from CDN so we don't have to bundle the font file.  */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("https://cdn.jsdelivr.net/fontsource/fonts/geist-mono@latest/latin-500-normal.woff2")
+    format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}

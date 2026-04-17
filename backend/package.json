@@ -1,0 +1,34 @@
+{
+  "name": "tokenboss-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TokenBoss relay station backend — AWS Lambda + DynamoDB",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json -w",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx watch src/local.ts",
+    "dev:mock": "cross-env MOCK_UPSTREAM=1 tsx watch src/local.ts",
+    "deploy": "sam build && sam deploy",
+    "deploy:guided": "sam build && sam deploy --guided",
+    "local:sam": "sam local start-api"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.699.0",
+    "@aws-sdk/lib-dynamodb": "^3.699.0",
+    "better-sqlite3": "^12.8.0",
+    "undici": "^7.24.8"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.9.0",
+    "cross-env": "^7.0.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

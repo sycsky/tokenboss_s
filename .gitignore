@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.aws-sam/
+samconfig.toml
+*.log
+.env
+.env.local
+.env.production
+*.tsbuildinfo
+.DS_Store
+.playwright-mcp/
+.worktrees/
+.gstack/

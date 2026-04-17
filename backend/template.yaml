@@ -1,0 +1,286 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TokenBoss relay station - Lambda + DynamoDB
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+  UpstreamApiUrl:
+    Type: String
+    Default: ''
+    Description: Aggregator base URL, e.g. https://api.newapi.example.com (no trailing /v1)
+  UpstreamApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Aggregator API key sent as Bearer token on every forwarded request
+  UpstreamId:
+    Type: String
+    Default: default
+    Description: Human-friendly ID of the upstream used in logs
+  SessionSecret:
+    Type: String
+    NoEcho: true
+    Description: HMAC-SHA256 secret used to sign web dashboard JWTs (min 16 chars)
+    MinLength: 16
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures: [arm64]
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        TABLE_NAME: !Ref AppTable
+        NODE_OPTIONS: --enable-source-maps
+        UPSTREAM_API_URL: !Ref UpstreamApiUrl
+        UPSTREAM_API_KEY: !Ref UpstreamApiKey
+        UPSTREAM_ID: !Ref UpstreamId
+        SESSION_SECRET: !Ref SessionSecret
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Single-table DynamoDB design
+  #
+  # PK/SK patterns:
+  #   USER#<uid>       / PROFILE              user profile
+  #   USER#<uid>       / DEVICE#<id>          device binding
+  #   USER#<uid>       / BUCKET#<id>          credit bucket (TTL: expires_at)
+  #   USER#<uid>       / RESERVATION#<reqId>  active credit reservation (TTL: 5 min)
+  #   USER#<uid>       / USAGE#<iso>#<reqId>  per-request usage log
+  #   PAIRING#<code>   / META                 pairing code (TTL: 10 min)
+  #   ORDER#<id>       / META                 payment order (idempotency anchor)
+  #   KEY#<tb_live_x>  / META                 proxy key -> user/device lookup (hot path)
+  #
+  # GSI1 (set GSI1PK/GSI1SK per entity on write):
+  #   reverse lookup from key/order to user, admin listings by status, etc.
+  #
+  # TTL attribute: `ttl` (Unix epoch seconds) — pairing codes and reservations
+  # auto-expire; DynamoDB handles cleanup within ~48h of expiry.
+  # ---------------------------------------------------------------------------
+  AppTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub tokenboss-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # HTTP API (cheaper + simpler than REST API for MVP)
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowHeaders: ['*']
+
+  # Placeholder health check — real handlers added alongside feature work.
+  HelloFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-hello-${Stage}
+      CodeUri: dist/
+      Handler: handlers/hello.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AppTable
+      Events:
+        Hello:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /hello
+            Method: GET
+
+  # --- Web dashboard backend ---
+  # One Lambda per resource to keep cold starts small. Registration/login
+  # and session-gated read endpoints share the same CRUD policy on the
+  # single table.
+
+  AuthRegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-auth-register-${Stage}
+      CodeUri: dist/
+      Handler: handlers/authHandlers.registerHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppTable
+      Events:
+        Register:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/auth/register
+            Method: POST
+
+  AuthLoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-auth-login-${Stage}
+      CodeUri: dist/
+      Handler: handlers/authHandlers.loginHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AppTable
+      Events:
+        Login:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/auth/login
+            Method: POST
+
+  MeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-me-${Stage}
+      CodeUri: dist/
+      Handler: handlers/authHandlers.meHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AppTable
+      Events:
+        Me:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/me
+            Method: GET
+
+  ListKeysFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-keys-list-${Stage}
+      CodeUri: dist/
+      Handler: handlers/keysHandlers.listKeysHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AppTable
+      Events:
+        ListKeys:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/keys
+            Method: GET
+
+  CreateKeyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-keys-create-${Stage}
+      CodeUri: dist/
+      Handler: handlers/keysHandlers.createKeyHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppTable
+      Events:
+        CreateKey:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/keys
+            Method: POST
+
+  DeleteKeyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-keys-delete-${Stage}
+      CodeUri: dist/
+      Handler: handlers/keysHandlers.deleteKeyHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppTable
+      Events:
+        DeleteKey:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/keys/{keyId}
+            Method: DELETE
+
+  UsageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-usage-${Stage}
+      CodeUri: dist/
+      Handler: handlers/usageHandlers.usageHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AppTable
+      Events:
+        Usage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/usage
+            Method: GET
+
+  # OpenAI-compatible chat proxy — pure pass-through to aggregator upstream.
+  # Served from a Lambda Function URL in RESPONSE_STREAM mode so SSE chunks
+  # from the upstream reach the client immediately instead of being buffered
+  # for the full response (which API Gateway HTTP API would force).
+  #
+  # The handler wraps `streamChatCore` with `awslambda.streamifyResponse` —
+  # see `src/handlers/chatProxy.ts`.
+  ChatProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tokenboss-chat-proxy-${Stage}
+      CodeUri: dist/
+      Handler: handlers/chatProxy.handler
+      Timeout: 60
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppTable
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins: ['*']
+          AllowMethods: [POST, OPTIONS]
+          AllowHeaders: [authorization, content-type]
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the TokenBoss HTTP API (non-streaming routes)
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  ChatProxyUrl:
+    Description: Lambda Function URL for the streaming chat proxy (POST /v1/chat/completions)
+    Value: !GetAtt ChatProxyFunctionUrl.FunctionUrl
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref AppTable
