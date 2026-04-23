@@ -1,17 +1,17 @@
-# Build context is repo root — all COPY paths are relative to repo root.
+# Build context is the backend/ directory.
 
 # ── Stage 1: install deps (compiles better-sqlite3 native module) ──
 FROM node:20-alpine AS deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-COPY backend/package*.json ./
+COPY package*.json ./
 RUN npm ci
 
 # ── Stage 2: compile TypeScript ──
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY backend/ .
+COPY . .
 RUN npm run build
 
 # ── Stage 3: runtime ──
