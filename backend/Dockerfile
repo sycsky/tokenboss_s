@@ -4,7 +4,7 @@
 FROM node:20-alpine AS deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-COPY package*.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
 
 # ── Stage 2: compile TypeScript ──
