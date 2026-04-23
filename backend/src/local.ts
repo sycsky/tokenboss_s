@@ -432,7 +432,9 @@ const server = createServer((req, res) => {
   });
 });
 
-await seedLocalData();
+if (process.env.NODE_ENV !== "production") {
+  await seedLocalData();
+}
 
 server.listen(PORT, () => {
   console.log(`[local] TokenBoss backend listening on http://localhost:${PORT}`);

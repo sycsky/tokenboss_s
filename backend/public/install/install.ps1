@@ -78,28 +78,25 @@ foreach ($dir in @($PLUGIN_DIR, $OLD_PLUGIN)) {
     }
 }
 
-# ── 5. Download & extract tarball ─────────────────────────────
-Write-Step "Downloading tarball..."
-$tgzPath = Join-Path $env:TEMP "tokenboss-router.tgz"
-Invoke-WebRequest -Uri "$BackendUrl/install/tokenboss-router.tgz" -OutFile $tgzPath -UseBasicParsing
-Write-Ok "Downloaded"
+# ── 5. Download from npm registry ────────────────────────────
+Write-Step "Downloading @tokenboss/router from npm ($NpmRegistry)..."
+$packTmp = Join-Path $env:TEMP "tb-pack-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+New-Item -ItemType Directory -Path $packTmp -Force | Out-Null
+Push-Location $packTmp
+npm pack "@tokenboss/router" --registry=$NpmRegistry --silent
+if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Err "npm pack failed"; exit 1 }
+$tgzFile = Get-ChildItem $packTmp -Filter "tokenboss-router-*.tgz" | Select-Object -First 1
+if (-not $tgzFile) { Pop-Location; Write-Err "package not found on registry"; exit 1 }
+Write-Ok "Downloaded $($tgzFile.Name)"
+Pop-Location
 
 New-Item -ItemType Directory -Path $PLUGIN_DIR -Force | Out-Null
-tar -xzf $tgzPath -C $PLUGIN_DIR --strip-components=1
+tar -xzf $tgzFile.FullName -C $PLUGIN_DIR --strip-components=1
 if ($LASTEXITCODE -ne 0) { Write-Err "tar extraction failed"; exit 1 }
+Remove-Item $packTmp -Recurse -Force
 Write-Ok "Extracted to $PLUGIN_DIR"
 
-# ── 6. npm install --omit=dev (streams output live) ───────────
-Write-Step "Installing plugin dependencies (registry: $NpmRegistry)..."
-$npmCmd = "npm install --omit=dev --registry=$NpmRegistry --fund=false --audit=false --progress=false --loglevel=info"
-cmd /c "cd /d `"$PLUGIN_DIR`" && $npmCmd"
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "npm install failed (exit $LASTEXITCODE)"
-    exit 1
-}
-Write-Ok "Dependencies installed"
-
-# ── 7. Patch openclaw.json ────────────────────────────────────
+# ── 6. Patch openclaw.json ────────────────────────────────────
 Write-Step "Registering plugin in openclaw.json..."
 if (-not (Test-Path $CONFIG_PATH)) {
     Write-Warn "openclaw.json not found at $CONFIG_PATH — is openclaw installed?"
@@ -139,13 +136,13 @@ if (-not (Test-Path $CONFIG_PATH)) {
     }
 }
 
-# ── 8. Clear models cache so openclaw re-fetches provider list ─
+# ── 7. Clear models cache so openclaw re-fetches provider list ─
 Write-Step "Clearing models cache..."
 Get-ChildItem "$env:USERPROFILE\.openclaw\agents\*\agent\models.json" -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 Write-Ok "Cache cleared"
 
-# ── 9. Persist env vars (User scope) ──────────────────────────
+# ── 8. Persist env vars (User scope) ──────────────────────────
 Write-Step "Setting env vars (User scope)..."
 [Environment]::SetEnvironmentVariable("TOKENBOSS_API_URL", $BackendUrl, "User")
 [Environment]::SetEnvironmentVariable("TOKENBOSS_API_KEY", $ApiKey, "User")

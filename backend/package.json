@@ -6,6 +6,7 @@
   "description": "TokenBoss relay station backend — AWS Lambda + DynamoDB",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/local.js",
     "watch": "tsc -p tsconfig.json -w",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/local.ts",
