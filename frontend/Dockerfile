@@ -1,18 +1,17 @@
-# Build context is the frontend/ directory.
+# Build context is the repo root (Zeabur monorepo setup).
+# This Dockerfile is pasted into the Zeabur service configuration.
 
-# ── Stage 1: build Vite app ──
-FROM node:20-alpine AS builder
+FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY frontend/package*.json .
 RUN npm ci
-COPY . .
+COPY frontend/ .
 RUN npm run build
 
-# ── Stage 2: serve with nginx ──
-FROM nginx:alpine AS runner
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY --from=builder /app/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/entrypoint.sh /entrypoint.sh
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY frontend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 80
 ENTRYPOINT ["/entrypoint.sh"]

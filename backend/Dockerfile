@@ -1,26 +1,21 @@
-# Build context is the backend/ directory.
+# Build context is the repo root (Zeabur monorepo setup).
+# This Dockerfile is pasted into the Zeabur service configuration.
 
-# ── Stage 1: install deps (compiles better-sqlite3 native module) ──
-FROM node:20-alpine AS deps
+FROM node:20-alpine AS build
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY backend/package*.json .
 RUN npm ci
-
-# ── Stage 2: compile TypeScript ──
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY backend/ .
 RUN npm run build
 
-# ── Stage 3: runtime ──
-FROM node:20-alpine AS runner
+FROM node:20-alpine
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/data ./data
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/public ./public
+COPY --from=build /app/data ./data
+COPY --from=build /app/package.json ./package.json
 EXPOSE 3000
 ENV NODE_ENV=production
 CMD ["node", "dist/local.js"]
