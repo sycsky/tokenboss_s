@@ -37,12 +37,14 @@
 | SKU | 实付 | 日额度 | 28 天累计上限 | 模型池 | 状态 |
 |---|---|---|---|---|---|
 | **Plus** | `¥288 / 月` | `$30 / 天` | 最高 `$840` | 便宜模型池（GPT-5 / GPT-5-mini / Codex / Haiku） | ✅ v1 开放 |
-| **Max** | `¥588 / 月` | `$60 / 天` | 最高 `$1,680` | 全模型（含 Claude Sonnet / Opus） | ✅ v1 开放 |
-| **Ultra** | `¥1688 / 月` | `$180 / 天` | 最高 `$5,040` | 全模型 + 优先级 | 🔒 显示已售罄 |
+| **Super** | `¥588 / 月` | `$80 / 天` | 最高 `$2,240` | 全模型（含 Claude Sonnet / Opus） | ✅ v1 开放 |
+| **Ultra** | `¥1688 / 月` | `$720 / 天` | 最高 `$20,160` | 全模型 + 优先级 | 🔒 显示已售罄 |
+
+**杠杆比递进设计（v16）**：3 档杠杆比刻意递进 — Plus `2.92×` → Super `3.81×` → Ultra `11.95×`。Super 比 Plus 多 ~30% 升档诱因，Ultra 是营销橱窗（"$20K 美金额度"），SOLD OUT 状态下不承担实际 margin。这跟"花得多比例更划算"的 SaaS 直觉对齐。
 
 **Ultra 的 "已售罄" 显示策略**：让用户看到"还有更高档存在"，给将来留升级路径。**"已售罄"传递供不应求 + 稀缺感**，比"暂不开放"营销心理更强 —— 上线时一并展示，Phase 1.5 评估开放时机。
 
-**关键差异化**：套餐区分不靠"能用多少"靠"能用什么"。Plus = TokenBoss Auto 替你选；Max = 你自己选 Opus / GPT-5 / 等。
+**关键差异化**：套餐区分不靠"能用多少"靠"能用什么"。Plus = TokenBoss Auto 替你选；Super = 你自己选 Opus / GPT-5 / 等。
 
 ### 3. 日 cap + 28 天周期
 
@@ -81,14 +83,14 @@
 
 ### 6. 扣费模型
 
-**Manual 单选模型**（仅 Max + Ultra + topup 用户可用）：按上游官方 $ 价扣（OpenAI / Anthropic / Google 等公开 token 单价）。涨跌跟随。新模型上架自动出现可选列表。
+**Manual 单选模型**（仅 Super + Ultra + topup 用户可用）：按上游官方 $ 价扣（OpenAI / Anthropic / Google 等公开 token 单价）。涨跌跟随。新模型上架自动出现可选列表。
 
 **Auto 路由模式**（所有用户共用一个用户面"Auto"）：基于 [ClawRouter](https://github.com/BlockRunAI/ClawRouter) 部署到云端 + 自定义模型表。系统按 prompt 复杂度自动选模型。对外标"省 ~X%"作为价值锚，X 来自 ClawRouter 已有 benchmark 数据反推。
 
 不同 bucket 的 Auto 行为在路由层差异化（用户面统一显示 "Auto 模式"）：
 
 - **Plus** 套餐：Auto 限制在便宜模型池（GPT-5 / mini / Codex / Haiku）
-- **Max / Ultra** 套餐：Auto 全模型池可路由
+- **Super / Ultra** 套餐：Auto 全模型池可路由
 - **Trial** 账户：Auto 强制走 ECO 兜底档（最便宜的几个），用户不感知 ECO 字样
 
 **v1 不做**：多 channel 分组（DragonCode 那种"企业稳定/Kiro 逆向/反重力"）。单 channel 走 ClawRouter，复杂度推迟到 Phase 1.5。
@@ -148,9 +150,9 @@
 |---|---|
 | `id` | uuid |
 | `user_id` | 关联用户 |
-| `sku_type` | `trial` / `topup` / `plan_plus` / `plan_max` / `plan_ultra` |
+| `sku_type` | `trial` / `topup` / `plan_plus` / `plan_super` / `plan_ultra` |
 | `amount_usd` | 美金 credit 总额（套餐为日 cap 累积上限，topup 为永久额度） |
-| `daily_cap_usd` | 套餐才有：每日额度（Plus=$30 / Max=$60 / Ultra=$180） |
+| `daily_cap_usd` | 套餐才有：每日额度（Plus=$30 / Super=$80 / Ultra=$720） |
 | `daily_remaining_usd` | 当日剩余（每日 0:00 重置为 daily_cap_usd） |
 | `total_remaining_usd` | topup 才用：永久剩余余额 |
 | `started_at` | 起算时间 |
@@ -179,7 +181,7 @@ ORDER BY
 |---|---|---|
 | `trial` | `auto_eco_only` | 路由层硬绑 ECO tier |
 | `plan_plus` | `auto_only` | `gpt_only` |
-| `plan_max` | `none` | `all` |
+| `plan_super` | `none` | `all` |
 | `plan_ultra` | `none` | `all` + 优先级 |
 | `topup` | `none` | `all` |
 
@@ -191,7 +193,7 @@ ORDER BY
 ### 前端展示
 
 - **Dashboard 主屏**：`$X.XX` 余额（Geist Mono 大数字，按当日剩余 + topup 余额合计） + 当前活跃 bucket 列表（Plus 还 N 天 / topup $X 不过期）+ 今日 / 累计消耗
-- **Billing 页**：3 张套餐卡（Plus + Max + Ultra "SOLD OUT"）+ 5 档 topup table + 支付方式选择
+- **Billing 页**：3 张套餐卡（Plus + Super + Ultra "SOLD OUT"）+ 5 档 topup table + 支付方式选择
 - **使用历史页**：沿用现有 `UsageHistory.tsx` 结构，单位换 `$`
 - **接入指引页**：试用 $10 礼物卡视觉 + 接入命令
 
@@ -201,7 +203,7 @@ ORDER BY
 
 | 触发 | 回复模板 |
 |---|---|
-| Plus 用户切 Claude 模型 | "此模型需 Max 套餐或加买额度。升级：tokenboss.co/billing" |
+| Plus 用户切 Claude 模型 | "此模型需 Super 套餐或加买额度。升级：tokenboss.co/billing" |
 | 试用切付费模型 | "免费试用仅可用智能路由。升级：tokenboss.co/billing" |
 | 当日额度耗尽 | "今日额度已用完。明日 0:00 自动刷新，或立即加买额度：tokenboss.co/billing" |
 | 周期结束 | "本周期结束。续订：tokenboss.co/billing" |
@@ -211,10 +213,10 @@ ORDER BY
 
 以下不影响经济模型骨架，但实施前需校准：
 
-1. **¥ 价微调**：Plus ¥288 / Max ¥588 / Ultra ¥1688 是定稿。如需汇率调整可 ±5%。
+1. **¥ 价微调**：Plus ¥288 / Super ¥588 / Ultra ¥1688 是定稿。如需汇率调整可 ±5%。
 2. **Auto 模式"省 X%"具体数字**：等 ClawRouter 部署后跑实测 benchmark 校准。
 3. **并发 / RPM 限制**：内部参数，按上游 API 实际承载力决定。
-4. **Ultra 何时实际开放**：v1 上线显示"已售罄"，Phase 1.5 看 Max 用户上限触顶频率决定开放时机。
+4. **Ultra 何时实际开放**：v1 上线显示"已售罄"，Phase 1.5 看 Super 用户上限触顶频率决定开放时机。
 
 ## Non-goals
 
@@ -227,7 +229,7 @@ ORDER BY
 
 ## Risk & rollback
 
-- **如果实际数据显示套餐用户日均消耗 > 80% credit**（margin 不够）→ 缩减日 cap（Plus $30 → $25 / Max $60 → $50）。预计 Phase 1.5 之前不需要。
+- **如果实际数据显示套餐用户日均消耗 > 80% credit**（margin 不够）→ 缩减日 cap（Plus $30 → $25 / Super $80 → $60）。预计 Phase 1.5 之前不需要。
 - **如果上游 API 价格大幅下跌**（如 Anthropic 降价 50%）→ ¥/$ 数字保持，杠杆变得更宽松，对我们更有利。
 - **如果上游 API 价格大幅上涨** → 缩减日 cap 数字（cheapest first response），或调整 ¥ 价。
 - **试用 $10 / 24h 如果薅羊毛严重**（机制 B 被绕过）→ 缩减到 $5 / 24h 或加手机号验证。
