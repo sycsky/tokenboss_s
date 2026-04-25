@@ -11,3 +11,6 @@ samconfig.toml
 .playwright-mcp/
 .worktrees/
 .gstack/
+
+# brainstorming visual companion
+.superpowers/
