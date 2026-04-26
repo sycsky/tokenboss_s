@@ -13,15 +13,18 @@ export function TerminalBlock({ cmd, size = 'sm', className = '' }: TerminalBloc
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
-  const padding = size === 'lg' ? 'px-5 py-4' : 'px-4 py-3.5';
-  const fontSize = size === 'lg' ? 'text-[15px]' : 'text-[12.5px]';
+  // Responsive: mobile shrinks font + padding so 28-char "set up tokenboss.com/skill.md"
+  // doesn't truncate at 390px viewport. Desktop keeps the original "lg" feel.
+  const padding = size === 'lg' ? 'px-3.5 py-3 sm:px-5 sm:py-4' : 'px-3 py-2.5 sm:px-4 sm:py-3.5';
+  const fontSize = size === 'lg' ? 'text-[11.5px] sm:text-[15px]' : 'text-[10.5px] sm:text-[12.5px]';
   return (
-    <div className={`flex items-center gap-2 bg-[#1C1917] rounded-[10px] ${padding} ${fontSize} font-mono leading-snug ${className}`}>
+    <div className={`group flex items-center gap-2 bg-[#1C1917] rounded-[10px] ${padding} ${fontSize} font-mono leading-snug transition-shadow hover:shadow-[0_0_0_1px_rgba(232,105,42,0.4),0_8px_28px_-12px_rgba(232,105,42,0.45)] ${className}`}>
       <span className="text-accent font-semibold select-none">$</span>
       <span className="text-[#FFF8F0] flex-1 truncate">{cmd}</span>
       <button
         onClick={handleCopy}
-        className="font-mono text-[9.5px] font-bold tracking-[0.12em] uppercase text-[#A89A8D] border border-[#3A332D] bg-[#0A0807] px-2 py-1 rounded-[5px]"
+        aria-label="copy command"
+        className="font-mono text-[9px] sm:text-[9.5px] font-bold tracking-[0.12em] uppercase text-[#A89A8D] hover:text-[#FFF8F0] border border-[#3A332D] bg-[#0A0807] px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-[5px] flex-shrink-0 transition-colors"
       >
         {copied ? '已复制' : 'COPY'}
       </button>
