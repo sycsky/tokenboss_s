@@ -11,7 +11,7 @@
  * Losing one does not compromise the other.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
@@ -131,7 +131,7 @@ export const meHandler = async (
 // ---------- POST /v1/auth/send-code ----------
 
 function genCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
 }
 
 export async function sendCodeHandler(
