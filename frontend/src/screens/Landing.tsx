@@ -86,7 +86,6 @@ export default function Landing() {
             models="Claude + Codex + reasoning"
             ctaText="免费注册试用 →"
             ctaVariant="secondary"
-            soldOut
           />
         </div>
       </section>
