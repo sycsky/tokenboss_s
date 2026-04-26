@@ -43,6 +43,7 @@ import {
 } from "./handlers/keysHandlers.js";
 import { modelsHandler } from "./handlers/modelsHandler.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
+import { skillMdHandler } from "./handlers/skillMd.js";
 import { usageHandler } from "./handlers/usageHandlers.js";
 import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
@@ -75,6 +76,7 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/usage", handler: usageHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
   { method: "GET", path: "/v1/router/tiers", handler: routerTiersHandler },
+  { method: "GET", path: "/skill.md", handler: skillMdHandler as LambdaHandler },
 ];
 
 /** Routes that bypass the buffered Lambda adapter and stream directly. */
