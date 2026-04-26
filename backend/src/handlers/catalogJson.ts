@@ -26,9 +26,9 @@ interface CatalogModel {
 function collectModels(): CatalogModel[] {
   const groups: Array<{ name: string; tiers: typeof DEFAULT_ROUTING_CONFIG.tiers }> = [
     { name: "standard", tiers: DEFAULT_ROUTING_CONFIG.tiers },
-    { name: "eco", tiers: DEFAULT_ROUTING_CONFIG.ecoTiers },
-    { name: "premium", tiers: DEFAULT_ROUTING_CONFIG.premiumTiers },
-    { name: "agentic", tiers: DEFAULT_ROUTING_CONFIG.agenticTiers },
+    { name: "eco", tiers: DEFAULT_ROUTING_CONFIG.ecoTiers ?? {} as typeof DEFAULT_ROUTING_CONFIG.tiers },
+    { name: "premium", tiers: DEFAULT_ROUTING_CONFIG.premiumTiers ?? {} as typeof DEFAULT_ROUTING_CONFIG.tiers },
+    { name: "agentic", tiers: DEFAULT_ROUTING_CONFIG.agenticTiers ?? {} as typeof DEFAULT_ROUTING_CONFIG.tiers },
   ];
 
   // Map from modelId -> set of group names where it appears

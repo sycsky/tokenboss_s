@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { init, logUsage, getHourlyUsage24h } from '../../lib/store.js';
 import { usageHandler } from '../usageHandlers.js';
 
@@ -17,7 +18,7 @@ describe('usageHandler', () => {
       headers: { 'x-tb-user-id': 'u_1' },
       queryStringParameters: {},
     } as any;
-    const res = await usageHandler(evt);
+    const res = await usageHandler(evt) as APIGatewayProxyStructuredResultV2;
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body!);
     expect(body.records.length).toBeGreaterThan(0);
@@ -34,7 +35,7 @@ describe('usageHandler', () => {
       headers: { 'x-tb-user-id': 'u_2' },
       queryStringParameters: { eventType: 'consume' },
     } as any;
-    const res = await usageHandler(evt);
+    const res = await usageHandler(evt) as APIGatewayProxyStructuredResultV2;
     const body = JSON.parse(res.body!);
     expect(body.records.every((r: any) => r.eventType === 'consume')).toBe(true);
   });
@@ -44,7 +45,7 @@ describe('usageHandler', () => {
       headers: { 'x-tb-user-id': 'u_3' },
       queryStringParameters: {},
     } as any;
-    const res = await usageHandler(evt);
+    const res = await usageHandler(evt) as APIGatewayProxyStructuredResultV2;
     const body = JSON.parse(res.body!);
     expect(body.hourly24h).toHaveLength(24);
     for (const bucket of body.hourly24h) {
@@ -58,7 +59,7 @@ describe('usageHandler', () => {
       headers: { 'x-tb-user-id': 'u_4' },
       queryStringParameters: { eventType: 'invalid_type' },
     } as any;
-    const res = await usageHandler(evt);
+    const res = await usageHandler(evt) as APIGatewayProxyStructuredResultV2;
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body!);
     expect(body.error.code).toBe('invalid_event_type');
@@ -74,7 +75,7 @@ describe('usageHandler', () => {
       headers: { 'x-tb-user-id': 'u_5' },
       queryStringParameters: { eventType: 'reset' },
     } as any;
-    const res = await usageHandler(evt);
+    const res = await usageHandler(evt) as APIGatewayProxyStructuredResultV2;
     const body = JSON.parse(res.body!);
     expect(body.records.every((r: any) => r.eventType === 'reset')).toBe(true);
     expect(body.totals.consumed).toBeCloseTo(3.0, 3);
