@@ -4,8 +4,6 @@ import Landing from "./screens/Landing.js";
 import LandingVision from "./screens/LandingVision.js";
 import OnboardWelcome from "./screens/OnboardWelcome.js";
 import OnboardInstall from "./screens/OnboardInstall.js";
-import OnboardPairCode from "./screens/OnboardPairCode.js";
-import OnboardBind from "./screens/OnboardBind.js";
 import OnboardSuccess from "./screens/OnboardSuccess.js";
 import LowBalance from "./screens/LowBalance.js";
 import BalanceCommand from "./screens/BalanceCommand.js";
@@ -32,8 +30,6 @@ export default function App() {
       {/* Onboarding */}
       <Route path="/onboard/welcome" element={<OnboardWelcome />} />
       <Route path="/onboard/install" element={<OnboardInstall />} />
-      <Route path="/onboard/pair-code" element={<OnboardPairCode />} />
-      <Route path="/onboard/bind" element={<OnboardBind />} />
       <Route path="/onboard/success" element={<OnboardSuccess />} />
 
       {/* Chat simulations */}
