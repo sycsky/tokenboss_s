@@ -180,7 +180,13 @@ export function computeActualCost(
 
 /**
  * Gate a request against the user's bucket. Extracts userId from the
- * `x-tb-user-id` header; if absent, skips gating (pass-through).
+ * `x-tb-user-id` header only when the request is authenticated as an
+ * internal call via `x-tb-internal-secret`. If the secret is absent or
+ * wrong the header is ignored, preventing header-spoofing attacks.
+ *
+ * Env var `TB_INTERNAL_SECRET` must be set (non-empty) for internal gating
+ * to activate. When it is not set, bucket gating is skipped entirely so
+ * existing local-dev / key-only callers continue to work unchanged.
  *
  * Returns `null` if the request may proceed, or a `StreamWriter`-ready
  * error payload if it should be rejected.
@@ -197,9 +203,17 @@ export function gateRequest(
   modelId: string,
   messages: unknown[],
 ): { ok: true; gate: GateResult } | { ok: false; errorBody: string } {
-  const userId = headers["x-tb-user-id"];
+  const expectedSecret = process.env.TB_INTERNAL_SECRET?.trim() ?? "";
+  const providedSecret = headers["x-tb-internal-secret"] ?? "";
+
+  // Validate the internal secret before trusting x-tb-user-id.
+  // If TB_INTERNAL_SECRET is not configured, skip gating entirely (pass-through).
+  const secretValid =
+    expectedSecret.length > 0 && providedSecret === expectedSecret;
+
+  const userId = secretValid ? headers["x-tb-user-id"] : undefined;
   if (!userId) {
-    // No user context — skip gating (key-only callers bypass bucket gating)
+    // No verified user context — skip gating (key-only callers bypass bucket gating)
     return {
       ok: true,
       gate: { userId: "", mode: "auto", modelTier: "eco", estimatedCost: 0 },
@@ -324,9 +338,10 @@ export async function streamChatCore(
   }
 
   // ---------- Bucket gating (pre-flight) ----------
-  // Uses x-tb-user-id header to identify caller. If header is absent, gating
-  // is skipped so key-only callers (e.g. direct API access without a session)
-  // still work.
+  // Uses x-tb-user-id header to identify caller, but only trusts it when
+  // the request is accompanied by a valid x-tb-internal-secret (set via
+  // TB_INTERNAL_SECRET env var). Without the secret the header is ignored so
+  // direct key-only callers bypass gating and spoofed headers have no effect.
   const modelIdForGating = typeof body.model === "string" ? body.model : "auto";
   const gateOutcome = gateRequest(
     event.headers as Record<string, string | undefined>,

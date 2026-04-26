@@ -7,7 +7,7 @@
  * integration / e2e tests.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { init, createBucket } from '../store.js';
 import {
   inferTierFromModelId,
@@ -16,9 +16,25 @@ import {
   gateRequest,
 } from '../chatProxyCore.js';
 
+/** Internal secret used across gating tests. */
+const TEST_SECRET = 'test-internal-secret-1234';
+
+/** Helper: build headers that include the internal secret + user id. */
+function internalHeaders(userId: string): Record<string, string | undefined> {
+  return {
+    'x-tb-user-id': userId,
+    'x-tb-internal-secret': TEST_SECRET,
+  };
+}
+
 beforeEach(() => {
   process.env.SQLITE_PATH = ':memory:';
+  process.env.TB_INTERNAL_SECRET = TEST_SECRET;
   init();
+});
+
+afterEach(() => {
+  delete process.env.TB_INTERNAL_SECRET;
 });
 
 // ---------- inferTierFromModelId ----------
@@ -111,9 +127,36 @@ describe('gateRequest', () => {
     }
   });
 
-  it('rejects request when user has no bucket', () => {
+  it('passes through (ignores x-tb-user-id) when internal secret is wrong', () => {
+    // Attacker sends x-tb-user-id without knowing the secret — must be ignored
     const result = gateRequest(
-      { 'x-tb-user-id': 'u_no_bucket' },
+      { 'x-tb-user-id': 'u_attacker', 'x-tb-internal-secret': 'wrong-secret' },
+      'claude-opus-4.6',
+      [],
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // userId must be empty — the spoofed header was rejected
+      expect(result.gate.userId).toBe('');
+    }
+  });
+
+  it('passes through (ignores x-tb-user-id) when internal secret header is absent', () => {
+    // No secret at all — header must not be trusted
+    const result = gateRequest(
+      { 'x-tb-user-id': 'u_attacker' },
+      'claude-opus-4.6',
+      [],
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.gate.userId).toBe('');
+    }
+  });
+
+  it('rejects request when user has no bucket (valid secret)', () => {
+    const result = gateRequest(
+      internalHeaders('u_no_bucket'),
       'gpt-5.5-mini',
       [{ role: 'user', content: 'hello' }],
     );
@@ -142,7 +185,7 @@ describe('gateRequest', () => {
     });
 
     const result = gateRequest(
-      { 'x-tb-user-id': 'u_plus' },
+      internalHeaders('u_plus'),
       'claude-opus-4.6', // premium tier, manual mode (explicit model)
       [{ role: 'user', content: 'hello' }],
     );
@@ -172,7 +215,7 @@ describe('gateRequest', () => {
     });
 
     const result = gateRequest(
-      { 'x-tb-user-id': 'u_super' },
+      internalHeaders('u_super'),
       'claude-opus-4.6',
       [{ role: 'user', content: 'hello' }],
     );
@@ -201,7 +244,7 @@ describe('gateRequest', () => {
     });
 
     const result = gateRequest(
-      { 'x-tb-user-id': 'u_broke' },
+      internalHeaders('u_broke'),
       'claude-opus-4.6',
       [{ role: 'user', content: 'x'.repeat(500) }],
     );
@@ -231,7 +274,7 @@ describe('gateRequest', () => {
     });
 
     const result = gateRequest(
-      { 'x-tb-user-id': 'u_trial' },
+      internalHeaders('u_trial'),
       'auto',
       [{ role: 'user', content: 'hi' }],
     );
