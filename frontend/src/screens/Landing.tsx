@@ -116,13 +116,24 @@ export default function Landing() {
           <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
         </div>
         <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
-          <Link to="/login" className="text-[12px] sm:text-[13px] text-ink-2 hover:text-ink transition-colors">登录</Link>
-          <Link
-            to="/register"
-            className="px-3 sm:px-4 py-1.5 bg-accent text-white rounded-lg text-[11.5px] sm:text-[12.5px] font-semibold hover:bg-accent-deep transition-colors whitespace-nowrap"
-          >
-            免费开始 →
-          </Link>
+          {isLoggedIn ? (
+            <Link
+              to="/dashboard"
+              className="px-3 sm:px-4 py-1.5 bg-accent text-white rounded-lg text-[11.5px] sm:text-[12.5px] font-semibold hover:bg-accent-deep transition-colors whitespace-nowrap"
+            >
+              控制台 →
+            </Link>
+          ) : (
+            <>
+              <Link to="/login" className="text-[12px] sm:text-[13px] text-ink-2 hover:text-ink transition-colors">登录</Link>
+              <Link
+                to="/register"
+                className="px-3 sm:px-4 py-1.5 bg-accent text-white rounded-lg text-[11.5px] sm:text-[12.5px] font-semibold hover:bg-accent-deep transition-colors whitespace-nowrap"
+              >
+                免费开始 →
+              </Link>
+            </>
+          )}
         </div>
       </nav>
 
@@ -147,15 +158,26 @@ export default function Landing() {
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
-              <Link
-                to="/register"
-                className="px-5 py-3 bg-accent text-white rounded-lg font-semibold hover:bg-accent-deep transition-colors shadow-[0_8px_28px_-10px_rgba(232,105,42,0.55)]"
-              >
-                免费开始 · 送 $10 体验
-              </Link>
-              <span className="text-[13px] text-ink-2">
-                已有账户？<Link to="/login" className="text-accent hover:underline">登录</Link>
-              </span>
+              {isLoggedIn ? (
+                <Link
+                  to="/dashboard"
+                  className="px-5 py-3 bg-accent text-white rounded-lg font-semibold hover:bg-accent-deep transition-colors shadow-[0_8px_28px_-10px_rgba(232,105,42,0.55)]"
+                >
+                  去控制台 →
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    to="/register"
+                    className="px-5 py-3 bg-accent text-white rounded-lg font-semibold hover:bg-accent-deep transition-colors shadow-[0_8px_28px_-10px_rgba(232,105,42,0.55)]"
+                  >
+                    免费开始 · 送 $10 体验
+                  </Link>
+                  <span className="text-[13px] text-ink-2">
+                    已有账户？<Link to="/login" className="text-accent hover:underline">登录</Link>
+                  </span>
+                </>
+              )}
             </div>
           </div>
 
