@@ -378,6 +378,33 @@ export function logUsage(r: Omit<UsageRecord, 'id' | 'createdAt'>): UsageRecord 
   return { id: Number(result.lastInsertRowid), createdAt, ...r };
 }
 
+export interface HourlyUsage {
+  hour: string;   // "HH:00"
+  consumed: number;
+}
+
+export function getHourlyUsage24h(userId: string): HourlyUsage[] {
+  const now = new Date();
+  const buckets: HourlyUsage[] = [];
+  for (let i = 23; i >= 0; i--) {
+    const hourStart = new Date(now.getTime() - i * 3600e3);
+    hourStart.setMinutes(0, 0, 0);
+    const hourEnd = new Date(hourStart.getTime() + 3600e3);
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(amountUsd), 0) AS total
+      FROM usage_log
+      WHERE userId = ?
+        AND eventType = 'consume'
+        AND createdAt >= ? AND createdAt < ?
+    `).get(userId, hourStart.toISOString(), hourEnd.toISOString()) as { total: number };
+    buckets.push({
+      hour: `${hourStart.getUTCHours().toString().padStart(2, '0')}:00`,
+      consumed: row.total ?? 0,
+    });
+  }
+  return buckets;
+}
+
 export function getUsageForUser(userId: string, opts: { limit?: number; offset?: number; eventTypes?: EventType[]; from?: string; to?: string } = {}): UsageRecord[] {
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
