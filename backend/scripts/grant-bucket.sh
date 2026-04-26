@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # Usage: ./grant-bucket.sh <email> <plan_plus|plan_super|plan_ultra|topup [amount]>
 set -e
+
+EMAIL_RE='^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
 EMAIL=$1
 SKU=$2
 DB="${SQLITE_PATH:-backend/data/tokenboss.db}"
 
 if [ -z "$EMAIL" ] || [ -z "$SKU" ]; then
   echo "Usage: $0 <email> <plan_plus|plan_super|plan_ultra|topup [amount]>"
+  exit 1
+fi
+
+if ! [[ "$EMAIL" =~ $EMAIL_RE ]]; then
+  echo "invalid email: $EMAIL"
   exit 1
 fi
 
@@ -33,6 +41,10 @@ case "$SKU" in
     ;;
   topup)
     AMT=${3:-100}
+    if ! [[ "$AMT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      echo "invalid amount: $AMT"
+      exit 1
+    fi
     sqlite3 "$DB" "INSERT INTO credit_bucket (id, userId, skuType, amountUsd, dailyCapUsd, dailyRemainingUsd, totalRemainingUsd, startedAt, expiresAt, modeLock, modelPool, createdAt) VALUES (lower(hex(randomblob(16))), '$USER_ID', 'topup', $AMT, NULL, NULL, $AMT, '$NOW', NULL, 'none', 'all', '$NOW');"
     echo "granted topup \$$AMT to $EMAIL"
     ;;
