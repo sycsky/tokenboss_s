@@ -63,4 +63,30 @@ describe('POST /v1/auth/verify-code', () => {
     const res = await verifyCodeHandler({ body: JSON.stringify({ email: 'not-email', code: '123456' }) } as any) as APIGatewayProxyStructuredResultV2;
     expect(res.statusCode).toBe(400);
   });
+
+  it('rejects already-consumed code', async () => {
+    await sendCodeHandler({ body: JSON.stringify({ email: 'reuse@test.com' }) } as any);
+    const code = await getCodeForEmail('reuse@test.com');
+
+    // First use — succeeds
+    const r1 = await verifyCodeHandler({ body: JSON.stringify({ email: 'reuse@test.com', code }) } as any) as APIGatewayProxyStructuredResultV2;
+    expect(r1.statusCode).toBe(200);
+
+    // Second use of same code — must fail
+    const r2 = await verifyCodeHandler({ body: JSON.stringify({ email: 'reuse@test.com', code }) } as any) as APIGatewayProxyStructuredResultV2;
+    expect(r2.statusCode).toBe(401);
+  });
+
+  it('rejects multiple wrong-code guesses against valid email', async () => {
+    await sendCodeHandler({ body: JSON.stringify({ email: 'brute@test.com' }) } as any);
+    // Try 5 random wrong codes — all should 401
+    for (const wrong of ['000000', '111111', '222222', '333333', '444444']) {
+      const r = await verifyCodeHandler({ body: JSON.stringify({ email: 'brute@test.com', code: wrong }) } as any) as APIGatewayProxyStructuredResultV2;
+      expect(r.statusCode).toBe(401);
+    }
+    // Original real code is still consumable (no lockout in v1.0 — note this for production hardening)
+    const code = await getCodeForEmail('brute@test.com');
+    const r = await verifyCodeHandler({ body: JSON.stringify({ email: 'brute@test.com', code }) } as any) as APIGatewayProxyStructuredResultV2;
+    expect(r.statusCode).toBe(200);
+  });
 });
