@@ -24,3 +24,7 @@ samconfig.toml
 
 # Sibling project (separate repo)
 clawd-on-desk/
+
+# Vite config compiled outputs (vite.config.ts is the source of truth)
+frontend/vite.config.js
+frontend/vite.config.d.ts
