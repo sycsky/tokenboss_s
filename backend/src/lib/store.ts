@@ -17,6 +17,7 @@
 import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
 
 // ---------- Record types ----------
 
@@ -37,9 +38,11 @@ export interface UserRecord {
   newapiPassword?: string;
 }
 
-// ---------- Database init ----------
+// ---------- Database singleton ----------
 
-const DB_PATH = process.env.DATABASE_PATH ?? "data/tokenboss.db";
+// Assigned by init() which is called immediately at module load below.
+// eslint-disable-next-line prefer-const
+let db: Database.Database = null!;
 
 function ensureDir(filePath: string) {
   const dir = dirname(filePath);
@@ -48,52 +51,77 @@ function ensureDir(filePath: string) {
   }
 }
 
-ensureDir(DB_PATH);
+/**
+ * (Re-)initialise the database. Must be called before any CRUD functions.
+ * Reads SQLITE_PATH (test override) or DATABASE_PATH (production) from env.
+ * Safe to call multiple times — closes any existing connection first.
+ */
+export function init(): void {
+  const dbPath =
+    process.env.SQLITE_PATH ?? process.env.DATABASE_PATH ?? "data/tokenboss.db";
 
-const db = new Database(DB_PATH);
-
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    userId         TEXT PRIMARY KEY,
-    displayName    TEXT,
-    email          TEXT,
-    phone          TEXT,
-    passwordHash   TEXT,
-    createdAt      TEXT NOT NULL,
-    newapiUserId   INTEGER,
-    newapiPassword TEXT
-  );
-
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
-    ON users(email) WHERE email IS NOT NULL;
-`);
-
-// Lightweight migrations — add missing columns on pre-existing dev DBs.
-{
-  const cols = db
-    .prepare(`PRAGMA table_info(users)`)
-    .all() as { name: string }[];
-  const have = new Set(cols.map((c) => c.name));
-  if (!have.has("newapiPassword")) {
-    db.exec(`ALTER TABLE users ADD COLUMN newapiPassword TEXT`);
+  if (db) {
+    db.close();
   }
+
+  if (dbPath !== ":memory:") {
+    ensureDir(dbPath);
+  }
+
+  db = new Database(dbPath);
+
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      userId         TEXT PRIMARY KEY,
+      displayName    TEXT,
+      email          TEXT,
+      phone          TEXT,
+      passwordHash   TEXT,
+      createdAt      TEXT NOT NULL,
+      newapiUserId   INTEGER,
+      newapiPassword TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+      ON users(email) WHERE email IS NOT NULL;
+  `);
+
+  // Lightweight migrations — add missing columns on pre-existing dev DBs.
+  {
+    const cols = db
+      .prepare(`PRAGMA table_info(users)`)
+      .all() as { name: string }[];
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("newapiPassword")) {
+      db.exec(`ALTER TABLE users ADD COLUMN newapiPassword TEXT`);
+    }
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credit_bucket (
+      id                  TEXT PRIMARY KEY,
+      userId              TEXT NOT NULL,
+      skuType             TEXT NOT NULL CHECK (skuType IN ('trial','topup','plan_plus','plan_super','plan_ultra')),
+      amountUsd           REAL NOT NULL,
+      dailyCapUsd         REAL,
+      dailyRemainingUsd   REAL,
+      totalRemainingUsd   REAL,
+      startedAt           TEXT NOT NULL,
+      expiresAt           TEXT,
+      modeLock            TEXT NOT NULL CHECK (modeLock IN ('none','auto_only','auto_eco_only')),
+      modelPool           TEXT NOT NULL CHECK (modelPool IN ('all','codex_only','eco_only')),
+      createdAt           TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bucket_user ON credit_bucket(userId, skuType);
+  `);
 }
 
-// ---------- Prepared statements ----------
-
-const stmts = {
-  getUser: db.prepare(`SELECT * FROM users WHERE userId = ?`),
-  putUser: db.prepare(`
-    INSERT OR REPLACE INTO users
-      (userId, displayName, email, phone, passwordHash, createdAt, newapiUserId, newapiPassword)
-    VALUES
-      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @newapiUserId, @newapiPassword)
-  `),
-  getUserByEmail: db.prepare(`SELECT userId FROM users WHERE email = ?`),
-};
+// Initialise on module load (production default path).
+// Tests call init() again after setting process.env.SQLITE_PATH = ':memory:'.
+init();
 
 // ---------- Row → Record mappers ----------
 
@@ -110,15 +138,22 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
   };
 }
 
-// ---------- Public API ----------
+// ---------- Public API — Users ----------
 
 export async function getUser(userId: string): Promise<UserRecord | null> {
-  const row = stmts.getUser.get(userId) as Record<string, unknown> | undefined;
+  const row = db
+    .prepare(`SELECT * FROM users WHERE userId = ?`)
+    .get(userId) as Record<string, unknown> | undefined;
   return row ? rowToUser(row) : null;
 }
 
 export async function putUser(rec: UserRecord): Promise<void> {
-  stmts.putUser.run({
+  db.prepare(`
+    INSERT OR REPLACE INTO users
+      (userId, displayName, email, phone, passwordHash, createdAt, newapiUserId, newapiPassword)
+    VALUES
+      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @newapiUserId, @newapiPassword)
+  `).run({
     userId: rec.userId,
     displayName: rec.displayName ?? null,
     email: rec.email ?? null,
@@ -133,12 +168,128 @@ export async function putUser(rec: UserRecord): Promise<void> {
 export async function getUserIdByEmail(email: string): Promise<string | null> {
   const norm = email.trim().toLowerCase();
   if (!norm) return null;
-  const row = stmts.getUserByEmail.get(norm) as { userId: string } | undefined;
+  const row = db
+    .prepare(`SELECT userId FROM users WHERE email = ?`)
+    .get(norm) as { userId: string } | undefined;
   return row?.userId ?? null;
 }
 
-export async function putEmailIndex(_email: string, _userId: string): Promise<void> {
+export async function putEmailIndex(
+  _email: string,
+  _userId: string
+): Promise<void> {
   // Email uniqueness is enforced by the UNIQUE index on users.email.
   // This function is kept for API compatibility but is now a no-op —
   // the email is written as part of putUser().
+}
+
+// ---------- Bucket types ----------
+
+export type BucketSku =
+  | "trial"
+  | "topup"
+  | "plan_plus"
+  | "plan_super"
+  | "plan_ultra";
+export type ModeLock = "none" | "auto_only" | "auto_eco_only";
+export type ModelPool = "all" | "codex_only" | "eco_only";
+
+export interface Bucket {
+  id: string;
+  userId: string;
+  skuType: BucketSku;
+  amountUsd: number;
+  dailyCapUsd: number | null;
+  dailyRemainingUsd: number | null;
+  totalRemainingUsd: number | null;
+  startedAt: string;
+  expiresAt: string | null;
+  modeLock: ModeLock;
+  modelPool: ModelPool;
+  createdAt: string;
+}
+
+// ---------- Public API — Buckets ----------
+
+export function createBucket(b: Omit<Bucket, "id" | "createdAt">): Bucket {
+  const id = randomBytes(16).toString("hex");
+  const createdAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO credit_bucket (id, userId, skuType, amountUsd, dailyCapUsd, dailyRemainingUsd,
+      totalRemainingUsd, startedAt, expiresAt, modeLock, modelPool, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    b.userId,
+    b.skuType,
+    b.amountUsd,
+    b.dailyCapUsd,
+    b.dailyRemainingUsd,
+    b.totalRemainingUsd,
+    b.startedAt,
+    b.expiresAt,
+    b.modeLock,
+    b.modelPool,
+    createdAt
+  );
+  return { id, createdAt, ...b };
+}
+
+export function getActiveBucketsForUser(userId: string): Bucket[] {
+  return db
+    .prepare(
+      `
+    SELECT * FROM credit_bucket
+    WHERE userId = ?
+      AND (expiresAt IS NULL OR expiresAt > datetime('now'))
+      AND (
+        (skuType IN ('plan_plus','plan_super','plan_ultra','trial') AND COALESCE(dailyRemainingUsd, 0) > 0)
+        OR (skuType = 'topup' AND COALESCE(totalRemainingUsd, 0) > 0)
+      )
+    ORDER BY
+      CASE WHEN skuType = 'topup' THEN 1 ELSE 0 END,
+      expiresAt ASC,
+      createdAt ASC
+  `
+    )
+    .all(userId) as Bucket[];
+}
+
+export function getActiveSubscriptionBuckets(): Bucket[] {
+  return db
+    .prepare(
+      `
+    SELECT * FROM credit_bucket
+    WHERE skuType != 'topup'
+      AND (expiresAt IS NULL OR expiresAt > datetime('now'))
+  `
+    )
+    .all() as Bucket[];
+}
+
+export function consumeBucket(bucketId: string, amountUsd: number): void {
+  db.prepare(`
+    UPDATE credit_bucket
+    SET dailyRemainingUsd = COALESCE(dailyRemainingUsd, 0) - ?,
+        totalRemainingUsd = CASE WHEN totalRemainingUsd IS NOT NULL THEN totalRemainingUsd - ? ELSE NULL END
+    WHERE id = ?
+  `).run(amountUsd, amountUsd, bucketId);
+}
+
+export function resetBucketDaily(bucketId: string, dailyCapUsd: number): void {
+  db.prepare(`UPDATE credit_bucket SET dailyRemainingUsd = ? WHERE id = ?`).run(
+    dailyCapUsd,
+    bucketId
+  );
+}
+
+export function expireBucketDaily(bucketId: string): number {
+  const row = db
+    .prepare(`SELECT dailyRemainingUsd FROM credit_bucket WHERE id = ?`)
+    .get(bucketId) as { dailyRemainingUsd: number | null } | undefined;
+  const remaining = row?.dailyRemainingUsd ?? 0;
+  db.prepare(
+    `UPDATE credit_bucket SET dailyRemainingUsd = 0 WHERE id = ?`
+  ).run(bucketId);
+  return remaining;
 }
