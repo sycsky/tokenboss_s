@@ -1,125 +1,112 @@
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../lib/auth';
 
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { Button } from "../components/Button.js";
-import { useAuth } from "../lib/auth.js";
-import { ApiError } from "../lib/api.js";
-
-/**
- * Free-signup form. Creates the account + seeds $5 of credits on the
- * backend, then persists the returned JWT so subsequent routes are authed.
- */
 export default function Register() {
-  const { register } = useAuth();
-  const navigate = useNavigate();
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const nav = useNavigate();
+  const { sendCode, loginWithCode } = useAuth();
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState<'email' | 'code' | 'success'>('email');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (password.length < 6) {
-      setError("密码至少 6 位");
-      return;
-    }
-    setSubmitting(true);
+    setLoading(true); setError(null);
     try {
-      await register({
-        email: email.trim(),
-        password,
-        displayName: displayName.trim() || undefined,
-      });
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : `注册失败: ${(err as Error).message}`,
-      );
+      await sendCode(email.trim().toLowerCase());
+      setStep('code');
+    } catch (err: unknown) {
+      setError((err as Error).message || '发送验证码失败');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
+    }
+  }
+
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    if (code.length !== 6) return;
+    setLoading(true); setError(null);
+    try {
+      const result = await loginWithCode(email.trim().toLowerCase(), code);
+      if (result.isNew) {
+        setStep('success');
+        setTimeout(() => nav('/onboard/welcome'), 2500);
+      } else {
+        nav('/dashboard');
+      }
+    } catch {
+      setError('验证码错误或已过期');
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-10 flex flex-col">
-        <div className="mb-6">
-          <div className="text-label text-text-secondary">TokenBoss</div>
-          <h1 className="text-h2 mt-1">创建账户</h1>
-          <p className="text-body text-text-secondary mt-1">
-            注册即送 $5 免费额度，无需信用卡
-          </p>
-        </div>
-
-        <div className="bg-accent-subtle border border-accent/30 rounded-[14px] px-4 py-3 mb-6">
-          <div className="text-caption text-accent font-semibold tracking-widest">
-            注册送
-          </div>
-          <div className="text-h2 text-accent">$5 · 约 5000 credits</div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <label className="block">
-            <span className="text-label text-text-secondary">邮箱</span>
-            <input
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-body focus:border-accent focus:outline-none"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-label text-text-secondary">昵称（可选）</span>
-            <input
-              type="text"
-              autoComplete="nickname"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="mt-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-body focus:border-accent focus:outline-none"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-label text-text-secondary">密码</span>
-            <input
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-sm border border-border bg-surface px-3 py-2 text-body focus:border-accent focus:outline-none"
-            />
-            <span className="text-caption text-text-muted">至少 6 位</span>
-          </label>
-
-          {error && (
-            <div className="text-caption text-danger-text bg-danger-subtle border border-danger-border rounded-sm px-3 py-2">
-              {error}
+    <div className="min-h-screen bg-bg flex items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        {step !== 'success' && (
+          <>
+            <h1 className="text-3xl font-bold mb-2 tracking-tight">免费注册</h1>
+            <p className="text-ink-2 text-sm mb-2">注册即送</p>
+            <div className="bg-accent-soft border border-accent rounded-lg p-4 mb-8">
+              <div className="font-mono text-3xl font-bold text-accent-ink">$10</div>
+              <div className="text-sm text-accent-ink mt-1">24 小时免费试用</div>
             </div>
-          )}
+          </>
+        )}
 
-          <Button type="submit" fullWidth disabled={submitting}>
-            {submitting ? "注册中…" : "注册并领取额度"}
-          </Button>
-        </form>
+        {step === 'email' && (
+          <form onSubmit={handleSendCode} className="space-y-4">
+            <input
+              type="email" required autoFocus
+              placeholder="email@example.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              className="w-full px-4 py-3 bg-surface border border-border rounded-lg text-base focus:outline-none focus:border-accent"
+            />
+            <button type="submit" disabled={loading || !email}
+              className="w-full py-3 bg-accent text-white font-semibold rounded-lg disabled:opacity-50">
+              {loading ? '发送中…' : '免费开始 · 送 $10 体验'}
+            </button>
+            {error && <p className="text-red-ink text-sm">{error}</p>}
+          </form>
+        )}
 
-        <div className="mt-6 text-center text-caption text-text-secondary">
-          已有账户？{" "}
-          <Link to="/login" className="text-accent font-medium">
-            登录
-          </Link>
-        </div>
+        {step === 'code' && (
+          <form onSubmit={handleVerify} className="space-y-4">
+            <p className="text-sm text-ink-2">验证码已发送至 <span className="font-mono">{email}</span></p>
+            <input
+              type="text" inputMode="numeric" autoFocus maxLength={6} pattern="\d{6}"
+              placeholder="输入 6 位验证码"
+              value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+              className="w-full px-4 py-3 bg-surface border border-border rounded-lg text-2xl font-mono tracking-[0.4em] text-center focus:outline-none focus:border-accent"
+            />
+            <button type="submit" disabled={loading || code.length !== 6}
+              className="w-full py-3 bg-accent text-white font-semibold rounded-lg disabled:opacity-50">
+              {loading ? '验证中…' : '完成注册'}
+            </button>
+            {error && <p className="text-red-ink text-sm">{error}</p>}
+          </form>
+        )}
+
+        {step === 'success' && (
+          <div className="text-center">
+            <div className="text-5xl mb-4">🎉</div>
+            <h2 className="text-2xl font-bold mb-2">注册成功</h2>
+            <p className="text-ink-2">$10 / 24h 试用已激活</p>
+            <p className="text-ink-3 text-sm mt-4">正在跳转到接入引导…</p>
+          </div>
+        )}
+
+        {step !== 'success' && (
+          <p className="text-center text-sm text-ink-3 mt-8">
+            已有账户？<a href="/login" className="text-accent">登录</a>
+          </p>
+        )}
       </div>
-    </PhoneFrame>
+    </div>
   );
 }

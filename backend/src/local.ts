@@ -31,9 +31,9 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 
 import { handler as helloHandler } from "./handlers/hello.js";
 import {
-  loginHandler,
   meHandler,
-  registerHandler,
+  sendCodeHandler,
+  verifyCodeHandler,
 } from "./handlers/authHandlers.js";
 import {
   createKeyHandler,
@@ -43,9 +43,13 @@ import {
 } from "./handlers/keysHandlers.js";
 import { modelsHandler } from "./handlers/modelsHandler.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
+import { catalogJsonHandler } from "./handlers/catalogJson.js";
+import { skillMdHandler } from "./handlers/skillMd.js";
 import { usageHandler } from "./handlers/usageHandlers.js";
+import { listBucketsHandler } from "./handlers/buckets.js";
 import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
+import { runDailyExpireAndReset } from './lib/dailyCron.js';
 
 type LambdaHandler = (
   event: APIGatewayProxyEventV2,
@@ -64,16 +68,19 @@ interface Route {
 
 const routes: Route[] = [
   { method: "GET", path: "/hello", handler: helloHandler as LambdaHandler },
-  { method: "POST", path: "/v1/auth/register", handler: registerHandler },
-  { method: "POST", path: "/v1/auth/login", handler: loginHandler },
+  { method: "POST", path: "/v1/auth/send-code", handler: sendCodeHandler },
+  { method: "POST", path: "/v1/auth/verify-code", handler: verifyCodeHandler },
   { method: "GET", path: "/v1/me", handler: meHandler },
   { method: "GET", path: "/v1/keys", handler: listKeysHandler },
   { method: "POST", path: "/v1/keys", handler: createKeyHandler },
   { method: "GET", path: "/v1/keys/{keyId}/reveal", handler: revealKeyHandler },
   { method: "DELETE", path: "/v1/keys/{keyId}", handler: deleteKeyHandler },
   { method: "GET", path: "/v1/usage", handler: usageHandler },
+  { method: "GET", path: "/v1/buckets", handler: listBucketsHandler as LambdaHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
   { method: "GET", path: "/v1/router/tiers", handler: routerTiersHandler },
+  { method: "GET", path: "/skill.md", handler: skillMdHandler as LambdaHandler },
+  { method: "GET", path: "/api/catalog.json", handler: catalogJsonHandler },
 ];
 
 /** Routes that bypass the buffered Lambda adapter and stream directly. */
@@ -435,6 +442,23 @@ const server = createServer((req, res) => {
 if (process.env.NODE_ENV !== "production") {
   await seedLocalData();
 }
+
+function scheduleDailyCron() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(16, 0, 0, 0); // 0:00 Beijing = 16:00 UTC prev day; adjust as needed
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  const delay = next.getTime() - now.getTime();
+  setTimeout(() => {
+    try {
+      const result = runDailyExpireAndReset();
+      console.log(`[cron] daily expire+reset: ${result.expired} expired, ${result.reset} reset`);
+    } catch (e) { console.error('[cron] failed', e); }
+    scheduleDailyCron();
+  }, delay);
+}
+
+scheduleDailyCron();
 
 server.listen(PORT, () => {
   console.log(`[local] TokenBoss backend listening on http://localhost:${PORT}`);

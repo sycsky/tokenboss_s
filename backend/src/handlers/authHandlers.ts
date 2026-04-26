@@ -1,9 +1,9 @@
 /**
  * Auth handlers for the web dashboard.
  *
- * POST /v1/auth/register  — create a user, seed free credits, return JWT
- * POST /v1/auth/login     — verify email/password, return JWT
- * GET  /v1/me             — return current user profile (session-authed)
+ * POST /v1/auth/send-code  — send a 6-digit verification code to an email
+ * POST /v1/auth/verify-code — verify the code, return JWT (creating account if new)
+ * GET  /v1/me              — return current user profile (session-authed)
  *
  * JWT and proxy keys are deliberately separate:
  *   - The JWT authenticates a browser session to these dashboard routes.
@@ -11,20 +11,23 @@
  * Losing one does not compromise the other.
  */
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
-import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
-import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
+import { signSession } from "../lib/authTokens.js";
+import { sendVerificationEmail } from "../lib/emailService.js";
+import { isNewapiConfigured, newapi } from "../lib/newapi.js";
 import {
-  getUser,
+  createBucket,
+  consumeVerificationCode,
   getUserIdByEmail,
-  putEmailIndex,
   putUser,
+  recentCodeCount,
+  saveVerificationCode,
   type UserRecord,
 } from "../lib/store.js";
 
@@ -111,136 +114,6 @@ async function buildUserProfile(
   };
 }
 
-// ---------- POST /v1/auth/register ----------
-
-export const registerHandler = async (
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> => {
-  const body = parseJsonBody(event);
-  if (!body) return jsonError(400, "invalid_request_error", "Body must be valid JSON.");
-
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body.password === "string" ? body.password : "";
-  const displayName = typeof body.displayName === "string" ? body.displayName.trim() : undefined;
-
-  if (!EMAIL_RE.test(email)) {
-    return jsonError(400, "invalid_request_error", "Invalid email address.");
-  }
-  if (password.length < 6) {
-    return jsonError(
-      400,
-      "invalid_request_error",
-      "Password must be at least 6 characters.",
-    );
-  }
-
-  const existing = await getUserIdByEmail(email);
-  if (existing) {
-    return jsonError(
-      409,
-      "conflict",
-      "An account with this email already exists.",
-      "email_taken",
-    );
-  }
-
-  let passwordHash: string;
-  try {
-    passwordHash = await hashPassword(password);
-  } catch (err) {
-    return jsonError(400, "invalid_request_error", (err as Error).message);
-  }
-
-  const userId = `u_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
-  const now = new Date().toISOString();
-  const user: UserRecord = {
-    userId,
-    email,
-    displayName,
-    passwordHash,
-    createdAt: now,
-  };
-
-  // Provision a matching newapi account + seed signup quota. No API token
-  // is created here — users mint their own on demand via `/v1/keys`. The
-  // random password we generate is kept server-side so TokenBoss can log
-  // in as the user when they later manage tokens through the dashboard.
-  //
-  // Fail-closed: if newapi is configured but provisioning fails, surface
-  // a 502 rather than create a TokenBoss user with no matching newapi
-  // account. (Local dev without newapi skips this block entirely.)
-  if (isNewapiConfigured()) {
-    // newapi caps username at 20 chars; TokenBoss userId is 22 ("u_" + 20
-    // hex), so strip the prefix. Password is ≤20 chars too, but only used
-    // server-to-server, so ~96 bits of entropy from 12 random bytes is plenty.
-    const newapiUsername = userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
-    const newapiPassword = randomBytes(12).toString("base64url");
-    try {
-      const provisioned = await newapi.provisionUser({
-        username: newapiUsername,
-        password: newapiPassword,
-        display_name: displayName ?? email,
-        email,
-        quota: getSignupQuota(),
-      });
-      user.newapiUserId = provisioned.newapiUserId;
-      user.newapiPassword = newapiPassword;
-    } catch (err) {
-      const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-      console.error(`[register] newapi provisioning failed for ${userId}:`, msg);
-      return jsonError(
-        502,
-        "upstream_error",
-        "Could not provision account on metering service. Please try again.",
-        "newapi_provision_failed",
-      );
-    }
-  }
-
-  await putUser(user);
-  await putEmailIndex(email, userId);
-
-  const token = signSession(userId);
-  return jsonResponse(201, {
-    token,
-    user: await buildUserProfile(user),
-  });
-};
-
-// ---------- POST /v1/auth/login ----------
-
-export const loginHandler = async (
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> => {
-  const body = parseJsonBody(event);
-  if (!body) return jsonError(400, "invalid_request_error", "Body must be valid JSON.");
-
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body.password === "string" ? body.password : "";
-  if (!email || !password) {
-    return jsonError(400, "invalid_request_error", "Email and password are required.");
-  }
-
-  const userId = await getUserIdByEmail(email);
-  if (!userId) {
-    return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
-  }
-  const user = await getUser(userId);
-  if (!user || !user.passwordHash) {
-    return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
-  }
-  const ok = await verifyPassword(password, user.passwordHash);
-  if (!ok) {
-    return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
-  }
-
-  const token = signSession(user.userId);
-  return jsonResponse(200, {
-    token,
-    user: await buildUserProfile(user),
-  });
-};
-
 // ---------- GET /v1/me ----------
 
 export const meHandler = async (
@@ -254,3 +127,85 @@ export const meHandler = async (
   }
   return jsonResponse(200, { user: await buildUserProfile(auth.user) });
 };
+
+// ---------- POST /v1/auth/send-code ----------
+
+function genCode(): string {
+  return String(randomInt(100000, 1000000));
+}
+
+export async function sendCodeHandler(
+  evt: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> {
+  const body = parseJsonBody(evt);
+  if (!body) return jsonResponse(400, { error: "invalid_body" });
+
+  const email =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!EMAIL_RE.test(email)) return jsonResponse(400, { error: "invalid_email" });
+
+  if (recentCodeCount(email, 60) >= 1)
+    return jsonResponse(429, { error: "too_many_requests" });
+  if (recentCodeCount(email, 3600) >= 5)
+    return jsonResponse(429, { error: "too_many_requests" });
+
+  const code = genCode();
+  saveVerificationCode(email, code, 300);
+  await sendVerificationEmail(email, code);
+  return jsonResponse(200, { ok: true });
+}
+
+// ---------- POST /v1/auth/verify-code ----------
+
+export async function verifyCodeHandler(
+  evt: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> {
+  const body = parseJsonBody(evt);
+  if (!body) return jsonResponse(400, { error: "invalid_body" });
+
+  const email =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const code =
+    typeof body.code === "string" ? body.code.trim() : "";
+
+  if (!EMAIL_RE.test(email) || !/^\d{6}$/.test(code)) {
+    return jsonResponse(400, { error: "invalid_input" });
+  }
+
+  if (!consumeVerificationCode(email, code)) {
+    return jsonResponse(401, { error: "invalid_or_expired_code" });
+  }
+
+  let userId = getUserIdByEmail(email);
+  let isNew = false;
+  if (!userId) {
+    userId = `u_${randomBytes(10).toString("hex")}`;
+    putUser({
+      userId,
+      email,
+      displayName: undefined,
+      phone: undefined,
+      passwordHash: undefined,
+      createdAt: new Date().toISOString(),
+      newapiUserId: undefined,
+      newapiPassword: undefined,
+    });
+    isNew = true;
+    // Grant trial bucket: $10 / 24h / forced ECO
+    createBucket({
+      userId,
+      skuType: "trial",
+      amountUsd: 10,
+      dailyCapUsd: null,
+      dailyRemainingUsd: null,
+      totalRemainingUsd: 10,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600e3).toISOString(),
+      modeLock: "auto_eco_only",
+      modelPool: "eco_only",
+    });
+  }
+
+  const token = signSession(userId);
+  return jsonResponse(200, { token, user: { userId, email }, isNew });
+}

@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/local.ts",
     "dev:mock": "cross-env MOCK_UPSTREAM=1 tsx watch src/local.ts",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
     "deploy": "sam build && sam deploy",
     "deploy:guided": "sam build && sam deploy --guided",
     "local:sam": "sam local start-api"
@@ -25,9 +27,11 @@
     "@types/aws-lambda": "^8.10.145",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.9.0",
+    "@vitest/ui": "^4.1.5",
     "cross-env": "^7.0.3",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5"
   },
   "engines": {
     "node": ">=20"

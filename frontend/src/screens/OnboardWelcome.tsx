@@ -1,54 +1,32 @@
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { LinkButton } from "../components/Button.js";
-import { ProgressDots } from "../components/ProgressDots.js";
+import { useNavigate } from 'react-router-dom';
 
-/**
- * Screen 2 — Onboarding 1/3. Welcome + free credit activation.
- */
 export default function OnboardWelcome() {
+  const nav = useNavigate();
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-8 flex flex-col">
-        <ProgressDots current={1} />
+    <div className="min-h-screen bg-bg p-6 flex flex-col">
+      <div className="max-w-md mx-auto w-full mt-12">
+        <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-ink-3 mb-3">第一步 · STEP 01</div>
+        <h1 className="text-3xl font-bold mb-2 tracking-tight">怎么接入？</h1>
+        <p className="text-ink-2 text-sm mb-10">告诉我们你的使用场景，给你最合适的引导</p>
 
-        <div className="flex-1 flex flex-col items-center text-center pt-4">
-          <div className="text-[60px] mb-4">🎉</div>
-          <h1 className="text-h2 mb-2">欢迎来到 TokenBoss</h1>
-          <p className="text-body text-text-secondary mb-6">
-            完成三步接入，立刻开始使用
-          </p>
+        <button
+          onClick={() => nav('/onboard/install')}
+          className="w-full bg-accent text-white rounded-2xl p-6 mb-4 text-left hover:bg-accent-deep transition"
+        >
+          <div className="font-mono text-[10px] tracking-widest uppercase opacity-70 mb-2">推荐</div>
+          <div className="text-2xl font-bold mb-1">我是 Agent 用户</div>
+          <div className="text-sm opacity-80">在 OpenClaw / Hermes / Claude Code 终端粘贴一行咒语，30 秒搞定</div>
+        </button>
 
-          <div className="bg-accent-subtle border border-accent/30 rounded-[14px] px-6 py-4 mb-6">
-            <div className="text-caption text-accent font-semibold tracking-widest mb-1">
-              注册送
-            </div>
-            <div className="text-hero text-accent">$5</div>
-            <div className="text-caption text-text-secondary">
-              约 150 万 token · 无需信用卡
-            </div>
-          </div>
-
-          <div className="w-full space-y-2 text-left mb-6">
-            <div className="text-label text-text-secondary">已支持模型</div>
-            {[
-              "Claude Opus 4.6 · Sonnet 4.6 · Haiku 4.5",
-              "GPT-5.4 / 5.3 / 4o / 4o-mini",
-              "Gemini 2.5 Pro · Gemini Flash",
-            ].map((line) => (
-              <div
-                key={line}
-                className="font-mono text-caption text-text-primary bg-surface-warm border border-border-subtle rounded-sm px-3 py-2"
-              >
-                {line}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <LinkButton to="/onboard/install" fullWidth>
-          下一步：接入 OpenClaw
-        </LinkButton>
+        <button
+          onClick={() => nav('/install/manual')}
+          className="w-full bg-surface border border-border rounded-2xl p-6 text-left hover:border-ink-2 transition"
+        >
+          <div className="font-mono text-[10px] tracking-widest uppercase text-ink-3 mb-2">手动</div>
+          <div className="text-xl font-bold mb-1 text-ink">我自己配置</div>
+          <div className="text-sm text-ink-2">看详细步骤，手动配 API key + base_url</div>
+        </button>
       </div>
-    </PhoneFrame>
+    </div>
   );
 }

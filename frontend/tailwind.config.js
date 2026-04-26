@@ -48,10 +48,25 @@ export default {
         // Brand badges
         "badge-claude-bg": "#FEE9DC",
         "badge-claude-text": "#9A3412",
+
+        // Extended tokens (Task 5.1)
+        "ink": "#1C1917",
+        "ink-3": "#A89A8D",
+        "ink-4": "#D9CEC2",
+        "accent-deep": "#B85020",
+        "accent-soft": "#FEE9DC",
+        "accent-ink": "#92400E",
+        "green-soft": "#DCFCE7",
+        "green-ink": "#15803D",
+        "red-soft": "#FEE2E2",
+        "red-ink": "#991B1B",
+        "hairline": "#EBE3DA",
+        "border-2": "#D9CEC2",
       },
       fontFamily: {
         sans: ['"DM Sans"', '"Noto Sans SC"', "sans-serif"],
         mono: ['"Geist Mono"', "ui-monospace", "monospace"],
+        serif: ['"Noto Serif SC"', "serif"],
       },
       fontSize: {
         hero: ["40px", { lineHeight: "1.05", letterSpacing: "-0.03em", fontWeight: "700" }],

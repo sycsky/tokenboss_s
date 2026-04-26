@@ -21,6 +21,7 @@ import {
   api,
   getStoredSession,
   setStoredSession,
+  type AuthResponse,
   type UserProfile,
 } from "./api.js";
 
@@ -32,12 +33,13 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (email: string, password: string) => Promise<void>;
-  register: (input: {
-    email: string;
-    password: string;
-    displayName?: string;
-  }) => Promise<void>;
+  /** Send a one-time code to the given email address. */
+  sendCode: (email: string) => Promise<void>;
+  /**
+   * Exchange an email + OTP code for a session.
+   * Returns the full AuthResponse (includes `isNew` flag for new accounts).
+   */
+  loginWithCode: (email: string, code: string) => Promise<import("./api.js").AuthResponse>;
   logout: () => void;
   /** Re-fetch the profile (e.g. after a chat call changes the balance). */
   refresh: () => Promise<void>;
@@ -81,20 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await api.login({ email, password });
-    setStoredSession(res.token);
-    setState({ user: res.user, token: res.token });
+  const sendCode = useCallback(async (email: string) => {
+    await api.sendCode(email);
   }, []);
 
-  const register = useCallback(
-    async (input: { email: string; password: string; displayName?: string }) => {
-      const res = await api.register(input);
-      setStoredSession(res.token);
-      setState({ user: res.user, token: res.token });
-    },
-    [],
-  );
+  const loginWithCode = useCallback(async (email: string, code: string): Promise<AuthResponse> => {
+    const res = await api.verifyCode(email, code);
+    setStoredSession(res.token);
+    setState({ user: res.user, token: res.token });
+    return res;
+  }, []);
 
   const logout = useCallback(() => {
     setStoredSession(null);
@@ -118,12 +116,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user: state.user,
       token: state.token,
-      login,
-      register,
+      sendCode,
+      loginWithCode,
       logout,
       refresh,
     }),
-    [state, login, register, logout, refresh],
+    [state, sendCode, loginWithCode, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -131,6 +131,8 @@ export interface UserProfile {
 export interface AuthResponse {
   token: string;
   user: UserProfile;
+  /** Present on verifyCode — true when the user was newly created. */
+  isNew?: boolean;
 }
 
 export interface ProxyKeySummary {
@@ -173,26 +175,77 @@ export interface UsageResponse {
   records: UsageRecordView[];
 }
 
+// ---------- API response types (v1 backend) ----------
+
+export type BucketSkuType = "trial" | "topup" | "plan_plus" | "plan_super" | "plan_ultra";
+
+export interface BucketRecord {
+  id: string;
+  userId: string;
+  skuType: BucketSkuType;
+  amountUsd: number;
+  dailyCapUsd: number | null;
+  dailyRemainingUsd: number | null;
+  totalRemainingUsd: number | null;
+  startedAt: string;
+  expiresAt: string | null;
+  modeLock: "none" | "auto_only" | "auto_eco_only";
+  modelPool: "all" | "codex_only" | "eco_only";
+  createdAt: string;
+}
+
+export interface BucketsResponse {
+  buckets: BucketRecord[];
+}
+
+export interface UsageRecord {
+  id: number;
+  userId: string;
+  bucketId: string | null;
+  eventType: "consume" | "reset" | "expire" | "topup" | "refund";
+  amountUsd: number;
+  model: string | null;
+  source: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  createdAt: string;
+}
+
+export interface HourlyUsage {
+  hour: string;
+  consumed: number;
+}
+
+export interface UsageDetailResponse {
+  records: UsageRecord[];
+  totals: { consumed: number; calls: number };
+  hourly24h: HourlyUsage[];
+}
+
+export interface MeResponse {
+  user: UserProfile;
+}
+
 // ---------- public API ----------
 
 export const api = {
-  // auth
-  register(input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> {
-    return request<AuthResponse>("/v1/auth/register", {
+  // auth — code-based flow
+  sendCode(email: string): Promise<{ ok: true }> {
+    return request<{ ok: true }>("/v1/auth/send-code", {
       method: "POST",
-      body: input,
+      body: { email },
       token: null,
     });
   },
-  login(input: { email: string; password: string }): Promise<AuthResponse> {
-    return request<AuthResponse>("/v1/auth/login", {
+  verifyCode(email: string, code: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/verify-code", {
       method: "POST",
-      body: input,
+      body: { email, code },
       token: null,
     });
   },
-  me(): Promise<{ user: UserProfile }> {
-    return request<{ user: UserProfile }>("/v1/me");
+  me(): Promise<MeResponse> {
+    return request<MeResponse>("/v1/me");
   },
 
   // keys
@@ -213,8 +266,21 @@ export const api = {
     );
   },
 
+  // buckets
+  getBuckets(): Promise<BucketsResponse> {
+    return request<BucketsResponse>("/v1/buckets");
+  },
+
   // usage
   usage(range: "today" | "week" | "month" = "today"): Promise<UsageResponse> {
     return request<UsageResponse>("/v1/usage", { query: { range } });
+  },
+  getUsage(opts: { from?: string; to?: string; eventType?: string; limit?: number; offset?: number } = {}): Promise<UsageDetailResponse> {
+    const qs = new URLSearchParams(
+      Object.entries(opts)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    return request<UsageDetailResponse>(`/v1/usage${qs ? "?" + qs : ""}`, { method: "GET" });
   },
 };
