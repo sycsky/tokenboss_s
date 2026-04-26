@@ -1,121 +1,117 @@
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { LinkButton } from "../components/Button.js";
-import { Card } from "../components/Card.js";
+import { Link } from 'react-router-dom';
+import { CompatRow, AgentMark } from '../components/CompatRow';
+import { TerminalBlock } from '../components/TerminalBlock';
+import { TierCard } from '../components/TierCard';
+import { SectionHeader } from '../components/SectionHeader';
 
-/**
- * Screen 1a — Landing (current version).
- * Value-prop-forward: savings, agent-ready, open-source, supported models,
- * local payment badges.
- */
+const AGENTS: AgentMark[] = [
+  { id: 'oc', label: 'OC', name: 'OpenClaw', className: 'bg-gradient-to-br from-accent to-accent-deep' },
+  { id: 'cx', label: 'CX', name: 'Codex', className: 'bg-ink' },
+  { id: 'hm', label: 'HM', name: 'Hermes', className: 'bg-gradient-to-br from-violet-600 to-indigo-600' },
+  { id: 'cc', label: 'CC', name: 'Claude Code', className: 'bg-gradient-to-br from-amber-600 to-amber-800' },
+];
+
 export default function Landing() {
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-8 flex flex-col">
-        {/* Nav row */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="text-[18px] font-bold tracking-tight">TokenBoss</div>
-          <a
-            href="/landing/vision"
-            className="text-label text-text-secondary hover:text-accent"
-          >
-            愿景
+    <div className="min-h-screen bg-bg">
+      {/* Top Nav */}
+      <nav className="px-9 py-4 flex items-center justify-between border-b border-border max-w-[1200px] mx-auto">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 bg-accent rounded-md flex items-center justify-center text-white font-mono text-[10px] font-bold">TB</div>
+          <span className="font-bold">TokenBoss</span>
+        </div>
+        <div className="hidden md:flex gap-6 text-[13px] text-ink-2">
+          <a href="/pricing">套餐</a>
+          <a>文档</a>
+        </div>
+        <div className="flex items-center gap-4">
+          <Link to="/login" className="text-[13px] text-ink-2 hover:text-ink">登录</Link>
+          <Link to="/register" className="px-4 py-1.5 bg-accent text-white rounded-lg text-[12.5px] font-semibold">
+            免费开始 →
+          </Link>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <section className="max-w-[1080px] mx-auto px-6 md:px-14 py-16 md:py-30">
+        <CompatRow label="适配你喜欢的 Agent" agents={AGENTS} className="mb-7" />
+
+        <h1 className="font-sans text-[44px] md:text-[72px] font-extrabold leading-none tracking-tight">
+          你的 Agent<br />
+          <span className="text-accent">钱包</span>
+        </h1>
+
+        <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="max-w-[520px] mt-6" />
+
+        <p className="font-mono text-xs text-ink-3 max-w-[520px] mt-3 leading-relaxed">
+          在 <span className="text-ink-2 font-semibold">OpenClaw / Hermes / Claude Code</span> 终端粘贴一行 ·
+          ¥ 人民币付款 · $ 美金额度计费
+        </p>
+
+        <div className="flex flex-wrap items-center gap-4 mt-8">
+          <Link to="/register" className="px-5 py-3 bg-accent text-white rounded-lg font-semibold">
+            免费开始 · 送 $10 体验
+          </Link>
+          <span className="text-[13px] text-ink-2">
+            已有账户？<Link to="/login" className="text-accent">登录</Link>
+          </span>
+        </div>
+      </section>
+
+      {/* Pricing tiles */}
+      <section className="max-w-[1080px] mx-auto px-6 md:px-14 py-12">
+        <SectionHeader num="01" cn="套餐" en="Membership" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+          <TierCard
+            name="PLUS"
+            pricePeriod="¥288 / 4 周"
+            dailyCap="$30 / 天"
+            models="Codex 系列"
+            ctaText="免费注册试用 →"
+            ctaVariant="secondary"
+          />
+          <TierCard
+            name="SUPER"
+            pricePeriod="¥688 / 4 周"
+            dailyCap="$80 / 天"
+            models="Claude + Codex"
+            ctaText="免费注册试用 →"
+            ctaVariant="primary"
+            featured
+          />
+          <TierCard
+            name="ULTRA"
+            pricePeriod="¥1688 / 4 周"
+            dailyCap="$720 / 天"
+            models="Claude + Codex + reasoning"
+            ctaText="免费注册试用 →"
+            ctaVariant="secondary"
+            soldOut
+          />
+        </div>
+      </section>
+
+      {/* Pay-as-you-go */}
+      <section className="max-w-[1080px] mx-auto px-6 md:px-14 py-12">
+        <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 border border-hairline rounded-xl mt-5">
+          <div>
+            <div className="text-lg font-bold">¥1 = $1 美金</div>
+            <div className="text-sm text-ink-3 mt-1">永不过期 · 全模型解锁 · ¥50 起</div>
+          </div>
+          <a className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap cursor-pointer">
+            联系客服充值
           </a>
         </div>
+      </section>
 
-        {/* Hero */}
-        <h1 className="text-hero mb-4">
-          一张卡
-          <br />
-          用遍所有
-          <br />
-          <span className="text-accent">AI 工具</span>
-        </h1>
-        <p className="text-body text-text-secondary mb-8">
-          面向非程序员的 AI API 中转站。支付宝 / 微信充值，
-          <br />
-          智能路由最多省 95% token。
-        </p>
-
-        {/* CTA */}
-        <LinkButton to="/onboard/welcome" fullWidth className="mb-3">
-          免费体验 →
-        </LinkButton>
-        <p className="text-caption text-text-muted text-center mb-8">
-          注册即送 $5 · 无需信用卡
-        </p>
-
-        {/* Feature cards */}
-        <div className="space-y-3 mb-8">
-          <Card>
-            <div className="flex items-start gap-3">
-              <span className="text-[22px]">⚡</span>
-              <div>
-                <div className="text-h3">最多省 95% token</div>
-                <div className="text-caption text-text-secondary mt-1">
-                  智能路由到最合适的模型，不为轻问题付重价
-                </div>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <div className="flex items-start gap-3">
-              <span className="text-[22px]">🤖</span>
-              <div>
-                <div className="text-h3">Agent-ready</div>
-                <div className="text-caption text-text-secondary mt-1">
-                  兼容 OpenAI / Anthropic / Claude Code 接口
-                </div>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <div className="flex items-start gap-3">
-              <span className="text-[22px]">🔓</span>
-              <div>
-                <div className="text-h3">开源可审计</div>
-                <div className="text-caption text-text-secondary mt-1">
-                  基于 ClawRouter 开源构建，路由逻辑透明
-                </div>
-              </div>
-            </div>
-          </Card>
+      {/* Footer */}
+      <footer className="border-t border-border py-7 text-center font-mono text-[10.5px] text-ink-3 max-w-[1080px] mx-auto px-6">
+        <div className="flex flex-wrap justify-center gap-3.5 mb-2.5">
+          <a href="/pricing">套餐</a><a>文档</a><a>条款</a><a>隐私</a><a>联系</a>
         </div>
-
-        {/* Model grid */}
-        <div className="mb-8">
-          <div className="text-label text-text-secondary mb-3">
-            已接入模型
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { name: "Claude Opus", color: "badge-claude" },
-              { name: "Claude Sonnet", color: "badge-claude" },
-              { name: "GPT-5.4", color: "success" },
-              { name: "GPT-5.3", color: "success" },
-            ].map((m) => (
-              <div
-                key={m.name}
-                className="bg-surface border border-border rounded-sm px-3 py-2 text-caption font-mono"
-              >
-                {m.name}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Payment badges */}
-        <div className="mt-auto flex items-center justify-center gap-3 pt-4 border-t border-border">
-          <div className="text-caption text-text-muted">支持支付方式</div>
-          <div className="flex items-center gap-2">
-            <span className="bg-info-subtle text-info-text rounded-sm px-2 py-1 text-caption font-medium">
-              支付宝
-            </span>
-            <span className="bg-success-subtle text-success-text rounded-sm px-2 py-1 text-caption font-medium">
-              微信支付
-            </span>
-          </div>
-        </div>
-      </div>
-    </PhoneFrame>
+        <div>© 2026 TokenBoss</div>
+      </footer>
+    </div>
   );
 }
