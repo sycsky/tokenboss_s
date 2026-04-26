@@ -35,6 +35,7 @@ import {
   meHandler,
   registerHandler,
   sendCodeHandler,
+  verifyCodeHandler,
 } from "./handlers/authHandlers.js";
 import {
   createKeyHandler,
@@ -68,6 +69,7 @@ const routes: Route[] = [
   { method: "POST", path: "/v1/auth/register", handler: registerHandler },
   { method: "POST", path: "/v1/auth/login", handler: loginHandler },
   { method: "POST", path: "/v1/auth/send-code", handler: sendCodeHandler },
+  { method: "POST", path: "/v1/auth/verify-code", handler: verifyCodeHandler },
   { method: "GET", path: "/v1/me", handler: meHandler },
   { method: "GET", path: "/v1/keys", handler: listKeysHandler },
   { method: "POST", path: "/v1/keys", handler: createKeyHandler },

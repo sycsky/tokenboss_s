@@ -22,6 +22,8 @@ import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js"
 import { sendVerificationEmail } from "../lib/emailService.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
 import {
+  createBucket,
+  consumeVerificationCode,
   getUser,
   getUserIdByEmail,
   putEmailIndex,
@@ -283,4 +285,59 @@ export async function sendCodeHandler(
   saveVerificationCode(email, code, 300);
   await sendVerificationEmail(email, code);
   return jsonResponse(200, { ok: true });
+}
+
+// ---------- POST /v1/auth/verify-code ----------
+
+export async function verifyCodeHandler(
+  evt: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> {
+  const body = parseJsonBody(evt);
+  if (!body) return jsonResponse(400, { error: "invalid_body" });
+
+  const email =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const code =
+    typeof body.code === "string" ? body.code.trim() : "";
+
+  if (!EMAIL_RE.test(email) || !/^\d{6}$/.test(code)) {
+    return jsonResponse(400, { error: "invalid_input" });
+  }
+
+  if (!consumeVerificationCode(email, code)) {
+    return jsonResponse(401, { error: "invalid_or_expired_code" });
+  }
+
+  let userId = getUserIdByEmail(email);
+  let isNew = false;
+  if (!userId) {
+    userId = `u_${randomBytes(10).toString("hex")}`;
+    putUser({
+      userId,
+      email,
+      displayName: undefined,
+      phone: undefined,
+      passwordHash: undefined,
+      createdAt: new Date().toISOString(),
+      newapiUserId: undefined,
+      newapiPassword: undefined,
+    });
+    isNew = true;
+    // Grant trial bucket: $10 / 24h / forced ECO
+    createBucket({
+      userId,
+      skuType: "trial",
+      amountUsd: 10,
+      dailyCapUsd: null,
+      dailyRemainingUsd: null,
+      totalRemainingUsd: 10,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600e3).toISOString(),
+      modeLock: "auto_eco_only",
+      modelPool: "eco_only",
+    });
+  }
+
+  const token = signSession(userId);
+  return jsonResponse(200, { token, user: { userId, email }, isNew });
 }

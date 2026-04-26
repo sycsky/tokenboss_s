@@ -42,7 +42,7 @@ export interface UserRecord {
 
 // Assigned by init() which is called immediately at module load below.
 // eslint-disable-next-line prefer-const
-let db: Database.Database = null!;
+export let db: Database.Database = null!;
 
 function ensureDir(filePath: string) {
   const dir = dirname(filePath);
@@ -174,7 +174,7 @@ export async function getUser(userId: string): Promise<UserRecord | null> {
   return row ? rowToUser(row) : null;
 }
 
-export async function putUser(rec: UserRecord): Promise<void> {
+export function putUser(rec: UserRecord): void {
   db.prepare(`
     INSERT OR REPLACE INTO users
       (userId, displayName, email, phone, passwordHash, createdAt, newapiUserId, newapiPassword)
@@ -192,7 +192,7 @@ export async function putUser(rec: UserRecord): Promise<void> {
   });
 }
 
-export async function getUserIdByEmail(email: string): Promise<string | null> {
+export function getUserIdByEmail(email: string): string | null {
   const norm = email.trim().toLowerCase();
   if (!norm) return null;
   const row = db
@@ -270,8 +270,8 @@ export function getActiveBucketsForUser(userId: string): Bucket[] {
     WHERE userId = ?
       AND (expiresAt IS NULL OR expiresAt > datetime('now'))
       AND (
-        (skuType IN ('plan_plus','plan_super','plan_ultra','trial') AND COALESCE(dailyRemainingUsd, 0) > 0)
-        OR (skuType = 'topup' AND COALESCE(totalRemainingUsd, 0) > 0)
+        (skuType IN ('plan_plus','plan_super','plan_ultra') AND COALESCE(dailyRemainingUsd, 0) > 0)
+        OR (skuType IN ('trial','topup') AND COALESCE(totalRemainingUsd, 0) > 0)
       )
     ORDER BY
       CASE WHEN skuType = 'topup' THEN 1 ELSE 0 END,
@@ -347,7 +347,7 @@ export function recentCodeCount(email: string, sinceSeconds: number): number {
   const since = new Date(Date.now() - sinceSeconds * 1000).toISOString();
   const row = db.prepare(`
     SELECT COUNT(*) AS n FROM verification_codes
-    WHERE email = ? AND createdAt > ?
+    WHERE email = ? AND createdAt > ? AND consumed = 0
   `).get(email.toLowerCase(), since) as { n: number };
   return row.n;
 }
