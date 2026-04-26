@@ -4,14 +4,36 @@ import { TerminalBlock } from '../components/TerminalBlock';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
 import { useAuth } from '../lib/auth';
+import openClawIcon from '../assets/agents/openclaw.svg';
+import openAiIcon from '../assets/agents/openai.svg';
+import hermesIcon from '../assets/agents/hermes.png';
+import anthropicIcon from '../assets/agents/anthropic.svg';
 
-// Placeholder glyphs — replace with real brand SVG/PNG once design assets land.
-// Choices: ◐ (claw curve / OpenClaw) · ⌬ (network ring / Codex) · ◆ (mythic / Hermes) · ✱ (Anthropic asterisk / Claude Code)
 const AGENTS: AgentMark[] = [
-  { id: 'oc', glyph: '◐', name: 'OpenClaw', className: 'bg-gradient-to-br from-accent to-accent-deep' },
-  { id: 'cx', glyph: '⌬', name: 'Codex', className: 'bg-ink' },
-  { id: 'hm', glyph: '◆', name: 'Hermes', className: 'bg-gradient-to-br from-violet-600 to-indigo-600' },
-  { id: 'cc', glyph: '✱', name: 'Claude Code', className: 'bg-gradient-to-br from-amber-600 to-amber-800' },
+  {
+    id: 'oc',
+    name: 'OpenClaw',
+    className: 'bg-[#0A0807] p-1',
+    icon: <img src={openClawIcon} alt="" className="w-full h-full" style={{ imageRendering: 'pixelated' }} />,
+  },
+  {
+    id: 'cx',
+    name: 'Codex',
+    className: 'bg-ink p-1.5',
+    icon: <img src={openAiIcon} alt="" className="w-full h-full" />,
+  },
+  {
+    id: 'hm',
+    name: 'Hermes Agent',
+    className: 'bg-white p-0',
+    icon: <img src={hermesIcon} alt="" className="w-full h-full object-cover rounded-lg" />,
+  },
+  {
+    id: 'cc',
+    name: 'Claude Code',
+    className: 'bg-transparent p-0',
+    icon: <img src={anthropicIcon} alt="" className="w-full h-full rounded-lg" />,
+  },
 ];
 
 /**
