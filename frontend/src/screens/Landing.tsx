@@ -3,12 +3,15 @@ import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
+import { useAuth } from '../lib/auth';
 
+// Placeholder glyphs — replace with real brand SVG/PNG once design assets land.
+// Choices: ◐ (claw curve / OpenClaw) · ⌬ (network ring / Codex) · ◆ (mythic / Hermes) · ✱ (Anthropic asterisk / Claude Code)
 const AGENTS: AgentMark[] = [
-  { id: 'oc', label: 'OC', name: 'OpenClaw', className: 'bg-gradient-to-br from-accent to-accent-deep' },
-  { id: 'cx', label: 'CX', name: 'Codex', className: 'bg-ink' },
-  { id: 'hm', label: 'HM', name: 'Hermes', className: 'bg-gradient-to-br from-violet-600 to-indigo-600' },
-  { id: 'cc', label: 'CC', name: 'Claude Code', className: 'bg-gradient-to-br from-amber-600 to-amber-800' },
+  { id: 'oc', glyph: '◐', name: 'OpenClaw', className: 'bg-gradient-to-br from-accent to-accent-deep' },
+  { id: 'cx', glyph: '⌬', name: 'Codex', className: 'bg-ink' },
+  { id: 'hm', glyph: '◆', name: 'Hermes', className: 'bg-gradient-to-br from-violet-600 to-indigo-600' },
+  { id: 'cc', glyph: '✱', name: 'Claude Code', className: 'bg-gradient-to-br from-amber-600 to-amber-800' },
 ];
 
 /**
@@ -62,6 +65,11 @@ function HeroTerminalDemo() {
 }
 
 export default function Landing() {
+  const { user } = useAuth();
+  const isLoggedIn = !!user;
+  // Visitor view → invite signup; logged-in view → contact 客服 (per spec, v1.0 has no self-checkout)
+  const payAsYouGoCta = isLoggedIn ? '联系客服充值' : '免费注册试用 →';
+  const payAsYouGoHref = isLoggedIn ? undefined : '/register';
   return (
     <div className="min-h-screen bg-bg overflow-hidden">
       {/* Top Nav */}
@@ -86,7 +94,7 @@ export default function Landing() {
       </nav>
 
       {/* Hero */}
-      <section className="max-w-[1200px] mx-auto px-6 md:px-14 pt-12 md:pt-20 pb-12 md:pb-24">
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 pt-12 md:pt-20 pb-10 md:pb-12">
         <CompatRow label="适配你喜欢的 Agent" agents={AGENTS} className="mb-7" />
 
         {/* 2-col on lg+, single col stacked on mobile */}
@@ -98,7 +106,7 @@ export default function Landing() {
               <span className="text-accent">钱包</span>
             </h1>
 
-            <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-6 max-w-[520px]" />
+            <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
             <p className="font-mono text-[11px] sm:text-xs text-ink-3 max-w-[520px] mt-3 leading-relaxed">
               在 <span className="text-ink-2 font-semibold">OpenClaw / Hermes / Claude Code</span> 终端粘贴一行 ·
@@ -126,9 +134,9 @@ export default function Landing() {
       </section>
 
       {/* Pricing tiles */}
-      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-10 md:py-14">
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-10 md:py-12">
         <SectionHeader num="01" cn="套餐" en="Membership" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mt-6">
           <TierCard
             name="PLUS"
             pricePeriod="¥288 / 4 周"
@@ -158,16 +166,25 @@ export default function Landing() {
       </section>
 
       {/* Pay-as-you-go */}
-      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-10 md:py-14">
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-10 md:py-12">
         <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 border border-hairline rounded-xl mt-5 hover:border-border-2 transition-colors">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 border border-hairline rounded-xl mt-6 hover:border-border-2 transition-colors">
           <div>
             <div className="text-lg font-bold">¥1 = $1 美金</div>
             <div className="text-sm text-ink-3 mt-1">永不过期 · 全模型解锁 · ¥50 起</div>
           </div>
-          <a className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap cursor-pointer hover:border-ink transition-colors">
-            联系客服充值
-          </a>
+          {payAsYouGoHref ? (
+            <Link
+              to={payAsYouGoHref}
+              className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap hover:border-ink transition-colors"
+            >
+              {payAsYouGoCta}
+            </Link>
+          ) : (
+            <a className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap cursor-pointer hover:border-ink transition-colors">
+              {payAsYouGoCta}
+            </a>
+          )}
         </div>
       </section>
 
