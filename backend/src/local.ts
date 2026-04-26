@@ -46,6 +46,7 @@ import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { usageHandler } from "./handlers/usageHandlers.js";
 import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
+import { runDailyExpireAndReset } from './lib/dailyCron.js';
 
 type LambdaHandler = (
   event: APIGatewayProxyEventV2,
@@ -435,6 +436,23 @@ const server = createServer((req, res) => {
 if (process.env.NODE_ENV !== "production") {
   await seedLocalData();
 }
+
+function scheduleDailyCron() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(16, 0, 0, 0); // 0:00 Beijing = 16:00 UTC prev day; adjust as needed
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  const delay = next.getTime() - now.getTime();
+  setTimeout(() => {
+    try {
+      const result = runDailyExpireAndReset();
+      console.log(`[cron] daily expire+reset: ${result.expired} expired, ${result.reset} reset`);
+    } catch (e) { console.error('[cron] failed', e); }
+    scheduleDailyCron();
+  }, delay);
+}
+
+scheduleDailyCron();
 
 server.listen(PORT, () => {
   console.log(`[local] TokenBoss backend listening on http://localhost:${PORT}`);
