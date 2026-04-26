@@ -14,7 +14,7 @@ export interface BucketRequest {
   tokensOut?: number;
 }
 
-export type ConsumeError = 'insufficient_balance' | 'mode_locked' | 'model_locked' | 'no_active_bucket';
+export type ConsumeError = 'insufficient_balance' | 'mode_locked' | 'model_locked';
 
 export interface ConsumeResult {
   ok: boolean;

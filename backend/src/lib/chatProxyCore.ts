@@ -245,11 +245,10 @@ const IN_CHAT_MESSAGES: Record<string, string> = {
   insufficient_balance: "今日额度已用完。明日 0:00 自动刷新，或立即加买额度：tokenboss.com/pricing",
   model_locked: "此模型需 Super 套餐或加买充值额度。升级：tokenboss.com/pricing",
   mode_locked: "免费试用仅可用智能路由。升级：tokenboss.com/pricing",
-  no_active_bucket: "请先注册或购买套餐：tokenboss.com",
 };
 
 function buildInChatErrorBody(error: string, modelId: string): string {
-  const text = IN_CHAT_MESSAGES[error] ?? IN_CHAT_MESSAGES.no_active_bucket;
+  const text = IN_CHAT_MESSAGES[error] ?? IN_CHAT_MESSAGES.insufficient_balance;
   return JSON.stringify({
     id: `chatcmpl-tb-error-${Date.now()}`,
     object: "chat.completion",
