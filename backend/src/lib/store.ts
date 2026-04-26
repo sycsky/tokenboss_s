@@ -288,7 +288,7 @@ export function getActiveSubscriptionBuckets(): Bucket[] {
       `
     SELECT * FROM credit_bucket
     WHERE skuType != 'topup'
-      AND (expiresAt IS NULL OR expiresAt > datetime('now'))
+      AND (expiresAt IS NULL OR datetime(expiresAt) > datetime('now'))
   `
     )
     .all() as Bucket[];
