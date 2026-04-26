@@ -1,83 +1,29 @@
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { Card } from "../components/Card.js";
-import { BackButton } from "../components/BackButton.js";
+import { Link, useLocation } from 'react-router-dom';
 
-const PLAN_SUMMARY: Record<string, { name: string; price: string; tokens: string }> = {
-  basic: { name: "基础版", price: "¥39", tokens: "500 万 token" },
-  standard: { name: "标准版", price: "¥129", tokens: "2000 万 token" },
-  pro: { name: "专业版", price: "¥429", tokens: "8000 万 token" },
-};
-
-/**
- * Screen 11 — Payment. Pick Alipay or WeChat Pay. Both buttons navigate to
- * the mock success screen since no real gateway is wired up.
- */
 export default function Payment() {
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const planId = params.get("plan") ?? "standard";
-  const plan = PLAN_SUMMARY[planId] ?? PLAN_SUMMARY.standard;
-
-  const pay = (method: "alipay" | "wechat") => {
-    navigate(`/billing/success?plan=${planId}&method=${method}`);
-  };
+  const loc = useLocation();
+  const plan = (loc.state as any)?.plan || '套餐';
 
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-6 flex flex-col">
-        <div className="mb-4">
-          <BackButton />
-        </div>
-
-        <h1 className="text-h2 mb-6">确认订单</h1>
-
-        <Card className="mb-6">
-          <div className="space-y-3">
-            <div className="flex justify-between">
-              <div className="text-caption text-text-secondary">套餐</div>
-              <div className="font-medium">{plan.name}</div>
-            </div>
-            <div className="flex justify-between">
-              <div className="text-caption text-text-secondary">包含</div>
-              <div className="font-mono text-caption">{plan.tokens}</div>
-            </div>
-            <div className="flex justify-between">
-              <div className="text-caption text-text-secondary">订阅周期</div>
-              <div className="font-medium">1 个月</div>
-            </div>
-            <div className="border-t border-border-subtle pt-3 flex justify-between items-baseline">
-              <div className="text-caption text-text-secondary">应付</div>
-              <div className="text-h2 font-bold text-accent">{plan.price}</div>
-            </div>
-          </div>
-        </Card>
-
-        <div className="text-label text-text-secondary mb-3">选择支付方式</div>
-        <div className="space-y-3 mb-6">
-          <button
-            onClick={() => pay("alipay")}
-            className="w-full bg-info text-white rounded-sm py-4 font-semibold text-body flex items-center justify-center gap-3 hover:opacity-90 transition-opacity"
-          >
-            <span className="text-[20px]">支</span>
-            支付宝支付
-          </button>
-          <button
-            onClick={() => pay("wechat")}
-            className="w-full bg-success text-white rounded-sm py-4 font-semibold text-body flex items-center justify-center gap-3 hover:opacity-90 transition-opacity"
-          >
-            <span className="text-[20px]">微</span>
-            微信支付
-          </button>
-        </div>
-
-        <p className="text-caption text-text-muted text-center mt-auto">
-          支付即表示同意 TokenBoss 的
-          <a href="#" className="text-accent ml-1">
-            服务条款
-          </a>
+    <div className="min-h-screen bg-bg flex items-center justify-center p-6">
+      <div className="max-w-md w-full text-center">
+        <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-ink-3 mb-3">v1.0</div>
+        <h1 className="text-3xl font-bold mb-3 tracking-tight">支付通道即将开放</h1>
+        <p className="text-ink-2 mb-8">
+          当前为内测期间，请联系客服获取 <span className="font-semibold text-ink">{plan}</span> 额度
         </p>
+
+        <div className="bg-surface border border-border rounded-xl p-6 mb-6">
+          <div className="w-32 h-32 bg-surface-2 border border-border rounded-lg mx-auto mb-3 flex items-center justify-center text-ink-3 text-xs">
+            [客服微信 QR]
+          </div>
+          <div className="font-mono text-sm text-ink">
+            微信：<span className="font-bold">tokenboss_admin</span>
+          </div>
+        </div>
+
+        <Link to="/dashboard" className="text-sm text-ink-2">← 返回控制台</Link>
       </div>
-    </PhoneFrame>
+    </div>
   );
 }
