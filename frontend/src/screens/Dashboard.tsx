@@ -126,10 +126,13 @@ export default function Dashboard() {
                       <span>每日 cap</span><span className="text-ink font-bold">${b.dailyCapUsd}</span>
                     </div>
                   )}
-                  {b.skuType === 'topup' && (
+                  {(b.skuType === 'topup' || b.skuType === 'trial') && (
                     <div className="font-mono text-xs flex justify-between text-ink-2 py-0.5">
                       <span>剩余</span><span className="text-ink font-bold">${(b.totalRemainingUsd ?? 0).toFixed(2)}</span>
                     </div>
+                  )}
+                  {b.skuType === 'trial' && b.expiresAt && (
+                    <div className="font-mono text-xs flex justify-between text-ink-2 py-0.5"><span>到期</span><span className="text-ink font-bold">{new Date(b.expiresAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span></div>
                   )}
                 </div>
               ))}
