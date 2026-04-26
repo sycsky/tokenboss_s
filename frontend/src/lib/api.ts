@@ -123,6 +123,8 @@ export interface UserProfile {
 export interface AuthResponse {
   token: string;
   user: UserProfile;
+  /** Present on verifyCode — true when the user was newly created. */
+  isNew?: boolean;
 }
 
 export interface ProxyKeySummary {
@@ -168,18 +170,18 @@ export interface UsageResponse {
 // ---------- public API ----------
 
 export const api = {
-  // auth
-  register(input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> {
-    return request<AuthResponse>("/v1/auth/register", {
+  // auth — code-based flow
+  sendCode(email: string): Promise<{ ok: true }> {
+    return request<{ ok: true }>("/v1/auth/send-code", {
       method: "POST",
-      body: input,
+      body: { email },
       token: null,
     });
   },
-  login(input: { email: string; password: string }): Promise<AuthResponse> {
-    return request<AuthResponse>("/v1/auth/login", {
+  verifyCode(email: string, code: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/verify-code", {
       method: "POST",
-      body: input,
+      body: { email, code },
       token: null,
     });
   },
@@ -205,8 +207,21 @@ export const api = {
     );
   },
 
+  // buckets
+  getBuckets(): Promise<{ buckets: unknown[] }> {
+    return request<{ buckets: unknown[] }>("/v1/buckets");
+  },
+
   // usage
   usage(range: "today" | "week" | "month" = "today"): Promise<UsageResponse> {
     return request<UsageResponse>("/v1/usage", { query: { range } });
+  },
+  getUsage(opts: { from?: string; to?: string; eventType?: string; limit?: number; offset?: number } = {}): Promise<UsageResponse> {
+    const qs = new URLSearchParams(
+      Object.entries(opts)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    return request<UsageResponse>(`/v1/usage${qs ? "?" + qs : ""}`, { method: "GET" });
   },
 };
