@@ -3,6 +3,7 @@ import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
+import { TopNav } from '../components/TopNav';
 import { useAuth } from '../lib/auth';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import openAiIcon from '../assets/agents/openai.svg';
@@ -106,36 +107,7 @@ export default function Landing() {
   const payAsYouGoHref = isLoggedIn ? undefined : '/register';
   return (
     <div className="min-h-screen bg-bg overflow-hidden">
-      {/* Top Nav */}
-      <nav className="px-5 sm:px-9 py-4 flex items-center justify-between border-b border-border max-w-[1200px] mx-auto gap-3 sm:gap-6">
-        <div className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="w-7 h-7 bg-accent rounded-md flex items-center justify-center text-white font-mono text-[10px] font-bold">TB</div>
-          <span className="font-bold text-[15px]">TokenBoss</span>
-        </div>
-        <div className="flex gap-4 sm:gap-6 text-[12px] sm:text-[13px] text-ink-2 ml-auto sm:ml-0">
-          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
-        </div>
-        <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
-          {isLoggedIn ? (
-            <Link
-              to="/dashboard"
-              className="px-3 sm:px-4 py-1.5 bg-accent text-white rounded-lg text-[11.5px] sm:text-[12.5px] font-semibold hover:bg-accent-deep transition-colors whitespace-nowrap"
-            >
-              控制台 →
-            </Link>
-          ) : (
-            <>
-              <Link to="/login" className="text-[12px] sm:text-[13px] text-ink-2 hover:text-ink transition-colors">登录</Link>
-              <Link
-                to="/register"
-                className="px-3 sm:px-4 py-1.5 bg-accent text-white rounded-lg text-[11.5px] sm:text-[12.5px] font-semibold hover:bg-accent-deep transition-colors whitespace-nowrap"
-              >
-                免费开始 →
-              </Link>
-            </>
-          )}
-        </div>
-      </nav>
+      <TopNav current="home" />
 
       {/* Hero */}
       <section className="max-w-[1200px] mx-auto px-6 md:px-14 pt-12 md:pt-20 pb-10 md:pb-12">
