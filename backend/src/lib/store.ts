@@ -389,6 +389,6 @@ export function getUsageForUser(userId: string, opts: { limit?: number; offset?:
   }
   if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
   if (opts.to) { where += ` AND createdAt <= ?`; params.push(opts.to); }
-  return db.prepare(`SELECT * FROM usage_log WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`)
+  return db.prepare(`SELECT * FROM usage_log WHERE ${where} ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?`)
     .all(...params, limit, offset) as UsageRecord[];
 }
