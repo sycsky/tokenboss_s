@@ -1,19 +1,19 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
-import { api } from '../lib/api';
+import { api, type BucketRecord } from '../lib/api';
 import { SectionHeader } from '../components/SectionHeader';
 
 export default function Settings() {
   const { user, logout } = useAuth();
   const [stats, setStats] = useState({ consumed: 0, calls: 0 });
-  const [bucket, setBucket] = useState<any>(null);
+  const [bucket, setBucket] = useState<BucketRecord | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getUsage({}).then((r: any) => setStats(r.totals));
-    api.getBuckets().then((r: any) => setBucket((r.buckets || []).find((b: any) => b.skuType.startsWith('plan_'))));
-    api.me().then((r: any) => setCreatedAt(r.user?.createdAt ?? null));
+    api.getUsage({}).then((r) => setStats(r.totals));
+    api.getBuckets().then((r) => setBucket((r.buckets || []).find((b) => b.skuType.startsWith('plan_')) ?? null));
+    api.me().then((r) => setCreatedAt(r.user?.createdAt ?? null));
   }, []);
 
   const planName = bucket?.skuType?.replace('plan_', '').replace(/^./, (c: string) => c.toUpperCase()) ?? '无';

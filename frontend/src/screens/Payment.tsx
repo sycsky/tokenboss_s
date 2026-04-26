@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 export default function Payment() {
   const loc = useLocation();
-  const plan = (loc.state as any)?.plan || '套餐';
+  const plan = (loc.state as { plan?: string } | null)?.plan || '套餐';
 
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center p-6">

@@ -1,22 +1,22 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { api } from '../lib/api';
+import { api, type UsageDetailResponse } from '../lib/api';
 import { BalancePill } from '../components/BalancePill';
 import { ConsumeChart24h, HourBucket } from '../components/ConsumeChart24h';
 import { UsageRow } from '../components/UsageRow';
 
 export default function UsageHistory() {
   const { user } = useAuth();
-  const [data, setData] = useState<any>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
+  const [data, setData] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
-      api.getUsage({ limit: 50 }).then((r: any) => setData(r)),
-      api.getBuckets().then((r: any) => {
-        const total = (r.buckets || []).reduce((s: number, b: any) => {
+      api.getUsage({ limit: 50 }).then((r) => setData(r)),
+      api.getBuckets().then((r) => {
+        const total = (r.buckets || []).reduce((s: number, b) => {
           if (b.skuType === 'topup' || b.skuType === 'trial') return s + (b.totalRemainingUsd ?? 0);
           return s + (b.dailyRemainingUsd ?? 0);
         }, 0);
@@ -25,7 +25,7 @@ export default function UsageHistory() {
     ]).finally(() => setLoading(false));
   }, []);
 
-  const buckets: HourBucket[] = (data.hourly24h || []).map((h: any) => {
+  const buckets: HourBucket[] = (data.hourly24h || []).map((h) => {
     const hourNum = parseInt(h.hour.split(':')[0], 10);
     return { hour: hourNum, consumeUsd: h.consumed };
   });
@@ -107,7 +107,7 @@ export default function UsageHistory() {
               </tr>
             </thead>
             <tbody>
-              {data.records?.length > 0 ? data.records.map((r: any) => (
+              {data.records?.length > 0 ? data.records.map((r) => (
                 <UsageRow key={r.id}
                   variant="desktop"
                   time={new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}

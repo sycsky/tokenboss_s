@@ -1,30 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { api } from '../lib/api';
+import { api, type BucketRecord, type UsageDetailResponse } from '../lib/api';
 import { APIKeyList } from '../components/APIKeyList';
 import { UsageRow } from '../components/UsageRow';
 
-interface Bucket {
-  id: string;
-  skuType: string;
-  amountUsd: number;
-  dailyCapUsd: number | null;
-  dailyRemainingUsd: number | null;
-  totalRemainingUsd: number | null;
-  expiresAt: string | null;
-}
-
 export default function Dashboard() {
   const { user, logout } = useAuth();
-  const [buckets, setBuckets] = useState<Bucket[]>([]);
-  const [usage, setUsage] = useState<any>({ records: [], totals: { consumed: 0, calls: 0 } });
+  const [buckets, setBuckets] = useState<BucketRecord[]>([]);
+  const [usage, setUsage] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
-      api.getBuckets().then((r: any) => setBuckets(r.buckets || [])),
-      api.getUsage({ limit: 4 }).then((r: any) => setUsage(r)),
+      api.getBuckets().then((r) => setBuckets(r.buckets || [])),
+      api.getUsage({ limit: 4 }).then((r) => setUsage(r)),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -179,7 +169,7 @@ export default function Dashboard() {
               <Link to="/dashboard/history" className="text-accent font-semibold text-[10px]">查看全部 →</Link>
             </div>
             <div className="bg-surface border border-border rounded-xl overflow-hidden">
-              {usage.records?.slice(0, 4).map((r: any) => (
+              {usage.records?.slice(0, 4).map((r) => (
                 <UsageRow
                   key={r.id}
                   variant="mobile"
