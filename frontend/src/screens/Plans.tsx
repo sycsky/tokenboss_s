@@ -23,7 +23,7 @@ export default function Plans() {
 
   return (
     <div className="min-h-screen bg-bg">
-      <TopNav current="pricing" />
+      <TopNav />
 
       <main className="max-w-[1080px] mx-auto px-6 md:px-14 py-12 md:py-20">
         {/* Hero */}

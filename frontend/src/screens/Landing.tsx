@@ -1,6 +1,8 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
+import { TierCard } from '../components/TierCard';
+import { SectionHeader } from '../components/SectionHeader';
 import { TopNav } from '../components/TopNav';
 import { useAuth } from '../lib/auth';
 import openClawIcon from '../assets/agents/openclaw.svg';
@@ -34,97 +36,6 @@ const AGENTS: AgentMark[] = [
     icon: <img src={anthropicIcon} alt="" className="w-full h-full rounded-lg" />,
   },
 ];
-
-// v2 preview · industries the Primitives layer will cover. Used by the
-// horizontal marquee in PrimitiveSection — array is duplicated at render
-// time so the scroll loop has a seamless wrap.
-const INDUSTRIES = [
-  '短视频脚本', '投资研究', '办公自动化', '代码评审', '客户支持',
-  '数据分析', '法律文档', '教育辅导', '内容运营', '招聘筛选',
-];
-
-/**
- * v2 preview · soft-entry section pitching the Primitives layer.
- * Two stacked equations (Agent = POWERFUL → Agent + Primitives = PRODUCTIVE)
- * + an industry marquee. No CTA — keeps it as a flag-planting teaser, not
- * a clickable promise we can't ship yet.
- */
-function PrimitiveSection() {
-  const agentChip = (
-    <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-ink text-white shadow-[0_8px_24px_-10px_rgba(60,40,20,0.45)]">
-      <span className="text-[18px] leading-none">🤖</span>
-      <div className="leading-tight">
-        <div className="text-[13px] font-bold tracking-tight">AI AGENT</div>
-        <div className="font-mono text-[8.5px] font-bold tracking-[0.14em] uppercase text-ink-4 mt-0.5">
-          AUTONOMOUS SYSTEM
-        </div>
-      </div>
-    </div>
-  );
-  const primitiveChip = (
-    <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-ink text-white border border-accent shadow-[0_0_0_1px_rgba(232,105,42,0.55),0_10px_28px_-8px_rgba(232,105,42,0.5)]">
-      <span className="text-[18px] leading-none">◇</span>
-      <div className="leading-tight">
-        <div className="text-[13px] font-bold tracking-tight">PRIMITIVES</div>
-        <div className="font-mono text-[8.5px] font-bold tracking-[0.14em] uppercase text-accent mt-0.5">
-          BY TOKENBOSS
-        </div>
-      </div>
-    </div>
-  );
-  const op = (s: string) => (
-    <span className="font-mono text-[26px] md:text-[32px] text-ink-3 font-light leading-none px-1">{s}</span>
-  );
-  return (
-    <section className="border-t border-hairline py-20 md:py-28">
-      <div className="max-w-[1100px] mx-auto px-6 md:px-14">
-        <p className="text-center font-mono text-[10.5px] font-bold tracking-[0.16em] uppercase text-ink-3 mb-12 md:mb-16">
-          COMING SOON · v2
-        </p>
-
-        {/* Equation 1 · Agent = POWERFUL */}
-        <div className="flex flex-col md:flex-row items-center justify-center gap-3 md:gap-5 mb-7 md:mb-10">
-          {agentChip}
-          {op('=')}
-          <span className="text-[44px] md:text-[64px] lg:text-[80px] font-extrabold tracking-tight text-ink leading-[0.95]">
-            POWERFUL.
-          </span>
-        </div>
-
-        {/* Equation 2 · Agent + Primitives = PRODUCTIVE */}
-        <div className="flex flex-col md:flex-row items-center justify-center gap-3 md:gap-5 mb-14 md:mb-20">
-          {agentChip}
-          {op('+')}
-          {primitiveChip}
-          {op('=')}
-          <span className="text-[44px] md:text-[64px] lg:text-[80px] font-extrabold tracking-tight bg-gradient-to-r from-accent to-accent-deep bg-clip-text text-transparent leading-[0.95]">
-            PRODUCTIVE.
-          </span>
-        </div>
-
-        {/* Industry marquee */}
-        <div className="relative overflow-hidden mb-10 md:mb-14">
-          <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 md:w-24 bg-gradient-to-r from-bg to-transparent z-10" />
-          <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 md:w-24 bg-gradient-to-l from-bg to-transparent z-10" />
-          <div className="flex gap-3 industry-marquee w-max">
-            {[...INDUSTRIES, ...INDUSTRIES].map((tag, i) => (
-              <span
-                key={i}
-                className="font-mono text-[11px] tracking-wide text-ink-2 bg-surface border border-hairline rounded-full px-4 py-2 whitespace-nowrap"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <p className="text-center font-mono text-[10.5px] font-bold tracking-[0.16em] uppercase text-ink-3">
-          敬请期待 ·
-        </p>
-      </div>
-    </section>
-  );
-}
 
 /**
  * Animated terminal demo on the hero right side. Pure CSS keyframes loop a
@@ -179,6 +90,22 @@ function HeroTerminalDemo() {
 export default function Landing() {
   const { user } = useAuth();
   const isLoggedIn = !!user;
+  const navigate = useNavigate();
+  const goRegister = () => navigate('/register');
+
+  // v1.0 has no self-checkout. Visitors → /register; logged-in → contact 客服.
+  // Ultra is sold-out for logged-in users per spec, but visitors still see the
+  // try CTA so we can funnel them into /register first.
+  const tierCta = isLoggedIn
+    ? { text: '联系客服购买', onClick: undefined }
+    : { text: '免费开始 →', onClick: goRegister };
+  const ultraCta = isLoggedIn
+    ? { text: '名额已满', onClick: undefined, soldOut: true, variant: 'disabled' as const }
+    : { text: '免费开始 →', onClick: goRegister, soldOut: false, variant: 'secondary' as const };
+  const standardCta = isLoggedIn
+    ? { text: '联系客服充值', onClick: undefined }
+    : { text: '免费开始 →', onClick: goRegister };
+
   return (
     <div className="min-h-screen bg-bg overflow-hidden">
       <TopNav current="home" />
@@ -234,7 +161,77 @@ export default function Landing() {
         </div>
       </section>
 
-      <PrimitiveSection />
+      {/* 01 · Membership tiers */}
+      <section id="pricing" className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
+        <SectionHeader num="01" cn="套餐" en="Membership" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mt-6">
+          <TierCard
+            name="Plus"
+            pricePeriod="¥288 / 4 周"
+            leverage="×3"
+            totalUsd="≈ $840 美金额度"
+            dailyCap="$30 美金 cap"
+            models="Codex 系列模型"
+            ctaText={tierCta.text}
+            onCtaClick={tierCta.onClick}
+            ctaVariant="secondary"
+            tooltipExtras={['智能路由 · 多端复用 · API key 多端共享']}
+          />
+          <TierCard
+            name="Super"
+            pricePeriod="¥688 / 4 周"
+            leverage="×4"
+            totalUsd="≈ $2,240 美金额度"
+            dailyCap="$80 美金 cap"
+            models="Claude + Codex 系列模型"
+            ctaText={tierCta.text}
+            onCtaClick={tierCta.onClick}
+            ctaVariant="primary"
+            featured
+            tooltipExtras={['含 Sonnet 4.7 / Opus 4.7 · 优先排队 · 高峰不降级']}
+          />
+          <TierCard
+            name="Ultra"
+            pricePeriod="¥1688 / 4 周"
+            leverage="×12"
+            totalUsd="≈ $20,160 美金额度"
+            dailyCap="$720 美金 cap"
+            models="Claude + Codex + reasoning"
+            ctaText={ultraCta.text}
+            onCtaClick={ultraCta.onClick}
+            ctaVariant={ultraCta.variant}
+            soldOut={ultraCta.soldOut}
+            tooltipExtras={['含 reasoning (o1/o3) · 专属客服 · SLA · 定制路由策略']}
+          />
+        </div>
+      </section>
+
+      {/* 02 · Pay-as-you-go */}
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
+        <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 border border-hairline rounded-xl mt-6 hover:border-border-2 transition-colors">
+          <div>
+            <div className="font-mono text-2xl font-bold">
+              <span className="text-base text-ink-2 align-top">¥</span>1
+              <span className="text-ink-4 mx-2">/</span>
+              <span className="text-base text-ink-2 align-top">$</span>1 美金
+            </div>
+            <div className="text-sm text-ink-3 mt-1">充值 ¥50 起 · 永不过期 · 全模型解锁</div>
+          </div>
+          {standardCta.onClick ? (
+            <button
+              onClick={standardCta.onClick}
+              className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap hover:border-ink transition-colors"
+            >
+              {standardCta.text}
+            </button>
+          ) : (
+            <span className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap">
+              {standardCta.text}
+            </span>
+          )}
+        </div>
+      </section>
 
       {/* Footer */}
       <footer className="border-t border-border py-7 text-center font-mono text-[10.5px] text-ink-3 max-w-[1200px] mx-auto px-6">
@@ -295,14 +292,6 @@ export default function Landing() {
         .td-cursor-blink { animation: td-cursor-blink 1s steps(2, end) infinite; }
         @media (prefers-reduced-motion: reduce) {
           .td-typing, .td-cursor, .td-line, .td-cursor-blink { animation: none !important; opacity: 1 !important; width: 100% !important; }
-        }
-        @keyframes industry-marquee {
-          from { transform: translateX(0); }
-          to   { transform: translateX(-50%); }
-        }
-        .industry-marquee { animation: industry-marquee 30s linear infinite; }
-        @media (prefers-reduced-motion: reduce) {
-          .industry-marquee { animation: none !important; }
         }
       `}</style>
     </div>
