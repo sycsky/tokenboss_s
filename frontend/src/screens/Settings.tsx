@@ -8,10 +8,12 @@ export default function Settings() {
   const { user, logout } = useAuth();
   const [stats, setStats] = useState({ consumed: 0, calls: 0 });
   const [bucket, setBucket] = useState<any>(null);
+  const [createdAt, setCreatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     api.getUsage({}).then((r: any) => setStats(r.totals));
     api.getBuckets().then((r: any) => setBucket((r.buckets || []).find((b: any) => b.skuType.startsWith('plan_'))));
+    api.me().then((r: any) => setCreatedAt(r.user?.createdAt ?? null));
   }, []);
 
   const planName = bucket?.skuType?.replace('plan_', '').replace(/^./, (c: string) => c.toUpperCase()) ?? '无';
@@ -51,7 +53,9 @@ export default function Settings() {
           </div>
           <div className="flex justify-between py-3">
             <span className="font-mono text-[11px] uppercase tracking-wider text-ink-3 font-semibold">注册时间</span>
-            <span className="font-mono text-xs text-ink-3">{user?.userId?.slice(0, 8) || '—'}</span>
+            <span className="font-mono text-xs text-ink-3">
+              {createdAt ? new Date(createdAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'}
+            </span>
           </div>
         </div>
 
