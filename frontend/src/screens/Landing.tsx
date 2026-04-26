@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { TierCard } from '../components/TierCard';
@@ -89,8 +89,20 @@ function HeroTerminalDemo() {
 export default function Landing() {
   const { user } = useAuth();
   const isLoggedIn = !!user;
-  // Visitor view → invite signup; logged-in view → contact 客服 (per spec, v1.0 has no self-checkout)
-  const payAsYouGoCta = isLoggedIn ? '联系客服充值' : '免费注册试用 →';
+  const navigate = useNavigate();
+  const goRegister = () => navigate('/register');
+
+  // v1.0 has no self-checkout. Visitors → /register; logged-in → contact 客服.
+  // Ultra is sold-out for logged-in users per spec, but visitors still see the
+  // try CTA so we can funnel them into /register first.
+  const tierCta = isLoggedIn
+    ? { text: '联系客服购买', onClick: undefined }
+    : { text: '免费开始 →', onClick: goRegister };
+  const ultraTier = isLoggedIn
+    ? { text: '名额已满', onClick: undefined, soldOut: true, variant: 'disabled' as const }
+    : { text: '免费开始 →', onClick: goRegister, soldOut: false, variant: 'secondary' as const };
+
+  const payAsYouGoCta = isLoggedIn ? '联系客服充值' : '免费开始 →';
   const payAsYouGoHref = isLoggedIn ? undefined : '/register';
   return (
     <div className="min-h-screen bg-bg overflow-hidden">
@@ -101,8 +113,7 @@ export default function Landing() {
           <span className="font-bold text-[15px]">TokenBoss</span>
         </div>
         <div className="flex gap-4 sm:gap-6 text-[12px] sm:text-[13px] text-ink-2 ml-auto sm:ml-0">
-          <a href="/pricing" className="hover:text-ink transition-colors">套餐</a>
-          <a className="hover:text-ink transition-colors cursor-pointer">文档</a>
+          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
         </div>
         <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
           <Link to="/login" className="text-[12px] sm:text-[13px] text-ink-2 hover:text-ink transition-colors">登录</Link>
@@ -131,7 +142,7 @@ export default function Landing() {
             <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
             <p className="font-mono text-[11px] sm:text-xs text-ink-3 max-w-[520px] mt-3 leading-relaxed">
-              在 <span className="text-ink-2 font-semibold">OpenClaw / Hermes / Claude Code</span> 终端粘贴一行 ·
+              在 <span className="text-ink-2 font-semibold">OpenClaw / Codex / Hermes / Claude Code</span> 终端粘贴一行 ·
               ¥ 人民币付款 · $ 美金额度计费
             </p>
 
@@ -164,7 +175,8 @@ export default function Landing() {
             pricePeriod="¥288 / 4 周"
             dailyCap="$30 / 天"
             models="Codex 系列"
-            ctaText="免费注册试用 →"
+            ctaText={tierCta.text}
+            onCtaClick={tierCta.onClick}
             ctaVariant="secondary"
           />
           <TierCard
@@ -172,7 +184,8 @@ export default function Landing() {
             pricePeriod="¥688 / 4 周"
             dailyCap="$80 / 天"
             models="Claude + Codex"
-            ctaText="免费注册试用 →"
+            ctaText={tierCta.text}
+            onCtaClick={tierCta.onClick}
             ctaVariant="primary"
             featured
           />
@@ -181,8 +194,10 @@ export default function Landing() {
             pricePeriod="¥1688 / 4 周"
             dailyCap="$720 / 天"
             models="Claude + Codex + reasoning"
-            ctaText="免费注册试用 →"
-            ctaVariant="secondary"
+            ctaText={ultraTier.text}
+            onCtaClick={ultraTier.onClick}
+            ctaVariant={ultraTier.variant}
+            soldOut={ultraTier.soldOut}
           />
         </div>
       </section>
@@ -213,11 +228,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="border-t border-border py-7 text-center font-mono text-[10.5px] text-ink-3 max-w-[1200px] mx-auto px-6">
         <div className="flex flex-wrap justify-center gap-3.5 mb-2.5">
-          <a href="/pricing" className="hover:text-ink transition-colors">套餐</a>
-          <a className="hover:text-ink transition-colors cursor-pointer">文档</a>
-          <a className="hover:text-ink transition-colors cursor-pointer">条款</a>
-          <a className="hover:text-ink transition-colors cursor-pointer">隐私</a>
-          <a className="hover:text-ink transition-colors cursor-pointer">联系</a>
+          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
         </div>
         <div>© 2026 TokenBoss</div>
       </footer>
