@@ -1,8 +1,6 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
-import { TierCard } from '../components/TierCard';
-import { SectionHeader } from '../components/SectionHeader';
 import { TopNav } from '../components/TopNav';
 import { useAuth } from '../lib/auth';
 import openClawIcon from '../assets/agents/openclaw.svg';
@@ -90,21 +88,6 @@ function HeroTerminalDemo() {
 export default function Landing() {
   const { user } = useAuth();
   const isLoggedIn = !!user;
-  const navigate = useNavigate();
-  const goRegister = () => navigate('/register');
-
-  // v1.0 has no self-checkout. Visitors → /register; logged-in → contact 客服.
-  // Ultra is sold-out for logged-in users per spec, but visitors still see the
-  // try CTA so we can funnel them into /register first.
-  const tierCta = isLoggedIn
-    ? { text: '联系客服购买', onClick: undefined }
-    : { text: '免费开始 →', onClick: goRegister };
-  const ultraTier = isLoggedIn
-    ? { text: '名额已满', onClick: undefined, soldOut: true, variant: 'disabled' as const }
-    : { text: '免费开始 →', onClick: goRegister, soldOut: false, variant: 'secondary' as const };
-
-  const payAsYouGoCta = isLoggedIn ? '联系客服充值' : '免费开始 →';
-  const payAsYouGoHref = isLoggedIn ? undefined : '/register';
   return (
     <div className="min-h-screen bg-bg overflow-hidden">
       <TopNav current="home" />
@@ -157,65 +140,6 @@ export default function Landing() {
           <div className="hidden lg:block lg:pl-2">
             <HeroTerminalDemo />
           </div>
-        </div>
-      </section>
-
-      {/* Pricing tiles */}
-      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-10 md:py-12">
-        <SectionHeader num="01" cn="套餐" en="Membership" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mt-6">
-          <TierCard
-            name="PLUS"
-            pricePeriod="¥288 / 4 周"
-            dailyCap="$30 / 天"
-            models="Codex 系列"
-            ctaText={tierCta.text}
-            onCtaClick={tierCta.onClick}
-            ctaVariant="secondary"
-          />
-          <TierCard
-            name="SUPER"
-            pricePeriod="¥688 / 4 周"
-            dailyCap="$80 / 天"
-            models="Claude + Codex"
-            ctaText={tierCta.text}
-            onCtaClick={tierCta.onClick}
-            ctaVariant="primary"
-            featured
-          />
-          <TierCard
-            name="ULTRA"
-            pricePeriod="¥1688 / 4 周"
-            dailyCap="$720 / 天"
-            models="Claude + Codex + reasoning"
-            ctaText={ultraTier.text}
-            onCtaClick={ultraTier.onClick}
-            ctaVariant={ultraTier.variant}
-            soldOut={ultraTier.soldOut}
-          />
-        </div>
-      </section>
-
-      {/* Pay-as-you-go */}
-      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-10 md:py-12">
-        <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 border border-hairline rounded-xl mt-6 hover:border-border-2 transition-colors">
-          <div>
-            <div className="text-lg font-bold">¥1 = $1 美金</div>
-            <div className="text-sm text-ink-3 mt-1">永不过期 · 全模型解锁 · ¥50 起</div>
-          </div>
-          {payAsYouGoHref ? (
-            <Link
-              to={payAsYouGoHref}
-              className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap hover:border-ink transition-colors"
-            >
-              {payAsYouGoCta}
-            </Link>
-          ) : (
-            <a className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap cursor-pointer hover:border-ink transition-colors">
-              {payAsYouGoCta}
-            </a>
-          )}
         </div>
       </section>
 
