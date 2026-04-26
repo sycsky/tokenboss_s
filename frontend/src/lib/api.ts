@@ -11,8 +11,16 @@
  *                    in local dev; in prod this is a Lambda Function URL)
  */
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000";
-const CHAT_URL = (import.meta.env.VITE_CHAT_URL as string | undefined) ?? API_URL;
+// Prefer build-time Vite env, fall back to runtime injection via /env.js (Docker entrypoint)
+declare global { interface Window { __ENV__?: { VITE_API_URL?: string; VITE_CHAT_URL?: string } } }
+const API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ||
+  window.__ENV__?.VITE_API_URL ||
+  "http://localhost:3000";
+const CHAT_URL =
+  (import.meta.env.VITE_CHAT_URL as string | undefined) ||
+  window.__ENV__?.VITE_CHAT_URL ||
+  API_URL;
 
 export const CHAT_COMPLETIONS_URL = `${CHAT_URL.replace(/\/$/, "")}/v1/chat/completions`;
 

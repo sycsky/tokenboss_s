@@ -14,3 +14,13 @@ samconfig.toml
 
 # brainstorming visual companion
 .superpowers/
+
+# Playwright screenshots
+*.png
+
+# SQLite WAL/SHM (dev artifacts)
+*.db-shm
+*.db-wal
+
+# Sibling project (separate repo)
+clawd-on-desk/
