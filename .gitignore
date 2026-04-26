@@ -17,6 +17,7 @@ samconfig.toml
 
 # Playwright screenshots
 *.png
+!frontend/src/assets/**/*.png
 
 # SQLite WAL/SHM (dev artifacts)
 *.db-shm
