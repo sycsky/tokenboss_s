@@ -120,14 +120,22 @@ export function init(): void {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS verification_codes (
-      email      TEXT NOT NULL,
-      code       TEXT NOT NULL,
-      expiresAt  TEXT NOT NULL,
-      consumed   INTEGER NOT NULL DEFAULT 0,
-      createdAt  TEXT NOT NULL
+      email          TEXT NOT NULL,
+      code           TEXT NOT NULL,
+      expiresAt      TEXT NOT NULL,
+      consumed       INTEGER NOT NULL DEFAULT 0,
+      createdAt      TEXT NOT NULL,
+      failedAttempts INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_codes_email ON verification_codes(email, code);
   `);
+
+  // Idempotent migration: add failedAttempts column to pre-existing DBs.
+  try {
+    db.exec(`ALTER TABLE verification_codes ADD COLUMN failedAttempts INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore.
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage_log (
@@ -332,15 +340,30 @@ export function saveVerificationCode(email: string, code: string, ttlSeconds: nu
 }
 
 export function consumeVerificationCode(email: string, code: string): boolean {
-  const row = db.prepare(`
-    SELECT rowid AS id, expiresAt FROM verification_codes
-    WHERE email = ? AND code = ? AND consumed = 0
+  // Find the latest unconsumed code for this email (regardless of code value).
+  const latest = db.prepare(`
+    SELECT rowid AS id, code AS storedCode, expiresAt, failedAttempts FROM verification_codes
+    WHERE email = ? AND consumed = 0
     ORDER BY createdAt DESC LIMIT 1
-  `).get(email.toLowerCase(), code) as { id: number; expiresAt: string } | undefined;
-  if (!row) return false;
-  if (new Date(row.expiresAt) < new Date()) return false;
-  db.prepare(`UPDATE verification_codes SET consumed = 1 WHERE rowid = ?`).run(row.id);
-  return true;
+  `).get(email.toLowerCase()) as { id: number; storedCode: string; expiresAt: string; failedAttempts: number } | undefined;
+
+  if (!latest) return false;
+  if (new Date(latest.expiresAt) < new Date()) return false;
+
+  if (latest.storedCode === code) {
+    // Correct code — consume it.
+    db.prepare(`UPDATE verification_codes SET consumed = 1 WHERE rowid = ?`).run(latest.id);
+    return true;
+  }
+
+  // Wrong code — increment failedAttempts and lock out after 5 failures.
+  const newCount = latest.failedAttempts + 1;
+  if (newCount >= 5) {
+    db.prepare(`UPDATE verification_codes SET consumed = 1 WHERE rowid = ?`).run(latest.id);
+  } else {
+    db.prepare(`UPDATE verification_codes SET failedAttempts = ? WHERE rowid = ?`).run(newCount, latest.id);
+  }
+  return false;
 }
 
 export function recentCodeCount(email: string, sinceSeconds: number): number {

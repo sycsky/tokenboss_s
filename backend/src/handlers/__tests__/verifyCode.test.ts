@@ -77,16 +77,21 @@ describe('POST /v1/auth/verify-code', () => {
     expect(r2.statusCode).toBe(401);
   });
 
-  it('rejects multiple wrong-code guesses against valid email', async () => {
+  it('locks out code after 5 wrong-code guesses', async () => {
+    const { db } = await import('../../lib/store.js');
     await sendCodeHandler({ body: JSON.stringify({ email: 'brute@test.com' }) } as any);
-    // Try 5 random wrong codes — all should 401
+
+    // Capture the real code before brute-forcing so we can prove it gets locked.
+    const realCode = (db.prepare('SELECT code FROM verification_codes WHERE email = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1').get('brute@test.com') as any).code;
+
+    // 5 wrong attempts — all must return 401.
     for (const wrong of ['000000', '111111', '222222', '333333', '444444']) {
       const r = await verifyCodeHandler({ body: JSON.stringify({ email: 'brute@test.com', code: wrong }) } as any) as APIGatewayProxyStructuredResultV2;
       expect(r.statusCode).toBe(401);
     }
-    // Original real code is still consumable (no lockout in v1.0 — note this for production hardening)
-    const code = await getCodeForEmail('brute@test.com');
-    const r = await verifyCodeHandler({ body: JSON.stringify({ email: 'brute@test.com', code }) } as any) as APIGatewayProxyStructuredResultV2;
-    expect(r.statusCode).toBe(200);
+
+    // After 5 failures the original code must be invalidated (consumed=1).
+    const r = await verifyCodeHandler({ body: JSON.stringify({ email: 'brute@test.com', code: realCode }) } as any) as APIGatewayProxyStructuredResultV2;
+    expect(r.statusCode).toBe(401);
   });
 });
