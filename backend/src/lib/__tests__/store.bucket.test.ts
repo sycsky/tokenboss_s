@@ -42,4 +42,15 @@ describe('credit_bucket', () => {
     expect(list[0].skuType).toBe('plan_plus');
     expect(list[1].skuType).toBe('topup');
   });
+
+  it('excludes expired subscriptions from getActiveBucketsForUser', () => {
+    createBucket({
+      userId: 'u_expired', skuType: 'plan_plus', amountUsd: 840, dailyCapUsd: 30,
+      dailyRemainingUsd: 5, totalRemainingUsd: null,
+      startedAt: new Date(Date.now() - 30*86400e3).toISOString(),
+      expiresAt: new Date(Date.now() - 1000).toISOString(), // already expired
+      modeLock: 'auto_only', modelPool: 'codex_only',
+    });
+    expect(getActiveBucketsForUser('u_expired')).toHaveLength(0);
+  });
 });

@@ -268,7 +268,7 @@ export function getActiveBucketsForUser(userId: string): Bucket[] {
       `
     SELECT * FROM credit_bucket
     WHERE userId = ?
-      AND (expiresAt IS NULL OR expiresAt > datetime('now'))
+      AND (expiresAt IS NULL OR datetime(expiresAt) > datetime('now'))
       AND (
         (skuType IN ('plan_plus','plan_super','plan_ultra') AND COALESCE(dailyRemainingUsd, 0) > 0)
         OR (skuType IN ('trial','topup') AND COALESCE(totalRemainingUsd, 0) > 0)
