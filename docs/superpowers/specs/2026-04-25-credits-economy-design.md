@@ -1,8 +1,10 @@
 # Credits 经济模型 v1
 
-**Date:** 2026-04-25
+**Date:** 2026-04-25 (revised 2026-04-26)
 **Status:** Approved, pending implementation
 **Topic:** TokenBoss v1 的付费 / 计价 / 扣费 / 套餐 / 试用 模型
+
+**2026-04-26 修订**：Super 涨价 ¥588 → ¥688；周期单位 28 天 → 4 周（展示）；扣费优先级反转（套餐 → 充值）；日 cap 重置改 **作废 + 重置** 双事件；模型命名（GPT 池 → Codex 系列，全模型 → Claude + Codex）；top-up 5 档 ladder 删除（改纯 ¥1=$1 baseline）；onboarding 改 `set up tokenboss.com/skill.md` 一行咒语（替代 pairing code TB-XXX 流程）。
 
 ## Context
 
@@ -34,42 +36,52 @@
 
 ### 2. 套餐 SKU（v1 上线 2 档 + 1 档 "已售罄" 占位）
 
-| SKU | 实付 | 日额度 | 28 天累计上限 | 模型池 | 状态 |
+| SKU | 实付 | 日额度 | 4 周累计上限 | 模型池 | 状态 |
 |---|---|---|---|---|---|
-| **Plus** | `¥288 / 月` | `$30 / 天` | 最高 `$840` | 便宜模型池（GPT-5 / GPT-5-mini / Codex / Haiku） | ✅ v1 开放 |
-| **Super** | `¥588 / 月` | `$80 / 天` | 最高 `$2,240` | 全模型（含 Claude Sonnet / Opus） | ✅ v1 开放 |
-| **Ultra** | `¥1688 / 月` | `$720 / 天` | 最高 `$20,160` | 全模型 + 优先级 | 🔒 显示已售罄 |
+| **Plus** | `¥288 / 4 周` | `$30 / 天` | `≈ $840` | **Codex 系列**（GPT-5.5 / mini / Codex 等 OpenAI 模型） | ✅ v1 开放 |
+| **Super** | `¥688 / 4 周` | `$80 / 天` | `≈ $2,240` | **Claude + Codex 系列**（含 Sonnet 4.7 / Opus 4.7） | ✅ v1 开放 |
+| **Ultra** | `¥1688 / 4 周` | `$720 / 天` | `≈ $20,160` | Claude + Codex + reasoning（o1 / o3） | 🔒 显示已售罄 |
 
-**杠杆比递进设计（v16）**：3 档杠杆比刻意递进 — Plus `2.92×` → Super `3.81×` → Ultra `11.95×`。Super 比 Plus 多 ~30% 升档诱因，Ultra 是营销橱窗（"$20K 美金额度"），SOLD OUT 状态下不承担实际 margin。这跟"花得多比例更划算"的 SaaS 直觉对齐。
+**杠杆比 ×N 视觉化**：套餐卡显橙色 `×N` pill —— Plus `×3` (2.92x), Super `×4` (3.26x, 取 marketing 整数), Ultra `×12` (11.95x)。"标准价"baseline ¥1=$1 抬到顶部当锚卡，套餐相对它显倍数优惠。访客视图（未登录）Ultra 也显"免费注册试用 →"先把人引进 /auth；登录视图才显示"名额已满"。
 
-**Ultra 的 "已售罄" 显示策略**：让用户看到"还有更高档存在"，给将来留升级路径。**"已售罄"传递供不应求 + 稀缺感**，比"暂不开放"营销心理更强 —— 上线时一并展示，Phase 1.5 评估开放时机。
+**关键差异化**：套餐区分**靠模型池**而不靠日 cap 数字。Plus = Codex（GPT 系列）；Super 起含 Claude；Ultra 含 reasoning。
 
-**关键差异化**：套餐区分不靠"能用多少"靠"能用什么"。Plus = TokenBoss Auto 替你选；Super = 你自己选 Opus / GPT-5 / 等。
+**周期单位**：用户面统一显 **4 周**（更具象），后端实际仍按 28 天计。
 
-### 3. 日 cap + 28 天周期
+### 3. 日 cap + 4 周周期 · 作废 + 重置 双事件
 
-- 每日 0:00 重置当日额度（套餐日 cap 重新满血）
-- **当日 24:00 未用完作废**（不结转到次日，不累积）
-- 4 周共 28 天为一个完整周期，付款日为 D0
+每日 0:00 触发**两个独立事件**（顺序：**作废 → 重置**）—— 显式分开记录，让用户看到"昨天没用完的部分作废了 + 今天 cap 重新满血"两件事。
+
+| 事件 | 金额 | 触发条件 | 显示 |
+|---|---|---|---|
+| **作废** (`expire`) | `−daily_remaining_usd` | 仅在剩余 > 0 时记 | "昨日剩余作废 · 未用余额清零" 灰色 pill |
+| **重置** (`reset`) | `+daily_cap_usd` | 永远固定 +$cap，无条件每日记 | "日 cap 重置 · Plus $30" 绿色 pill |
+
+**三种实例**（Plus cap = $30）：
+- 昨天用 $25.43，今天 0:00 → `+$30 重置` + `−$4.57 作废`（2 条记录）
+- 昨天用满 $30，今天 0:00 → `+$30 重置`（仅 1 条，作废 = 0 不入账）
+- 昨天没用，今天 0:00 → `+$30 重置` + `−$30 作废`（视觉对消，2 条都入账保审计）
+
+**为什么分两条**：原方案是"净增量"单条记录（cap − 剩余），但用户看不出"昨天浪费了多少"。分开记账后审计清晰，每条事件都是确定性的。
+
+- **4 周（28 天）** = 一个完整周期，付款日为 D0
 - D27 23:59 周期结束，套餐 bucket 清零并失效
-- "28 天累计上限"是营销展示数字（= 日 cap × 28），不是真实可累积余额
+- "≈ $840 / $2,240 / $20,160" 是营销展示数字（= 日 cap × 28），不是真实可累积余额
 - v1 不做更细的 rate limit / 并发限制（按上游 API 实际承载力决定，内部参数）
 
-### 4. 一次性充值（top-up）
+### 4. 一次性充值（pay-as-you-go）· ¥1 = $1 baseline
 
-5 档心理价，**永不过期**，无折扣（已通过日 cap 给足实惠对比）：
+充值 = **标准价 baseline**，**¥1 = $1 美金额度**，**永不过期**，**全模型解锁**。
 
-| 档位 | 实付 | 到账 |
-|---|---|---|
-| 入门 | `¥9.9` | `$10` |
-| 小补 | `¥29.9` | `$30` |
-| 常用 | `¥58.8` | `$60` |
-| 大量 | `¥98` | `$100` |
-| 批量 | `¥288` | `$300` |
+- 入门 ¥50（最小起充）
+- 上不封顶，无 5 档预设 ladder
+- 无 bonus 优惠（之前的 ¥9.9 / ¥29.9 / ¥58.8 / ¥98 / ¥288 5 档已废）
 
-充值后所有模式（Auto + Manual 全模型）都解锁。Plus 套餐用户加买充值后可临时使用 Claude / Opus 等 Manual 模型。
+充值后**所有模式（Auto + Manual 全模型）都解锁**。Plus 套餐用户加买充值后可临时使用 Claude / Opus 等 Manual 模型。
 
-**订阅 vs 按量对比清晰**：同样付 ¥288，订阅给最高 $840 美金额度（约 2.92×），按量给 $288（1×）。订阅是高频用户的明显更优解；按量是低频 / 多模型用户的灵活解。
+**Pricing 页 baseline 对比**：充值 ¥1=$1（×1 baseline）vs Plus ¥288→$840（×3）vs Super ¥688→$2,240（×4）vs Ultra ¥1688→$20,160（×12）。订阅相对 baseline 的"几倍优惠"是营销主打。
+
+**v1.0 阶段**：充值入口在 Dashboard 余额卡 + Pricing 页底部"按量充值 ¥50 起"。CTA 都走客服微信，等 v1.1 同事接虎皮椒后开放 self-checkout。
 
 ### 5. 试用
 
@@ -100,11 +112,13 @@
 用户既有套餐余额（日 cap，会过期）+ 一次性充值（永不过期）时：
 
 ```
-1. 先扣 一次性充值余额  (永不过期)
-2. 后扣 套餐当日额度    (24:00 作废)
+1. 先扣 套餐当日额度    (24:00 作废 → 用不完就浪费，所以先用)
+2. 后扣 一次性充值余额  (永不过期 → 备用)
 ```
 
-**理由**：让用户感觉"我充的钱在被实实在在用"，套餐当日额度是基础保障；同时套餐每日作废能 incentive 用户用足，不会因优先扣套餐而觉得"我充的钱白放着"。
+**理由**（2026-04-26 修订）：套餐每日作废，先用 → 不浪费套餐 cap；充值永久，是备用 + 解锁全模型的工具。Plus 套餐用户加买充值能解锁 Claude，但只在套餐 cap 用完或选了非 Codex 模型时才动用充值。
+
+**之前 v15 的反向优先级（先扣充值）已废**：那个逻辑会让套餐 cap 浪费率变高（用户感觉"我有充值就先用充值，套餐 cap 等等"），实际更违反用户直觉。
 
 ### 8. 使用历史 / 透明度
 
@@ -112,15 +126,15 @@
 
 | 字段 | 内容 |
 |---|---|
-| 时间 | 调用时间戳 |
-| 类型 | 消耗 / 充值 / 退款 |
-| 客户端 | OpenClaw / Hermes / 等 Agent 标识 + logo |
-| 模式 | Auto / Manual |
+| 时间 | 调用时间戳 (`2026/04/26 9:41` 完整 timestamp，无"今天/昨天"分组) |
+| 类型 | **消耗** (橙) / **重置** (绿) / **作废** (灰) / **充值** (绿) / **退款** (灰) |
+| 来源 | OpenClaw / Hermes / 等 Agent 标识 + logo |
 | 模型 | `claude-sonnet-4` / `gpt-5.4-mini` / 等 |
-| Tokens | 输入 + 输出 token 数 |
-| 金额 | `−$X.XXXX` |
+| $ 变化 | `−$X.XXXX` (红) / `+$X.XX` (绿) / `−$X.XX` (灰，作废) |
 
-沿用现有 `frontend/src/screens/UsageHistory.tsx` 的结构（图表 + 表格），把"积分变化"列改为"金额（$）"+ 增加 Tokens 列 + 新增"模式"列区分 Auto / Manual。
+页面顶部加 **24h 消耗柱状图**（峰值小时高亮 accent-deep）+ 当前余额 pill。**砍掉的**：搜索框 / CSV 导出 / 用量(tokens)列 / "今天/昨天"分组行（per less-is-more 原则 + 借鉴 UniVibe 信息架构）。
+
+后端：SQLite `usage_log` 表已存在 → 加 `event_type` 字段（`consume` / `reset` / `expire` / `topup` / `refund`）。重置和作废不是 user-facing API 调用，由 cron 任务写入 log。
 
 ### 9. 套餐经济学（赚钱机制）
 
@@ -161,19 +175,23 @@
 | `model_pool` | `gpt_only` / `all` / null（即使用全模型） |
 | `created_at` | 购买时间 |
 
-**消耗顺序**（每次扣费时按以下排序）：
+**消耗顺序**（每次扣费时按以下排序，2026-04-26 翻转）：
 
 ```sql
 ORDER BY
   CASE
-    WHEN expires_at IS NULL THEN 0   -- topup（永不过期）优先
-    ELSE 1
+    WHEN expires_at IS NULL THEN 1   -- topup（永不过期）后扣
+    ELSE 0                            -- 套餐先扣（要趁今天用，0:00 会作废）
   END,
   expires_at ASC,                     -- 套餐之间按到期早的优先
   created_at ASC
 ```
 
-每日 0:00 cron 任务：所有 active 套餐 bucket 的 `daily_remaining_usd = daily_cap_usd`（重置当日额度，未用部分作废）。
+**每日 0:00 cron 任务**（双事件原子操作）：
+1. **作废 (expire)**：对每个 active 套餐 bucket，若 `daily_remaining_usd > 0` → 写一条 `usage_log` 记录 `event_type=expire, amount=−daily_remaining_usd`，并 set `daily_remaining_usd = 0`
+2. **重置 (reset)**：对每个 active 套餐 bucket，写一条 `usage_log` 记录 `event_type=reset, amount=+daily_cap_usd`，并 set `daily_remaining_usd = daily_cap_usd`
+
+两个动作必须在同一事务里完成（原子）。
 
 ### 模式锁 / 模型池实现
 
@@ -192,10 +210,11 @@ ORDER BY
 
 ### 前端展示
 
-- **Dashboard 主屏**：`$X.XX` 余额（Geist Mono 大数字，按当日剩余 + topup 余额合计） + 当前活跃 bucket 列表（Plus 还 N 天 / topup $X 不过期）+ 今日 / 累计消耗
-- **Billing 页**：3 张套餐卡（Plus + Super + Ultra "SOLD OUT"）+ 5 档 topup table + 支付方式选择
-- **使用历史页**：沿用现有 `UsageHistory.tsx` 结构，单位换 `$`
-- **接入指引页**：试用 $10 礼物卡视觉 + 接入命令
+- **控制台主屏**（dashboard-v1）：`$X.XX` 余额橙色 hero + 今日 cap 进度条 + 活跃 bucket 列表（套餐 / 充值 + 优先扣套餐 → 充值的提示） + 黑底"最近调用"strip + **接入中心卡** + 内嵌"最近使用历史"4 行 + 内嵌"API Key"列表 + 快捷链接。控制台 = 账号一切的入口，使用历史 / API Key 都收纳在内不再单独占顶导。
+- **套餐定价页**（pricing-v8）：顶部 baseline 锚卡 ¥1=$1 + 编号小节 01 标准价 / 02 套餐 + 3 张卡（Plus / Super 推荐 / Ultra 售罄） · 每卡 ×N 优惠 pill + ≈$X 总额度 + 仅 4 个关键数据（日 cap · 总额 · 倍数 · 模型） · "i" hover tooltip 露其余 + 编辑式克制（无销售感分隔条）
+- **使用历史页**（history-v1.2）：当前余额 pill + 24h 消耗柱状图 + 类型列（消耗/重置/作废/充值，颜色编码） + $变化列（红/绿/灰） + 完整 timestamp + 筛选 selects + 首/末页分页。删 CSV 导出 / 用量列 / 搜索框 / 日期分组
+- **账户设置页**（settings-v1）：仅邮箱 + 当前套餐 + 注册时间（无头像 / 显示名 / 最常用模型）+ 用量摘要（消耗 + 调用 2 项，无最常用模型）+ 操作（联系客服 + 退出登录）
+- **接入指引页**（manual-config-pc）：v1.0 改为 `set up tokenboss.com/skill.md` 一行咒语主路径 + 传统 4 步 fallback（折叠在二级 tab）
 
 ### Agent 内 in-chat 文本（仅文本 + 链接，无 UI 元素）
 
@@ -203,20 +222,21 @@ ORDER BY
 
 | 触发 | 回复模板 |
 |---|---|
-| Plus 用户切 Claude 模型 | "此模型需 Super 套餐或加买额度。升级：tokenboss.co/billing" |
-| 试用切付费模型 | "免费试用仅可用智能路由。升级：tokenboss.co/billing" |
-| 当日额度耗尽 | "今日额度已用完。明日 0:00 自动刷新，或立即加买额度：tokenboss.co/billing" |
-| 周期结束 | "本周期结束。续订：tokenboss.co/billing" |
-| 服务异常 | "服务暂时不可用，已切到备用模型。详情：tokenboss.co/status" |
+| Plus 用户切 Claude 模型 | "此模型需 Super 套餐或加买充值额度。升级：tokenboss.com/pricing" |
+| 试用切付费模型 | "免费试用仅可用智能路由。升级：tokenboss.com/pricing" |
+| 当日额度耗尽 | "今日额度已用完。明日 0:00 自动刷新，或立即加买额度：tokenboss.com/pricing" |
+| 周期结束 | "本周期结束。续订：tokenboss.com/pricing" |
+| 服务异常 | "服务暂时不可用，已切到备用模型。详情：tokenboss.com/status" |
 
 ## Open questions
 
 以下不影响经济模型骨架，但实施前需校准：
 
-1. **¥ 价微调**：Plus ¥288 / Super ¥588 / Ultra ¥1688 是定稿。如需汇率调整可 ±5%。
-2. **Auto 模式"省 X%"具体数字**：等 ClawRouter 部署后跑实测 benchmark 校准。
-3. **并发 / RPM 限制**：内部参数，按上游 API 实际承载力决定。
-4. **Ultra 何时实际开放**：v1 上线显示"已售罄"，Phase 1.5 看 Super 用户上限触顶频率决定开放时机。
+1. **¥ 价微调**：Plus ¥288 / Super ¥688 / Ultra ¥1688 是 2026-04-26 定稿。如需汇率调整可 ±5%。
+2. **Super ×4 vs ×3 marketing 倍数**：实际是 ¥688/$2,240 = 3.26x，pill 标 ×4 是 marketing 上调（×3 也对）。如需诚实精确，pricing 页改 ×3.3 或 ×3+。
+3. **Auto 模式"省 X%"具体数字**：等内置路由跑实测 benchmark 校准。
+4. **并发 / RPM 限制**：内部参数，按上游 API 实际承载力决定。
+5. **Ultra 何时实际开放**：v1 上线显示"已售罄"（已登录视图），未登录访客视图露 Ultra 卡 + "免费注册试用 →" CTA → 引到 /auth；用户登录后才告知名额已满。Phase 1.5 看 Super 上限触顶频率决定开放时机。
 
 ## Non-goals
 
