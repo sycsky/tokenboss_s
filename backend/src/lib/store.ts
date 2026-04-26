@@ -117,6 +117,33 @@ export function init(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_bucket_user ON credit_bucket(userId, skuType);
   `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS verification_codes (
+      email      TEXT NOT NULL,
+      code       TEXT NOT NULL,
+      expiresAt  TEXT NOT NULL,
+      consumed   INTEGER NOT NULL DEFAULT 0,
+      createdAt  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_codes_email ON verification_codes(email, code);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId      TEXT NOT NULL,
+      bucketId    TEXT,
+      eventType   TEXT NOT NULL CHECK (eventType IN ('consume','reset','expire','topup','refund')),
+      amountUsd   REAL NOT NULL,
+      model       TEXT,
+      source      TEXT,
+      tokensIn    INTEGER,
+      tokensOut   INTEGER,
+      createdAt   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(userId, createdAt DESC);
+  `);
 }
 
 // Initialise on module load (production default path).
@@ -292,4 +319,76 @@ export function expireBucketDaily(bucketId: string): number {
     `UPDATE credit_bucket SET dailyRemainingUsd = 0 WHERE id = ?`
   ).run(bucketId);
   return remaining;
+}
+
+// ---------- Public API — Verification Codes ----------
+
+export function saveVerificationCode(email: string, code: string, ttlSeconds: number): void {
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  db.prepare(`
+    INSERT INTO verification_codes (email, code, expiresAt, consumed, createdAt)
+    VALUES (?, ?, ?, 0, ?)
+  `).run(email.toLowerCase(), code, expiresAt, new Date().toISOString());
+}
+
+export function consumeVerificationCode(email: string, code: string): boolean {
+  const row = db.prepare(`
+    SELECT rowid AS id, expiresAt FROM verification_codes
+    WHERE email = ? AND code = ? AND consumed = 0
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(email.toLowerCase(), code) as { id: number; expiresAt: string } | undefined;
+  if (!row) return false;
+  if (new Date(row.expiresAt) < new Date()) return false;
+  db.prepare(`UPDATE verification_codes SET consumed = 1 WHERE rowid = ?`).run(row.id);
+  return true;
+}
+
+export function recentCodeCount(email: string, sinceSeconds: number): number {
+  const since = new Date(Date.now() - sinceSeconds * 1000).toISOString();
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM verification_codes
+    WHERE email = ? AND createdAt > ?
+  `).get(email.toLowerCase(), since) as { n: number };
+  return row.n;
+}
+
+// ---------- Public API — Usage Log ----------
+
+export type EventType = 'consume' | 'reset' | 'expire' | 'topup' | 'refund';
+
+export interface UsageRecord {
+  id: number;
+  userId: string;
+  bucketId: string | null;
+  eventType: EventType;
+  amountUsd: number;
+  model: string | null;
+  source: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  createdAt: string;
+}
+
+export function logUsage(r: Omit<UsageRecord, 'id' | 'createdAt'>): UsageRecord {
+  const createdAt = new Date().toISOString();
+  const result = db.prepare(`
+    INSERT INTO usage_log (userId, bucketId, eventType, amountUsd, model, source, tokensIn, tokensOut, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(r.userId, r.bucketId, r.eventType, r.amountUsd, r.model, r.source, r.tokensIn, r.tokensOut, createdAt);
+  return { id: Number(result.lastInsertRowid), createdAt, ...r };
+}
+
+export function getUsageForUser(userId: string, opts: { limit?: number; offset?: number; eventTypes?: EventType[]; from?: string; to?: string } = {}): UsageRecord[] {
+  const limit = opts.limit ?? 50;
+  const offset = opts.offset ?? 0;
+  let where = `userId = ?`;
+  const params: unknown[] = [userId];
+  if (opts.eventTypes?.length) {
+    where += ` AND eventType IN (${opts.eventTypes.map(() => '?').join(',')})`;
+    params.push(...opts.eventTypes);
+  }
+  if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
+  if (opts.to) { where += ` AND createdAt <= ?`; params.push(opts.to); }
+  return db.prepare(`SELECT * FROM usage_log WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset) as UsageRecord[];
 }
