@@ -19,12 +19,15 @@ import type {
 
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
+import { sendVerificationEmail } from "../lib/emailService.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
 import {
   getUser,
   getUserIdByEmail,
   putEmailIndex,
   putUser,
+  recentCodeCount,
+  saveVerificationCode,
   type UserRecord,
 } from "../lib/store.js";
 
@@ -254,3 +257,30 @@ export const meHandler = async (
   }
   return jsonResponse(200, { user: await buildUserProfile(auth.user) });
 };
+
+// ---------- POST /v1/auth/send-code ----------
+
+function genCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export async function sendCodeHandler(
+  evt: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> {
+  const body = parseJsonBody(evt);
+  if (!body) return jsonResponse(400, { error: "invalid_body" });
+
+  const email =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!EMAIL_RE.test(email)) return jsonResponse(400, { error: "invalid_email" });
+
+  if (recentCodeCount(email, 60) >= 1)
+    return jsonResponse(429, { error: "too_many_requests" });
+  if (recentCodeCount(email, 3600) >= 5)
+    return jsonResponse(429, { error: "too_many_requests" });
+
+  const code = genCode();
+  saveVerificationCode(email, code, 300);
+  await sendVerificationEmail(email, code);
+  return jsonResponse(200, { ok: true });
+}
