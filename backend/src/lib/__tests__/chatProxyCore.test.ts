@@ -285,3 +285,81 @@ describe('gateRequest', () => {
     }
   });
 });
+
+// ---------- gateRequest internal-secret auth ----------
+
+describe('gateRequest internal-secret auth', () => {
+  beforeEach(() => {
+    process.env.SQLITE_PATH = ':memory:';
+    delete process.env.TB_INTERNAL_SECRET;
+    init();
+  });
+
+  it('passes through (no gating) when TB_INTERNAL_SECRET not set', () => {
+    // When the env var is absent, bucket gating is skipped entirely for
+    // backward-compat with key-only callers — userId is treated as empty.
+    const result = gateRequest(
+      { 'x-tb-user-id': 'u_anyone' } as Record<string, string | undefined>,
+      'auto',
+      [],
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // userId must be '' — x-tb-user-id was not trusted without the secret
+      expect(result.gate.userId).toBe('');
+    }
+  });
+
+  it('passes when secret matches and user has a valid bucket', () => {
+    process.env.TB_INTERNAL_SECRET = 'my-secret';
+    // Re-init so the new env var takes effect in this sub-describe
+    init();
+    createBucket({
+      userId: 'u_secret', skuType: 'plan_super', amountUsd: 2240, dailyCapUsd: 80,
+      dailyRemainingUsd: 80, totalRemainingUsd: null,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 28 * 86400e3).toISOString(),
+      modeLock: 'none', modelPool: 'all',
+    });
+    const result = gateRequest(
+      { 'x-tb-user-id': 'u_secret', 'x-tb-internal-secret': 'my-secret' } as Record<string, string | undefined>,
+      'gpt-5.5',
+      [{ role: 'user', content: 'hi' }],
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.gate.userId).toBe('u_secret');
+    }
+  });
+
+  it('ignores x-tb-user-id (pass-through) when secret header is absent', () => {
+    process.env.TB_INTERNAL_SECRET = 'my-secret';
+    init();
+    // No x-tb-internal-secret header — spoofed user id must be ignored
+    const result = gateRequest(
+      { 'x-tb-user-id': 'u_someone' } as Record<string, string | undefined>,
+      'gpt-5.5',
+      [{ role: 'user', content: 'hi' }],
+    );
+    // Secret present in env but not in header → userId not trusted → pass-through
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.gate.userId).toBe('');
+    }
+  });
+
+  it('ignores x-tb-user-id (pass-through) when secret value mismatches', () => {
+    process.env.TB_INTERNAL_SECRET = 'my-secret';
+    init();
+    const result = gateRequest(
+      { 'x-tb-user-id': 'u_someone', 'x-tb-internal-secret': 'wrong-secret' } as Record<string, string | undefined>,
+      'gpt-5.5',
+      [],
+    );
+    // Wrong secret → userId not trusted → pass-through (userId '')
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.gate.userId).toBe('');
+    }
+  });
+});
