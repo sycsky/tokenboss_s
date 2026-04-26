@@ -46,6 +46,7 @@ import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { catalogJsonHandler } from "./handlers/catalogJson.js";
 import { skillMdHandler } from "./handlers/skillMd.js";
 import { usageHandler } from "./handlers/usageHandlers.js";
+import { listBucketsHandler } from "./handlers/buckets.js";
 import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
 import { runDailyExpireAndReset } from './lib/dailyCron.js';
@@ -75,6 +76,7 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/keys/{keyId}/reveal", handler: revealKeyHandler },
   { method: "DELETE", path: "/v1/keys/{keyId}", handler: deleteKeyHandler },
   { method: "GET", path: "/v1/usage", handler: usageHandler },
+  { method: "GET", path: "/v1/buckets", handler: listBucketsHandler as LambdaHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
   { method: "GET", path: "/v1/router/tiers", handler: routerTiersHandler },
   { method: "GET", path: "/skill.md", handler: skillMdHandler as LambdaHandler },
