@@ -70,3 +70,33 @@ describe('consumeForRequest', () => {
     expect(result.error).toBe('insufficient_balance');
   });
 });
+
+describe('consumeForRequest with trial bucket', () => {
+  it('drains trial bucket via totalRemainingUsd path', () => {
+    createBucket({
+      userId: 'u_trial',
+      skuType: 'trial',
+      amountUsd: 10,
+      dailyCapUsd: null,
+      dailyRemainingUsd: null,
+      totalRemainingUsd: 10,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 3600e3).toISOString(),
+      modeLock: 'auto_eco_only',
+      modelPool: 'eco_only',
+    });
+
+    const result = consumeForRequest({
+      userId: 'u_trial',
+      mode: 'auto',
+      modelId: 'gpt-5.5-mini',
+      modelTier: 'eco',
+      costUsd: 0.01,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.consumed.length).toBe(1);
+    expect(result.consumed[0].bucketSkuType).toBe('trial');
+    expect(result.consumed[0].amount).toBe(0.01);
+  });
+});

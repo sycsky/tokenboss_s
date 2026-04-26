@@ -60,9 +60,13 @@ export function consumeForRequest(req: BucketRequest): ConsumeResult {
     return { ok: false, error: 'model_locked', consumed: [] };
   }
 
-  const available = eligible.reduce((sum, b) => {
-    return sum + (b.skuType === 'topup' ? (b.totalRemainingUsd ?? 0) : (b.dailyRemainingUsd ?? 0));
-  }, 0);
+  // trial + topup buckets use totalRemainingUsd; subscription buckets use dailyRemainingUsd
+  const balanceOf = (b: typeof eligible[0]): number =>
+    (b.skuType === 'topup' || b.skuType === 'trial')
+      ? (b.totalRemainingUsd ?? 0)
+      : (b.dailyRemainingUsd ?? 0);
+
+  const available = eligible.reduce((sum, b) => sum + balanceOf(b), 0);
 
   if (available < req.costUsd) {
     return { ok: false, error: 'insufficient_balance', consumed: [] };
@@ -73,7 +77,7 @@ export function consumeForRequest(req: BucketRequest): ConsumeResult {
 
   for (const b of eligible) {
     if (remaining <= 0) break;
-    const have = b.skuType === 'topup' ? (b.totalRemainingUsd ?? 0) : (b.dailyRemainingUsd ?? 0);
+    const have = balanceOf(b);
     const take = Math.min(have, remaining);
     if (take > 0) {
       consumeBucket(b.id, take);
