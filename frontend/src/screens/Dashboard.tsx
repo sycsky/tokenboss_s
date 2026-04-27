@@ -188,7 +188,7 @@ export default function Dashboard() {
             <div className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2 mb-3">
               <div className="w-5 h-5 bg-accent border-2 border-ink rounded text-white font-mono text-[8.5px] font-bold flex items-center justify-center">OC</div>
               <span className="text-[12.5px] font-semibold text-ink flex-1">OpenClaw</span>
-              <span className="font-mono text-[9.5px] font-bold tracking-wider uppercase text-[#15803D] bg-[#DCFCE7] border-2 border-ink px-1.5 py-px rounded">
+              <span className="font-mono text-[9.5px] font-bold tracking-wider uppercase text-lime-stamp-ink bg-lime-stamp border-2 border-ink px-1.5 py-px rounded">
                 运行中
               </span>
             </div>
@@ -256,11 +256,11 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function BucketTag({ skuType }: { skuType: BucketRecord['skuType'] }) {
   const map: Record<BucketRecord['skuType'], { label: string; cls: string }> = {
-    trial:       { label: '试用',   cls: 'bg-[#FEF3C7] text-[#92400E]' },
-    topup:       { label: '不过期', cls: 'bg-[#DCFCE7] text-[#15803D]' },
-    plan_plus:   { label: '套餐',   cls: 'bg-accent-soft text-accent-ink' },
-    plan_super:  { label: '套餐',   cls: 'bg-accent-soft text-accent-ink' },
-    plan_ultra:  { label: '套餐',   cls: 'bg-accent-soft text-accent-ink' },
+    trial:       { label: '试用',   cls: 'bg-yellow-stamp text-yellow-stamp-ink' },
+    topup:       { label: '不过期', cls: 'bg-lime-stamp text-lime-stamp-ink' },
+    plan_plus:   { label: 'Plus',   cls: 'bg-cyan-stamp text-cyan-stamp-ink' },
+    plan_super:  { label: 'Super',  cls: 'bg-lavender text-lavender-ink' },
+    plan_ultra:  { label: 'Ultra',  cls: 'bg-accent text-white' },
   };
   const t = map[skuType];
   return (

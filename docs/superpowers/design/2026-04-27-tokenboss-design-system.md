@@ -380,7 +380,115 @@ When auditing an existing screen against this system:
 
 ---
 
-## 13 · Open questions / future iterations
+## 13 · Status palette + primitives
+
+Added 2026-04-27 after a Slock-pixel audit. The principle borrowed from
+Slock isn't "more color" — it's that **multiple utility colors can share
+the same 2px-ink + hard-offset frame**, so a viewer reads "what kind"
+from color and "where it lives" from frame. We adopt the frame; we keep
+our terracotta-led palette and reserve these utility tones for **status
+metadata only** (pills, type badges, avatar blocks). Never use them as
+primary brand color.
+
+### Status color palette
+
+| Token | Hex | Use |
+|---|---|---|
+| `bg-lime-stamp` / `text-lime-stamp-ink` | `#A3E635` / `#365314` | Verified, Current Plan, Active state — the "this is good / this is on" tone |
+| `bg-cyan-stamp` / `text-cyan-stamp-ink` | `#67E8F9` / `#155E75` | In-progress, processing, info — neutral-positive |
+| `bg-yellow-stamp` / `text-yellow-stamp-ink` | `#FACC15` / `#713F12` | Trial, attention, warning — needs eyes (don't confuse with brand terracotta CTA) |
+| `bg-lavender` / `text-lavender-ink` | `#C4B5FD` / `#4C1D95` | User avatars, paid-tier highlight (Plus / Super), neutral identity |
+
+The existing `green-soft / green-ink` and `accent-soft / accent-ink`
+pairs are still the **ink-on-cream** family — use them for soft pills on
+white cards. The new `*-stamp` family is the **ink-on-saturated** family
+— use it when the pill itself should pop, e.g. `IN PROGRESS` floating
+on a task card, `VERIFIED` next to an email.
+
+### StatusPill (primitive)
+
+```html
+<span class="font-mono text-[9.5px] font-bold tracking-[0.14em] uppercase
+             border-2 border-ink rounded px-1.5 py-0.5
+             bg-lime-stamp text-lime-stamp-ink">
+  已验证
+</span>
+```
+
+- `font-mono`, `tracking-[0.14em]`, `uppercase`. **Always.**
+- 2px ink border, no shadow.
+- Bg from the status palette, ink-text counterpart for legibility.
+- Padding stays tight (`px-1.5 py-0.5`) — pills are not buttons.
+
+### TabPill (primitive)
+
+The active/inactive tab toggle pattern — `控制台 · 套餐 · 账户`,
+`ACCOUNT · BROWSER · SERVER`, etc.
+
+```
+active:    bg-ink text-bg + 2px ink + 3px hard offset
+inactive:  bg-bg text-ink + 2px ink + 3px hard offset
+```
+
+Both states keep the frame. Color flip alone is the hierarchy. **Don't**
+remove the border on inactive tabs — it breaks the "all tabs are pills"
+read.
+
+### AvatarBlock (primitive)
+
+A solid-color square with the user's initial in mono. Replaces every
+gradient-circle avatar.
+
+```html
+<span class="w-9 h-9 bg-lavender border-2 border-ink rounded
+             font-mono font-bold text-ink flex items-center justify-center">
+  S
+</span>
+```
+
+- Always **square** (`rounded` = small 4px radius, never `rounded-full`).
+- Color comes from the status palette: `lavender` is the default user
+  block; `accent` for owner/admin; `lime-stamp` for agents/automated;
+  `bg-bg` (cream) for unset.
+- An optional 8px green dot at bottom-right indicates "online".
+
+### Plan card pattern (Slock-pixel pricing)
+
+Used in `Plans.tsx` and the in-app plans grid. Replaces the older
+`border-hairline rounded-xl` soft cards.
+
+```
+default tier:    bg-surface       + 2px ink + 3px hard shadow
+featured tier:   bg-surface-warm  + 2px ink + 4px hard shadow + accent CTA
+current tier:    bg-bg            + 3px ink frame + lime-stamp full-width CTA reading "当前套餐"
+coming soon:     bg-bg            + 2px dashed ink + opacity-60 + disabled CTA "敬请期待"
+```
+
+- Crossed-out old limits + **bold "Unlimited (limited time)"** is the
+  rhetorical move from Slock — earn it by actually offering more.
+- The CTA always sits **at the bottom of the card** as a full-width
+  block, not inline — that's what gives the grid its row-aligned rhythm.
+
+### Modal pattern
+
+Modals follow the same hard-edge construction:
+
+```
+overlay:   bg-ink/60
+panel:     bg-surface + 2px ink + 4px hard offset shadow + rounded-md
+header:    mono uppercase title (e.g. "EDIT CHANNEL") + small × close pill
+footer:    Cancel (secondary) / Save (primary) / [Destructive] (red)
+           — destructive actions sit on a separator below primary actions,
+             not crammed inline
+```
+
+A destructive action never sits next to a Cancel button — it gets its
+own row, with a visible hairline separator above it. Slock does this
+well; we adopt it.
+
+---
+
+## 14 · Open questions / future iterations
 
 - **Login / Register flow** — needs Slock-pixel pass. Currently uses raw form inputs without our 2px-border treatment. Audit pending.
 - **Dashboard** — same. The post-login surface should still feel like the same brand. Audit pending.

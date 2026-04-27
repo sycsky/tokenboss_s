@@ -65,11 +65,11 @@ export default function Settings() {
             label="邮箱状态"
             value={
               user?.emailVerified ? (
-                <span className="font-mono text-[12px] font-bold uppercase tracking-wider px-2 py-0.5 bg-[#DCFCE7] text-[#15803D] border-2 border-ink rounded">
+                <span className="font-mono text-[12px] font-bold uppercase tracking-wider px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
                   已验证
                 </span>
               ) : (
-                <span className="font-mono text-[12px] font-bold uppercase tracking-wider px-2 py-0.5 bg-[#FEF3C7] text-[#92400E] border-2 border-ink rounded">
+                <span className="font-mono text-[12px] font-bold uppercase tracking-wider px-2 py-0.5 bg-yellow-stamp text-yellow-stamp-ink border-2 border-ink rounded">
                   待验证
                 </span>
               )
