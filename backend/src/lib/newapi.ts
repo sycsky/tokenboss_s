@@ -48,6 +48,23 @@ export class NewapiError extends Error {
   }
 }
 
+// ---------- Quota unit conversion ----------
+//
+// newapi stores quotas in raw "units" where 500,000 ≈ $1. All conversions
+// between USD and newapi units must go through these helpers — never write
+// `* 500_000` inline. Get this wrong by 1000x and you'll either give every
+// free user a planet's worth of credits or charge $30/day plans 0.06 cents.
+
+const NEWAPI_UNITS_PER_USD = 500_000;
+
+export function usdToNewapiQuota(usd: number): number {
+  return Math.round(usd * NEWAPI_UNITS_PER_USD);
+}
+
+export function newapiQuotaToUsd(quota: number): number {
+  return quota / NEWAPI_UNITS_PER_USD;
+}
+
 // ---------- Fetch core ----------
 
 async function req<T>(
