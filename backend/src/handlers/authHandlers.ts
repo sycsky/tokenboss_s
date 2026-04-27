@@ -452,6 +452,35 @@ export async function verifyCodeHandler(
   let isNew = false;
   if (!userId) {
     userId = `u_${randomBytes(10).toString("hex")}`;
+
+    // Provision the newapi-side account up front so this user can
+    // immediately create keys and call /v1/chat/completions. The
+    // password-register flow does this too — we mirror it here so
+    // the email-code path doesn't ship a half-provisioned user.
+    let newapiUserId: number | undefined;
+    let newapiPassword: string | undefined;
+    if (isNewapiConfigured()) {
+      const newapiUsername = userId.slice(2);
+      newapiPassword = randomBytes(12).toString("base64url");
+      try {
+        const provisioned = await newapi.provisionUser({
+          username: newapiUsername,
+          password: newapiPassword,
+          display_name: newapiUsername,
+          email,
+          quota: getSignupQuota(),
+        });
+        newapiUserId = provisioned.newapiUserId;
+      } catch (err) {
+        const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+        console.error(`[verifyCode] newapi provisioning failed for ${userId}:`, msg);
+        return jsonResponse(502, {
+          error: "newapi_provision_failed",
+          message: "Could not provision account on metering service. Please try again.",
+        });
+      }
+    }
+
     putUser({
       userId,
       email,
@@ -459,10 +488,14 @@ export async function verifyCodeHandler(
       phone: undefined,
       passwordHash: undefined,
       createdAt: new Date().toISOString(),
-      newapiUserId: undefined,
-      newapiPassword: undefined,
+      // The act of consuming the verify-code IS proof the user owns
+      // the inbox — mark verified so we don't pester them again.
+      emailVerified: true,
+      newapiUserId,
+      newapiPassword,
     });
     isNew = true;
+
     // Grant trial bucket: $10 / 24h / forced ECO
     createBucket({
       userId,
