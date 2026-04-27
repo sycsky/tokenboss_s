@@ -10,7 +10,6 @@ import OnboardSuccess from './screens/OnboardSuccess';
 import Dashboard from './screens/Dashboard';
 import UsageHistory from './screens/UsageHistory';
 import Settings from './screens/Settings';
-import Keys from './screens/Keys';
 import Plans from './screens/Plans';
 import Primitive from './screens/Primitive';
 import Payment from './screens/Payment';
@@ -35,7 +34,6 @@ export default function App() {
       <Route path="/console" element={<RequireAuth><Dashboard /></RequireAuth>} />
       <Route path="/console/history" element={<RequireAuth><UsageHistory /></RequireAuth>} />
       <Route path="/console/account" element={<RequireAuth><Settings /></RequireAuth>} />
-      <Route path="/console/keys" element={<RequireAuth><Keys /></RequireAuth>} />
 
       <Route path="/pricing" element={<Plans />} />
       <Route path="/primitive" element={<Primitive />} />

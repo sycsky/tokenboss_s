@@ -4,11 +4,13 @@ import { useAuth } from '../lib/auth';
 import {
   api,
   type BucketRecord,
+  type CreatedProxyKey,
   type ProxyKeySummary,
   type UsageAggregateGroup,
   type UsageDetailResponse,
 } from '../lib/api';
 import { APIKeyList, type KeyStats } from '../components/APIKeyList';
+import { CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
 import { UsageRow } from '../components/UsageRow';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 import { AppNav, SectionLabel } from '../components/AppNav';
@@ -201,6 +203,27 @@ export default function Dashboard() {
   const [contactReason, setContactReason] = useState<
     'upgrade' | 'renew' | 'topup' | 'general' | null
   >(null);
+
+  // Inline key management — Create → Reveal → Delete all live on this
+  // page now. The reveal stage owns the freshly-minted plaintext key
+  // (one-shot), then `closeRevealAndRefresh` clears it and reloads the
+  // list so the new entry shows up.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [justCreated, setJustCreated] = useState<CreatedProxyKey | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProxyKeySummary | null>(null);
+
+  function handleCreated(created: CreatedProxyKey) {
+    setCreateOpen(false);
+    setJustCreated(created);
+    void reloadKeys();
+  }
+  function closeReveal() {
+    setJustCreated(null);
+  }
+  async function handleDeleted() {
+    setDeleteTarget(null);
+    await reloadKeys();
+  }
 
   if (loading) {
     return (
@@ -482,7 +505,13 @@ export default function Dashboard() {
             <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
               API KEY
             </div>
-            <APIKeyList keys={keys} loadError={keysError} keyStats={keyStats} onChanged={reloadKeys} />
+            <APIKeyList
+              keys={keys}
+              loadError={keysError}
+              keyStats={keyStats}
+              onCreateClick={() => setCreateOpen(true)}
+              onDeleteClick={setDeleteTarget}
+            />
           </section>
 
           {/* Recent usage — only when there's something to show. Empty
@@ -521,6 +550,23 @@ export default function Dashboard() {
         open={contactReason !== null}
         onClose={() => setContactReason(null)}
         reason={contactReason ?? undefined}
+      />
+
+      <CreateKeyModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+      />
+      <RevealKeyModal
+        open={justCreated !== null}
+        onClose={closeReveal}
+        created={justCreated}
+      />
+      <DeleteKeyModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        target={deleteTarget}
+        onDeleted={handleDeleted}
       />
     </div>
   );

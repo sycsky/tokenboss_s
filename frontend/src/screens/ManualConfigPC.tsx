@@ -81,7 +81,7 @@ export default function ManualConfigPC() {
               title="创建一把 API Key"
               body={
                 <span>
-                  到 <Link to="/console/keys" className="text-accent font-semibold underline underline-offset-2">控制台 / API Keys</Link> 点「+ 创建」。
+                  到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 右栏 API KEY 区，点「+ 创建 API Key」。
                   完整 key 只在创建后的弹窗里显示一次，<span className="font-semibold text-ink">立即复制保存</span>。
                 </span>
               }
