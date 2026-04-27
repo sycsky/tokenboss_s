@@ -42,6 +42,12 @@ import {
   revealKeyHandler,
 } from "./handlers/keysHandlers.js";
 import { modelsHandler } from "./handlers/modelsHandler.js";
+import {
+  createOrderHandler,
+  getOrderHandler,
+  listOrdersHandler,
+} from "./handlers/paymentHandlers.js";
+import { epusdtWebhookHandler } from "./handlers/paymentWebhook.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { usageHandler } from "./handlers/usageHandlers.js";
 import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
@@ -74,6 +80,10 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/usage", handler: usageHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
   { method: "GET", path: "/v1/router/tiers", handler: routerTiersHandler },
+  { method: "POST", path: "/v1/billing/orders", handler: createOrderHandler },
+  { method: "GET", path: "/v1/billing/orders", handler: listOrdersHandler },
+  { method: "GET", path: "/v1/billing/orders/{orderId}", handler: getOrderHandler },
+  { method: "POST", path: "/v1/billing/webhook/epusdt", handler: epusdtWebhookHandler },
 ];
 
 /** Routes that bypass the buffered Lambda adapter and stream directly. */

@@ -37,6 +37,26 @@ export interface UserRecord {
   newapiPassword?: string;
 }
 
+export type OrderStatus = "pending" | "paid" | "expired" | "failed";
+export type PaymentChannel = "epusdt" | "xunhupay";
+export type PlanId = "basic" | "standard" | "pro";
+
+export interface OrderRecord {
+  orderId: string;
+  userId: string;
+  planId: PlanId;
+  channel: PaymentChannel;
+  amountCNY: number;
+  amountActual?: number;
+  status: OrderStatus;
+  upstreamTradeId?: string;
+  upstreamPaymentUrl?: string;
+  blockTxId?: string;
+  receiveAddress?: string;
+  createdAt: string;
+  paidAt?: string;
+}
+
 // ---------- Database init ----------
 
 const DB_PATH = process.env.DATABASE_PATH ?? "data/tokenboss.db";
@@ -69,6 +89,25 @@ db.exec(`
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
     ON users(email) WHERE email IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS orders (
+    orderId            TEXT PRIMARY KEY,
+    userId             TEXT NOT NULL,
+    planId             TEXT NOT NULL,
+    channel            TEXT NOT NULL,
+    amountCNY          REAL NOT NULL,
+    amountActual       REAL,
+    status             TEXT NOT NULL,
+    upstreamTradeId    TEXT,
+    upstreamPaymentUrl TEXT,
+    blockTxId          TEXT,
+    receiveAddress     TEXT,
+    createdAt          TEXT NOT NULL,
+    paidAt             TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_orders_user
+    ON orders(userId, createdAt DESC);
 `);
 
 // Lightweight migrations — add missing columns on pre-existing dev DBs.
@@ -93,6 +132,45 @@ const stmts = {
       (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @newapiUserId, @newapiPassword)
   `),
   getUserByEmail: db.prepare(`SELECT userId FROM users WHERE email = ?`),
+
+  insertOrder: db.prepare(`
+    INSERT INTO orders
+      (orderId, userId, planId, channel, amountCNY, amountActual, status,
+       upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
+       createdAt, paidAt)
+    VALUES
+      (@orderId, @userId, @planId, @channel, @amountCNY, @amountActual, @status,
+       @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
+       @createdAt, @paidAt)
+  `),
+  getOrder: db.prepare(`SELECT * FROM orders WHERE orderId = ?`),
+  listOrdersByUser: db.prepare(
+    `SELECT * FROM orders WHERE userId = ? ORDER BY createdAt DESC LIMIT ?`,
+  ),
+  attachUpstream: db.prepare(`
+    UPDATE orders
+       SET upstreamTradeId = @upstreamTradeId,
+           upstreamPaymentUrl = @upstreamPaymentUrl,
+           amountActual = @amountActual
+     WHERE orderId = @orderId
+  `),
+  // Conditional update: only flip pending→paid. RowsChanged=0 means the
+  // row was already paid (or expired/failed) — duplicate webhooks become
+  // no-ops, giving us idempotent settlement.
+  markPaidIfPending: db.prepare(`
+    UPDATE orders
+       SET status = 'paid',
+           paidAt = @paidAt,
+           amountActual = COALESCE(@amountActual, amountActual),
+           blockTxId = COALESCE(@blockTxId, blockTxId),
+           receiveAddress = COALESCE(@receiveAddress, receiveAddress)
+     WHERE orderId = @orderId AND status = 'pending'
+  `),
+  markStatus: db.prepare(`
+    UPDATE orders
+       SET status = @status
+     WHERE orderId = @orderId AND status = 'pending'
+  `),
 };
 
 // ---------- Row → Record mappers ----------
@@ -107,6 +185,24 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     createdAt: row.createdAt as string,
     newapiUserId: (row.newapiUserId as number) ?? undefined,
     newapiPassword: (row.newapiPassword as string) ?? undefined,
+  };
+}
+
+function rowToOrder(row: Record<string, unknown>): OrderRecord {
+  return {
+    orderId: row.orderId as string,
+    userId: row.userId as string,
+    planId: row.planId as PlanId,
+    channel: row.channel as PaymentChannel,
+    amountCNY: row.amountCNY as number,
+    amountActual: (row.amountActual as number) ?? undefined,
+    status: row.status as OrderStatus,
+    upstreamTradeId: (row.upstreamTradeId as string) ?? undefined,
+    upstreamPaymentUrl: (row.upstreamPaymentUrl as string) ?? undefined,
+    blockTxId: (row.blockTxId as string) ?? undefined,
+    receiveAddress: (row.receiveAddress as string) ?? undefined,
+    createdAt: row.createdAt as string,
+    paidAt: (row.paidAt as string) ?? undefined,
   };
 }
 
@@ -141,4 +237,76 @@ export async function putEmailIndex(_email: string, _userId: string): Promise<vo
   // Email uniqueness is enforced by the UNIQUE index on users.email.
   // This function is kept for API compatibility but is now a no-op —
   // the email is written as part of putUser().
+}
+
+// ---------- Orders ----------
+
+export async function createOrder(rec: OrderRecord): Promise<void> {
+  stmts.insertOrder.run({
+    orderId: rec.orderId,
+    userId: rec.userId,
+    planId: rec.planId,
+    channel: rec.channel,
+    amountCNY: rec.amountCNY,
+    amountActual: rec.amountActual ?? null,
+    status: rec.status,
+    upstreamTradeId: rec.upstreamTradeId ?? null,
+    upstreamPaymentUrl: rec.upstreamPaymentUrl ?? null,
+    blockTxId: rec.blockTxId ?? null,
+    receiveAddress: rec.receiveAddress ?? null,
+    createdAt: rec.createdAt,
+    paidAt: rec.paidAt ?? null,
+  });
+}
+
+export async function getOrder(orderId: string): Promise<OrderRecord | null> {
+  const row = stmts.getOrder.get(orderId) as Record<string, unknown> | undefined;
+  return row ? rowToOrder(row) : null;
+}
+
+export async function listOrdersByUser(
+  userId: string,
+  limit = 50,
+): Promise<OrderRecord[]> {
+  const rows = stmts.listOrdersByUser.all(userId, limit) as Record<string, unknown>[];
+  return rows.map(rowToOrder);
+}
+
+export async function attachUpstreamFields(args: {
+  orderId: string;
+  upstreamTradeId: string;
+  upstreamPaymentUrl: string;
+  amountActual: number;
+}): Promise<void> {
+  stmts.attachUpstream.run(args);
+}
+
+/**
+ * Settle a payment. Returns true on the first successful pending→paid
+ * transition; subsequent calls (duplicate webhooks) return false without
+ * mutating the row. Callers use this to decide whether to credit balance.
+ */
+export async function markOrderPaidIfPending(args: {
+  orderId: string;
+  paidAt: string;
+  amountActual?: number;
+  blockTxId?: string;
+  receiveAddress?: string;
+}): Promise<boolean> {
+  const result = stmts.markPaidIfPending.run({
+    orderId: args.orderId,
+    paidAt: args.paidAt,
+    amountActual: args.amountActual ?? null,
+    blockTxId: args.blockTxId ?? null,
+    receiveAddress: args.receiveAddress ?? null,
+  });
+  return result.changes > 0;
+}
+
+export async function markOrderStatus(args: {
+  orderId: string;
+  status: Exclude<OrderStatus, "paid">;
+}): Promise<boolean> {
+  const result = stmts.markStatus.run(args);
+  return result.changes > 0;
 }

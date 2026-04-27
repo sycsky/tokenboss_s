@@ -5,7 +5,7 @@ FROM node:20-alpine AS build
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY backend/package*.json .
-RUN npm ci
+RUN npm ci --include=dev
 COPY backend/ .
 RUN npm run build
 
@@ -16,6 +16,6 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
 COPY --from=build /app/data ./data
 COPY --from=build /app/package.json ./package.json
-EXPOSE 3000
+EXPOSE 8080
 ENV NODE_ENV=production
 CMD ["node", "dist/local.js"]

@@ -11,3 +11,4 @@ samconfig.toml
 .playwright-mcp/
 .worktrees/
 .gstack/
+vendor/
