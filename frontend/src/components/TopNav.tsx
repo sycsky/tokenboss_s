@@ -21,13 +21,17 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
   const isLoggedIn = !!user;
   const dark = theme === 'dark';
 
-  const linkActive = dark ? 'text-white' : 'text-ink';
-  const linkInactive = dark
+  const inactive = dark
     ? 'text-white/65 hover:text-white'
     : 'text-ink-2 hover:text-ink';
+  const activePill = dark
+    ? 'bg-white text-ink shadow-[2px_2px_0_0_#FFFFFF]/40'
+    : 'bg-ink text-bg shadow-[2px_2px_0_0_#1C1917]/30';
 
   const navLink = (active: boolean) =>
-    `text-[13px] font-medium transition-colors ${active ? linkActive : linkInactive}`;
+    active
+      ? `${activePill} px-3 py-1 rounded-md text-[13px] font-semibold transition-colors`
+      : `text-[13px] font-medium transition-colors ${inactive}`;
 
   // On /primitive (an independent page) we hide the home-related side links.
   const onPrimitive = current === 'primitive';

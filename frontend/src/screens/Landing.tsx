@@ -343,7 +343,7 @@ export default function Landing() {
               免费开始 · 送 $10 体验额度 · 无需绑卡。
             </p>
             <div className="flex items-center justify-center gap-5 flex-wrap">
-              <Link to="/register" className={slockBtn('dark')}>
+              <Link to="/register" className={slockBtn('secondary')}>
                 免费开始 →
               </Link>
               <span className="text-white/90 text-[14px]">
