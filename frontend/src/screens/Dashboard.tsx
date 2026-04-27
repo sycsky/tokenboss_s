@@ -13,6 +13,7 @@ import { UsageRow } from '../components/UsageRow';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
+import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
@@ -94,6 +95,12 @@ export default function Dashboard() {
   const [keysError, setKeysError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Plaintext default-key value for the inline spell (right aside).
+  // Refreshed whenever `keys` changes; revealed via /v1/keys/{id}/reveal
+  // so the user can re-copy the full spell on a new machine without
+  // hunting for a separate dialog.
+  const [defaultKeyPlain, setDefaultKeyPlain] = useState<string | null>(null);
+
   async function reloadKeys() {
     try {
       const r = await api.listKeys();
@@ -103,6 +110,27 @@ export default function Dashboard() {
       setKeysError((e as Error).message);
     }
   }
+
+  useEffect(() => {
+    if (keys.length === 0) {
+      setDefaultKeyPlain(null);
+      return;
+    }
+    const target = keys.find((k) => k.label === 'default') ?? keys[0];
+    let cancelled = false;
+    api
+      .revealKey(target.keyId)
+      .then((r) => {
+        if (!cancelled) setDefaultKeyPlain(r.key);
+      })
+      .catch(() => {
+        // Silent — the masked key list below still gives the user a way
+        // to find / copy their key from the management view.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [keys]);
 
   useEffect(() => {
     Promise.all([
@@ -119,6 +147,7 @@ export default function Dashboard() {
 
   const agents = useMemo(() => shapeAgents(agentGroups), [agentGroups]);
   const keyStats = useMemo(() => shapeKeyStats(keyHintGroups), [keyHintGroups]);
+  const noActivity = (usage.totals?.calls ?? 0) === 0;
 
   const balanceUsd = buckets.reduce((sum, b) => {
     if (b.skuType === 'topup' || b.skuType === 'trial') return sum + (b.totalRemainingUsd ?? 0);
@@ -132,11 +161,46 @@ export default function Dashboard() {
   const dailyUsed = dailyCap - dailyRemaining;
   const dailyPct = dailyCap > 0 ? Math.min(100, (dailyUsed / dailyCap) * 100) : 0;
 
-  const planTag = planBucket
-    ? `${planBucket.skuType.replace('plan_', '').toUpperCase()} 套餐 · 还 ${Math.ceil((new Date(planBucket.expiresAt!).getTime() - Date.now()) / 86400e3)} 天`
-    : trialBucket
-      ? `TRIAL · 还 ${Math.max(0, Math.ceil((new Date(trialBucket.expiresAt!).getTime() - Date.now()) / 3600e3))} 小时`
-      : '无活跃套餐';
+  // Live trial countdown — ticks once a second, only when there's a
+  // trial bucket whose expiry is in the future. The hero shows it as a
+  // mono HH:MM:SS so the urgency carried over from /onboard/success
+  // doesn't get lost the moment the user lands on /console.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!trialBucket?.expiresAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [trialBucket?.expiresAt]);
+  const trialSecRemaining = trialBucket?.expiresAt
+    ? Math.max(0, Math.floor((new Date(trialBucket.expiresAt).getTime() - now) / 1000))
+    : 0;
+  const tH = String(Math.floor(trialSecRemaining / 3600)).padStart(2, '0');
+  const tM = String(Math.floor((trialSecRemaining % 3600) / 60)).padStart(2, '0');
+  const tS = String(trialSecRemaining % 60).padStart(2, '0');
+  const trialClock = `${tH}:${tM}:${tS}`;
+
+  // Plan tier metadata — chip color follows the status palette so
+  // each tier reads at a glance without needing to read the label.
+  const planTier = planBucket?.skuType.replace('plan_', '').toUpperCase() ?? '';
+  const planChipClass =
+    planBucket?.skuType === 'plan_plus' ? 'bg-cyan-stamp text-cyan-stamp-ink'
+    : planBucket?.skuType === 'plan_super' ? 'bg-lavender text-lavender-ink'
+    : planBucket?.skuType === 'plan_ultra' ? 'bg-accent text-white'
+    : '';
+  const planDaysRemaining = planBucket?.expiresAt
+    ? Math.max(0, Math.ceil((new Date(planBucket.expiresAt).getTime() - Date.now()) / 86400e3))
+    : 0;
+
+  // The balance + trial-clock combo replaces the standalone 试用余额
+  // card below. Only render the bucket-list section when there's
+  // something the hero can't already say.
+  const showBucketList = buckets.some((b) => b.skuType !== 'trial') || buckets.length > 1;
+
+  // Contact-sales modal — every paid action (upgrade / renew / topup)
+  // routes through here in v1 since there's no self-checkout yet.
+  const [contactReason, setContactReason] = useState<
+    'upgrade' | 'renew' | 'topup' | 'general' | null
+  >(null);
 
   if (loading) {
     return (
@@ -159,23 +223,75 @@ export default function Dashboard() {
       )}
 
       <main className="max-w-[1200px] mx-auto px-5 sm:px-9 pt-5 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
-        {/* Balance hero — full width across both columns */}
+        {/* Balance hero — adapts by user state:
+              · plan: today's daily quota leads, plan tier chip, days
+                remaining in the cycle, "升级/续费 →" → contact modal
+              · trial / topup: total balance leads, trial chip + 24h
+                clock OR topup chip, "充值 →" → /pricing */}
         <section
-          className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] p-6 sm:p-7 mb-5"
+          className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5 flex flex-wrap items-center gap-x-6 gap-y-3"
         >
-          <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85 mb-3">
-            当前余额
-          </div>
-          <div className="font-mono text-[60px] sm:text-[88px] font-bold leading-[0.95] mb-2">
-            <span className="text-[28px] sm:text-[42px] opacity-70 align-top mr-1">$</span>
-            {balanceParts[0]}
-            <span className="opacity-65">.{balanceParts[1]}</span>
-          </div>
-          <div className="font-mono text-[12px] tracking-[0.08em] opacity-90 mb-5">{planTag}</div>
-          <div className="flex flex-wrap gap-3 max-w-md">
-            <Link to="/pricing" className={slockBtn('secondary')}>充值 →</Link>
-            <a className={slockBtn('dark') + ' cursor-pointer'}>联系客服</a>
-          </div>
+          {planBucket ? (
+            <>
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                  今日剩
+                </span>
+                <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
+                  <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
+                  {dailyRemaining.toFixed(2)}
+                  <span className="opacity-60 text-[18px] sm:text-[22px] ml-2">/ ${dailyCap}</span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={
+                    `font-mono text-[9.5px] tracking-[0.16em] uppercase font-bold px-1.5 py-0.5 ${planChipClass} border-2 border-ink rounded`
+                  }
+                >
+                  {planTier}
+                </span>
+                <span className="font-mono text-[13px] font-bold leading-none">
+                  本月还 {planDaysRemaining} 天
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setContactReason(planBucket.skuType === 'plan_ultra' ? 'renew' : 'upgrade')}
+                className={slockBtn('secondary') + ' ml-auto'}
+              >
+                {planBucket.skuType === 'plan_ultra' ? '续费 →' : '升级 →'}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                  当前余额
+                </span>
+                <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
+                  <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
+                  {balanceParts[0]}
+                  <span className="opacity-65">.{balanceParts[1]}</span>
+                </span>
+              </div>
+
+              {trialBucket && trialSecRemaining > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[9.5px] tracking-[0.16em] uppercase font-bold px-1.5 py-0.5 bg-yellow-stamp text-yellow-stamp-ink border-2 border-ink rounded">
+                    试用
+                  </span>
+                  <span className="font-mono text-[13px] font-bold tabular-nums leading-none">
+                    剩 {trialClock}
+                  </span>
+                </div>
+              )}
+
+              <Link to="/pricing" className={slockBtn('secondary') + ' ml-auto'}>充值 →</Link>
+            </>
+          )}
         </section>
 
         {/* MAIN COL */}
@@ -223,7 +339,10 @@ export default function Dashboard() {
             </section>
           )}
 
-          {/* Active buckets */}
+          {/* Active buckets — only show when there's something the hero
+              can't already say (paid topup / plan, or multiple buckets).
+              For a fresh trial-only user this would be a verbatim repeat. */}
+          {showBucketList && (
           <section>
             <SectionLabel>活跃额度池</SectionLabel>
             <div className="space-y-2.5">
@@ -259,19 +378,39 @@ export default function Dashboard() {
               )}
             </div>
           </section>
+          )}
 
-          {/* Today stats */}
-          <section className="grid grid-cols-2 gap-2.5">
-            <div className={`${card} p-4`}>
-              <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
-              <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
-              <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
-            </div>
-            <div className={`${card} p-4`}>
-              <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
-              <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(2)}</div>
-            </div>
-          </section>
+          {/* Today stats — full numbers only after the first call has
+              landed. Before that, an empty 0 / $0 grid feels like a
+              sterile sandbox; the waiting card carries the story. */}
+          {noActivity ? (
+            <section className={`${card} p-5 flex items-center gap-4`}>
+              <span className="relative flex-shrink-0" aria-hidden="true">
+                <span className="absolute inset-0 bg-cyan-stamp/40 rounded-full animate-ping" />
+                <span className="relative block w-3 h-3 bg-cyan-stamp border-2 border-ink rounded-full" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14.5px] font-bold text-ink leading-snug">
+                  等 Agent 第一笔调用…
+                </div>
+                <div className="text-[12.5px] text-[#6B5E52] mt-0.5 leading-snug">
+                  调用进来这里就会出现实时数据 · 先去 Agent 试一句话
+                </div>
+              </div>
+            </section>
+          ) : (
+            <section className="grid grid-cols-2 gap-2.5">
+              <div className={`${card} p-4`}>
+                <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
+                <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
+                <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
+              </div>
+              <div className={`${card} p-4`}>
+                <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
+                <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(2)}</div>
+              </div>
+            </section>
+          )}
         </div>
 
         {/* SIDE COL */}
@@ -283,11 +422,14 @@ export default function Dashboard() {
               <span className="font-mono text-[10px] text-[#A89A8D] tracking-wider">v1.0</span>
             </div>
 
-            {/* Always-visible spell — replaces both the empty-state guide
-                and the "+ 接入新 Agent" CTA. New users see what to do;
-                returning users can re-copy for a new machine / new agent. */}
+            {/* Always-visible spell — same SkillBoss-style two-line
+                payload as /onboard/install (cmd + key env), so a user
+                re-installing on a new machine / agent gets the whole
+                bundle from one COPY. */}
             <TerminalBlock
               cmd="set up tokenboss.com/skill.md"
+              extra={defaultKeyPlain ? `TOKENBOSS_API_KEY=${defaultKeyPlain}` : undefined}
+              loading={keys.length > 0 && !defaultKeyPlain}
               prompt={
                 <>
                   <span aria-hidden="true" className="mr-1.5">↓</span>
@@ -343,36 +485,43 @@ export default function Dashboard() {
             <APIKeyList keys={keys} loadError={keysError} keyStats={keyStats} onChanged={reloadKeys} />
           </section>
 
-          {/* Recent usage */}
-          <section>
-            <SectionLabel
-              action={
-                <Link to="/console/history" className="text-accent font-bold tracking-wider hover:text-accent-deep">
-                  查看全部 →
-                </Link>
-              }
-            >
-              最近使用
-            </SectionLabel>
-            <div className={`${card} overflow-hidden`}>
-              {usage.records?.slice(0, 4).map((r) => (
-                <UsageRow
-                  key={r.id}
-                  variant="mobile"
-                  time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                  eventType={r.eventType}
-                  model={r.model || undefined}
-                  source={r.source || undefined}
-                  amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(3)}`}
-                />
-              ))}
-              {(!usage.records || usage.records.length === 0) && (
-                <div className="text-center text-[#A89A8D] text-[13px] p-6">暂无使用记录</div>
-              )}
-            </div>
-          </section>
+          {/* Recent usage — only when there's something to show. Empty
+              "暂无使用记录" card was the same nothing as the left-col
+              waiting indicator and added visual filler. */}
+          {!noActivity && (
+            <section>
+              <SectionLabel
+                action={
+                  <Link to="/console/history" className="text-accent font-bold tracking-wider hover:text-accent-deep">
+                    查看全部 →
+                  </Link>
+                }
+              >
+                最近使用
+              </SectionLabel>
+              <div className={`${card} overflow-hidden`}>
+                {usage.records?.slice(0, 4).map((r) => (
+                  <UsageRow
+                    key={r.id}
+                    variant="mobile"
+                    time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                    eventType={r.eventType}
+                    model={r.model || undefined}
+                    source={r.source || undefined}
+                    amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(3)}`}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </aside>
       </main>
+
+      <ContactSalesModal
+        open={contactReason !== null}
+        onClose={() => setContactReason(null)}
+        reason={contactReason ?? undefined}
+      />
     </div>
   );
 }
