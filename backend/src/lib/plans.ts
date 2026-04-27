@@ -60,8 +60,10 @@ export function isPlanId(v: unknown): v is PlanId {
 }
 
 /** Free-tier defaults. Free users are NOT in `PLANS` — they get a
- *  one-shot $10 quota at signup with no daily reset. */
+ *  one-shot $10 quota at signup with no daily reset. The `free` group on
+ *  newapi can be configured to restrict eco-only channels if you want
+ *  defense-in-depth on top of TokenBoss's silent model rewrite. */
 export const FREE_TIER = {
   initialQuotaUsd: 10,
-  group: "default",
+  group: "free",
 } as const;

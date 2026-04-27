@@ -124,11 +124,16 @@ async function resolveCallerPlan(
 /**
  * Free-tier model rewrite. Mutates `body.model` in place when needed.
  *
- *  - virtual profile (`auto` / `premium` / `agentic`) → `eco` so
- *    resolveVirtualModel picks an eco-tier concrete model
- *  - already `eco` → no change
- *  - concrete non-eco model (opus/sonnet/o-series/gpt-5) → swap for
- *    `FREE_TIER_DEFAULT_MODEL` env (default `gpt-5-mini`)
+ * Whenever the request resolves to a non-eco tier we hand it off to the
+ * `eco` virtual profile, which `resolveVirtualModel` then resolves via
+ * `data/router-tiers.json` `ecoTiers`. This keeps the eco model catalog
+ * in ONE place (the router config) instead of TokenBoss picking a model
+ * out of thin air.
+ *
+ * Cases:
+ *   - Already eco virtual or eco-tier concrete model → no change
+ *   - Non-eco virtual (`auto` / `premium` / `agentic`) → "eco"
+ *   - Non-eco concrete model (opus / sonnet / o-series / gpt-5)  → "eco"
  *
  * This is silent on purpose — the user's product spec says free users
  * always get eco, regardless of what their tool requested.
@@ -136,22 +141,13 @@ async function resolveCallerPlan(
 function rewriteForFreeUser(body: Record<string, unknown>): void {
   if (typeof body.model !== "string") return;
   const original = body.model;
-  const fallbackEcoModel =
-    process.env.FREE_TIER_DEFAULT_MODEL?.trim() || "gpt-5-mini";
 
   const profile = detectVirtualProfile(original);
-  if (profile) {
-    if (profile !== "eco") {
-      body.model = "eco";
-      console.log(`[free-rewrite] ${original} → eco (virtual)`);
-    }
-    return;
-  }
+  if (profile === "eco") return;
+  if (!profile && inferTierFromModelId(original) === "eco") return;
 
-  if (inferTierFromModelId(original) !== "eco") {
-    body.model = fallbackEcoModel;
-    console.log(`[free-rewrite] ${original} → ${fallbackEcoModel}`);
-  }
+  body.model = "eco";
+  console.log(`[free-rewrite] ${original} → eco`);
 }
 
 function getNewapiBase(): string | null {

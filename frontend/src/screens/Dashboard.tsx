@@ -238,7 +238,7 @@ export default function Dashboard() {
     );
   }
 
-  const balanceParts = balanceUsd.toFixed(2).split('.');
+  const balanceParts = balanceUsd.toFixed(4).split('.');
 
   return (
     <div className="min-h-screen bg-bg pb-12">
@@ -267,7 +267,7 @@ export default function Dashboard() {
                 </span>
                 <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
                   <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
-                  {dailyRemaining.toFixed(2)}
+                  {dailyRemaining.toFixed(4)}
                   <span className="opacity-60 text-[18px] sm:text-[22px] ml-2">/ ${dailyCap}</span>
                 </span>
               </div>
@@ -332,7 +332,7 @@ export default function Dashboard() {
                   今日额度
                 </span>
                 <span className="font-mono text-[13px] font-bold text-ink">
-                  ${dailyUsed.toFixed(2)}
+                  ${dailyUsed.toFixed(4)}
                   <span className="text-[#A89A8D] mx-1">/</span>
                   <span className="text-[#A89A8D]">${dailyCap}</span>
                 </span>
@@ -341,7 +341,7 @@ export default function Dashboard() {
                 <div className="h-full bg-accent" style={{ width: `${dailyPct}%` }} />
               </div>
               <div className="flex justify-between font-mono text-[11px] text-[#A89A8D]">
-                <span>剩 <span className="text-ink font-semibold">${dailyRemaining.toFixed(2)}</span></span>
+                <span>剩 <span className="text-ink font-semibold">${dailyRemaining.toFixed(4)}</span></span>
                 <span>明 0:00 重置</span>
               </div>
             </section>
@@ -362,7 +362,7 @@ export default function Dashboard() {
                 </span>{' '}
                 ·{' '}
                 <span className="text-accent font-semibold">{usage.records[0].model || 'auto'}</span>{' '}
-                · −${(usage.records[0].amountUsd ?? 0).toFixed(3)}
+                · −${(usage.records[0].amountUsd ?? 0).toFixed(6)}
               </div>
             </section>
           )}
@@ -386,7 +386,7 @@ export default function Dashboard() {
                     <Row label="每日 cap" value={`$${b.dailyCapUsd}`} />
                   )}
                   {(b.skuType === 'topup' || b.skuType === 'trial') && (
-                    <Row label="剩余" value={`$${(b.totalRemainingUsd ?? 0).toFixed(2)}`} />
+                    <Row label="剩余" value={`$${(b.totalRemainingUsd ?? 0).toFixed(4)}`} />
                   )}
                   {b.skuType === 'trial' && b.expiresAt && (
                     <Row
@@ -435,7 +435,7 @@ export default function Dashboard() {
               </div>
               <div className={`${card} p-4`}>
                 <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
-                <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(2)}</div>
+                <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
               </div>
             </section>
           )}
@@ -496,7 +496,7 @@ export default function Dashboard() {
                     <div className="flex-1 min-w-0">
                       <div className="text-[12.5px] font-bold text-ink truncate">{a.label}</div>
                       <div className="font-mono text-[10px] text-[#A89A8D] truncate">
-                        {timeAgo(a.lastUsedAt)} · {a.callCount} 次 · ${a.totalSpent.toFixed(3)}
+                        {timeAgo(a.lastUsedAt)} · {a.callCount} 次 · ${a.totalSpent.toFixed(6)}
                       </div>
                     </div>
                   </div>
@@ -543,7 +543,7 @@ export default function Dashboard() {
                     eventType={r.eventType}
                     model={r.model || undefined}
                     source={r.source || undefined}
-                    amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(3)}`}
+                    amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(6)}`}
                   />
                 ))}
               </div>

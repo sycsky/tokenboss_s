@@ -17,6 +17,34 @@
 
 // ---------- Config ----------
 
+import { Agent } from "undici";
+
+/**
+ * Disable connection reuse for newapi calls. Default Node fetch keeps
+ * connections in a pool; serverless-hosted newapi instances (zeabur etc.)
+ * silently close idle connections, so the next reuse returns an empty
+ * body before any HTTP response. Same fix chatProxyCore uses for chat
+ * forwards. Adds a tiny per-request handshake cost in exchange for
+ * reliability — admin / dashboard calls are infrequent enough that this
+ * is invisible in practice.
+ */
+const newapiDispatcher = new Agent({
+  connect: { timeout: 30_000 },
+  keepAliveTimeout: 1,
+  keepAliveMaxTimeout: 1,
+  headersTimeout: 60_000,
+  bodyTimeout: 60_000,
+});
+
+/** Wrap fetch() to always pass the no-keep-alive dispatcher. */
+function nfetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetch(url, {
+    ...(init ?? {}),
+    // @ts-expect-error undici-specific extension on fetch init
+    dispatcher: newapiDispatcher,
+  });
+}
+
 function getConfig(): { baseUrl: string; token: string; userId: string } {
   const baseUrl = process.env.NEWAPI_BASE_URL?.replace(/\/+$/, "");
   const token = process.env.NEWAPI_ADMIN_TOKEN;
@@ -67,6 +95,35 @@ export function newapiQuotaToUsd(quota: number): number {
 
 // ---------- Fetch core ----------
 
+/**
+ * Read the response body as JSON, but tolerate empty / non-JSON bodies by
+ * surfacing a NewapiError with the upstream status and a snippet of the
+ * raw text. Without this wrapper, an empty body (502 from a fronting
+ * proxy, temporary 504, etc.) bubbles up as the cryptic
+ * "Unexpected end of JSON input".
+ */
+async function readJsonResponse<T>(
+  res: Response,
+  opName: string,
+): Promise<T> {
+  const text = await res.text();
+  if (!text) {
+    throw new NewapiError(
+      res.status || 502,
+      `${opName}: empty response from newapi (status ${res.status})`,
+    );
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.slice(0, 120);
+    throw new NewapiError(
+      res.status || 502,
+      `${opName}: non-JSON response from newapi (status ${res.status}): ${snippet}`,
+    );
+  }
+}
+
 async function req<T>(
   method: string,
   path: string,
@@ -89,7 +146,7 @@ async function req<T>(
 
   let res: Response;
   try {
-    res = await fetch(url.toString(), {
+    res = await nfetch(url.toString(), {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -170,6 +227,27 @@ interface PageResult<T> {
   page: number;
   page_size: number;
 }
+
+// ---------- Session cache ----------
+//
+// newapi's /api/user/login is rate-limited (returns 429 with empty body
+// when called too often). Callers that need a user-scoped session
+// (listUserTokens, createAndRevealToken, revealToken) all go through
+// loginUser; without caching, every dashboard refresh re-authenticates
+// and trips the limiter. We hold a session cookie in-memory keyed by
+// username for SESSION_TTL_MS — after which loginUser fetches a fresh
+// one. Process restarts evict everything (intentional; sessions are
+// non-critical state).
+
+const SESSION_TTL_MS = 5 * 60 * 1000;
+
+interface CachedSession {
+  cookie: string;
+  userId: number;
+  expiresAt: number;
+}
+
+const sessionCache = new Map<string, CachedSession>();
 
 // ---------- Public API ----------
 
@@ -260,28 +338,40 @@ export const newapi = {
   //   3. GET  /api/token/ to discover the new token's id (the POST response
   //      itself returns only {success:true})
   //   4. POST /api/token/{id}/key to reveal the raw key
+  //
+  // Session-cookie cache: every dashboard request that needs to act as a
+  // user (list keys, create key, reveal key) goes through loginUser. Without
+  // caching, a chatty dashboard hammers /api/user/login and hits newapi's
+  // rate limiter (429 with empty body). We hold cookies in-memory keyed by
+  // username for SESSION_TTL_MS; callers don't see this — they always go
+  // through loginUser. Cookies older than the TTL are evicted lazily.
 
   /**
    * Log in as a newapi user and return the session cookie plus their id.
-   * The cookie is an opaque string (`session=...`) suitable for inclusion
-   * in the `Cookie` header of follow-up requests.
+   * Cached for SESSION_TTL_MS so repeated dashboard calls reuse a single
+   * cookie. Pass `force=true` (e.g., after a 401 from a downstream call)
+   * to skip the cache.
    */
   async loginUser(input: {
     username: string;
     password: string;
+    force?: boolean;
   }): Promise<{ cookie: string; userId: number }> {
+    const cached = sessionCache.get(input.username);
+    if (!input.force && cached && cached.expiresAt > Date.now()) {
+      return { cookie: cached.cookie, userId: cached.userId };
+    }
     const { baseUrl } = getConfig();
-    const res = await fetch(`${baseUrl}/api/user/login`, {
+    const res = await nfetch(`${baseUrl}/api/user/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ username: input.username, password: input.password }),
     });
-    const text = await res.text();
-    const parsed = JSON.parse(text) as {
+    const parsed = await readJsonResponse<{
       success?: boolean;
       message?: string;
       data?: { id?: number };
-    };
+    }>(res, "loginUser");
     if (!res.ok || !parsed.success || !parsed.data?.id) {
       throw new NewapiError(
         res.status || 500,
@@ -293,7 +383,18 @@ export const newapi = {
     if (!cookie) {
       throw new NewapiError(500, "login succeeded but no session cookie returned");
     }
+    sessionCache.set(input.username, {
+      cookie,
+      userId: parsed.data.id,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
     return { cookie, userId: parsed.data.id };
+  },
+
+  /** Drop a cached session for a username — call this after a downstream
+   *  401 to force the next loginUser to re-authenticate. */
+  invalidateSession(username: string): void {
+    sessionCache.delete(username);
   },
 
   /**
@@ -318,7 +419,7 @@ export const newapi = {
     };
 
     // 1. Create the token. Response body is just {success, message}.
-    const createRes = await fetch(`${baseUrl}/api/token/`, {
+    const createRes = await nfetch(`${baseUrl}/api/token/`, {
       method: "POST",
       headers: { ...userHeaders, "content-type": "application/json" },
       body: JSON.stringify({
@@ -330,7 +431,10 @@ export const newapi = {
         group: input.group,
       }),
     });
-    const createBody = (await createRes.json()) as { success?: boolean; message?: string };
+    const createBody = await readJsonResponse<{
+      success?: boolean;
+      message?: string;
+    }>(createRes, "createToken");
     if (!createRes.ok || !createBody.success) {
       throw new NewapiError(
         createRes.status || 500,
@@ -340,13 +444,13 @@ export const newapi = {
 
     // 2. Locate the just-created token by name, taking the newest match.
     // We scope to page 0 size 10 since a fresh user's token count is small.
-    const listRes = await fetch(`${baseUrl}/api/token/?p=0&size=10`, {
+    const listRes = await nfetch(`${baseUrl}/api/token/?p=0&size=10`, {
       headers: userHeaders,
     });
-    const listBody = (await listRes.json()) as {
+    const listBody = await readJsonResponse<{
       success?: boolean;
       data?: { items?: NewapiToken[] };
-    };
+    }>(listRes, "createAndRevealToken/list");
     const items = listBody.data?.items ?? [];
     const match = items
       .filter((t) => t.name === input.name)
@@ -356,15 +460,15 @@ export const newapi = {
     }
 
     // 3. Reveal the raw key via the UI-facing endpoint.
-    const revealRes = await fetch(`${baseUrl}/api/token/${match.id}/key`, {
+    const revealRes = await nfetch(`${baseUrl}/api/token/${match.id}/key`, {
       method: "POST",
       headers: userHeaders,
     });
-    const revealBody = (await revealRes.json()) as {
+    const revealBody = await readJsonResponse<{
       success?: boolean;
       message?: string;
       data?: { key?: string };
-    };
+    }>(revealRes, "createAndRevealToken/reveal");
     if (!revealRes.ok || !revealBody.success || !revealBody.data?.key) {
       throw new NewapiError(
         revealRes.status || 500,
@@ -394,13 +498,18 @@ export const newapi = {
     email?: string;
     /** Initial newapi quota to seed (raw newapi units; 500,000 ≈ $1). */
     quota?: number;
+    /** newapi user-group; defaults to "default". TokenBoss free users
+     *  pass "free" so the group can be configured to restrict eco-only
+     *  channels as defense-in-depth. */
+    group?: string;
   }): Promise<{ newapiUserId: number }> {
+    const group = input.group ?? "default";
     const user = await this.createUser({
       username: input.username,
       password: input.password,
       display_name: input.display_name,
       email: input.email,
-      group: "default",
+      group,
     });
     // newapi's POST /api/user/ silently ignores the `quota` field at
     // creation time — quota can only be set via PUT. Without this step
@@ -411,7 +520,7 @@ export const newapi = {
       id: user.id,
       username: user.username,
       quota: input.quota ?? 2_500_000,
-      group: "default",
+      group,
     });
     return { newapiUserId: user.id };
   },
@@ -426,18 +535,18 @@ export const newapi = {
     userId: number;
   }, tokenId: number): Promise<string> {
     const { baseUrl } = getConfig();
-    const res = await fetch(`${baseUrl}/api/token/${tokenId}/key`, {
+    const res = await nfetch(`${baseUrl}/api/token/${tokenId}/key`, {
       method: "POST",
       headers: {
         cookie: session.cookie,
         "new-api-user": String(session.userId),
       },
     });
-    const body = (await res.json()) as {
+    const body = await readJsonResponse<{
       success?: boolean;
       message?: string;
       data?: { key?: string };
-    };
+    }>(res, "revealToken");
     if (!res.ok || !body.success || !body.data?.key) {
       throw new NewapiError(
         res.status || 500,
@@ -459,17 +568,17 @@ export const newapi = {
     userId: number;
   }): Promise<NewapiToken[]> {
     const { baseUrl } = getConfig();
-    const res = await fetch(`${baseUrl}/api/token/?p=0&size=100`, {
+    const res = await nfetch(`${baseUrl}/api/token/?p=0&size=100`, {
       headers: {
         cookie: session.cookie,
         "new-api-user": String(session.userId),
       },
     });
-    const body = (await res.json()) as {
+    const body = await readJsonResponse<{
       success?: boolean;
       message?: string;
       data?: { items?: NewapiToken[] };
-    };
+    }>(res, "listUserTokens");
     if (!res.ok || !body.success) {
       throw new NewapiError(
         res.status || 500,
@@ -479,9 +588,37 @@ export const newapi = {
     return body.data?.items ?? [];
   },
 
-  /** Delete a token by ID (admin). */
+  /** Delete a token by ID via admin auth. NOTE: many newapi forks require
+   *  the OWNER's session to delete (admin DELETE is silently ignored or
+   *  soft-deletes). Prefer `deleteUserToken` from a user session. */
   async deleteToken(tokenId: number): Promise<void> {
     await req<unknown>("DELETE", `/api/token/${tokenId}`);
+  },
+
+  /** Delete a token using the owner's session. This is the path the
+   *  newapi UI takes — works reliably across forks. */
+  async deleteUserToken(
+    session: { cookie: string; userId: number },
+    tokenId: number,
+  ): Promise<void> {
+    const { baseUrl } = getConfig();
+    const res = await nfetch(`${baseUrl}/api/token/${tokenId}`, {
+      method: "DELETE",
+      headers: {
+        cookie: session.cookie,
+        "new-api-user": String(session.userId),
+      },
+    });
+    const body = await readJsonResponse<{ success?: boolean; message?: string }>(
+      res,
+      "deleteUserToken",
+    );
+    if (!res.ok || body.success === false) {
+      throw new NewapiError(
+        res.status || 500,
+        body.message ?? "deleteUserToken failed",
+      );
+    }
   },
 
   // --- Usage logs ---
@@ -552,7 +689,7 @@ export const newapi = {
   /** Check if the newapi instance is reachable. */
   async status(): Promise<Record<string, unknown>> {
     const { baseUrl } = getConfig();
-    const res = await fetch(`${baseUrl}/api/status`);
+    const res = await nfetch(`${baseUrl}/api/status`);
     return (await res.json()) as Record<string, unknown>;
   },
 };

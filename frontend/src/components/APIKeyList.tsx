@@ -152,7 +152,7 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
               <span>创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')}</span>
               {stats ? (
                 <span className="text-ink-2">
-                  {timeAgo(stats.lastUsedAt)} · {stats.callCount} 次 · ${stats.totalSpent.toFixed(3)}
+                  {timeAgo(stats.lastUsedAt)} · {stats.callCount} 次 · ${stats.totalSpent.toFixed(6)}
                 </span>
               ) : (
                 <span>未使用</span>

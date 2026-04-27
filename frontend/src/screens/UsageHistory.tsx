@@ -58,11 +58,11 @@ export default function UsageHistory() {
             </h1>
             <div className="font-mono text-[13px] text-[#6B5E52]">
               共 <span className="text-ink font-bold">{data.totals?.calls ?? 0}</span> 次调用 ·
-              <span className="text-ink font-bold ml-1">${(data.totals?.consumed ?? 0).toFixed(2)}</span> 已用 ·
+              <span className="text-ink font-bold ml-1">${(data.totals?.consumed ?? 0).toFixed(4)}</span> 已用 ·
               <span className="text-ink font-bold ml-1">4 月以来</span>
             </div>
           </div>
-          <BalancePill amount={`$${balance.toFixed(2)}`} label="当前余额" />
+          <BalancePill amount={`$${balance.toFixed(4)}`} label="当前余额" />
         </div>
 
         {/* 24h chart */}
@@ -124,7 +124,7 @@ export default function UsageHistory() {
                     eventType={r.eventType}
                     model={r.model || undefined}
                     source={r.source || undefined}
-                    amount={`${r.amountUsd >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd).toFixed(3)}`}
+                    amount={`${r.amountUsd >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd).toFixed(6)}`}
                   />
                 ))
               ) : (

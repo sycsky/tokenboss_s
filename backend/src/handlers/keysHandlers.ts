@@ -283,7 +283,9 @@ export const deleteKeyHandler = async (
       // another user or doesn't exist at all.
       return jsonError(404, "not_found", "Key does not exist.");
     }
-    await newapi.deleteToken(tokenId);
+    // Delete via the user's session — newapi requires owner auth for
+    // hard delete; admin DELETE is silently ignored on some forks.
+    await newapi.deleteUserToken(session, tokenId);
     deleteApiKeyIndex(auth.userId, tokenId);
     return jsonResponse(200, { ok: true, keyId: tokenId });
   } catch (err) {

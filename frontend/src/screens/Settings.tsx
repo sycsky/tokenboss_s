@@ -107,7 +107,7 @@ export default function Settings() {
                 总消耗
               </div>
               <div className="font-mono text-[28px] font-bold leading-none text-ink">
-                ${(stats.consumed ?? 0).toFixed(2)}
+                ${(stats.consumed ?? 0).toFixed(4)}
               </div>
               <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">自注册以来</div>
             </div>

@@ -18,7 +18,7 @@
  * Losing one does not compromise the other.
  */
 
-import { randomBytes, randomInt, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
@@ -36,6 +36,7 @@ import {
   getUser,
   getUserIdByEmail,
   markEmailVerified,
+  putApiKeyIndex,
   putEmailIndex,
   putUser,
   recentCodeCount,
@@ -220,6 +221,7 @@ export const registerHandler = async (
         display_name: displayName ?? newapiUsername,
         email,
         quota: getSignupQuota(),
+        group: FREE_TIER.group,
       });
       user.newapiUserId = provisioned.newapiUserId;
       user.newapiPassword = newapiPassword;
@@ -456,22 +458,34 @@ export async function verifyCodeHandler(
           display_name: newapiUsername,
           email,
           quota: getSignupQuota(),
+          group: FREE_TIER.group,
         });
         newapiUserId = provisioned.newapiUserId;
 
         // Auto-create the user's default API key right after provisioning
         // so /onboard/install can render the spell with the key inline,
         // SkillBoss-style. Plaintext is fetched on demand via reveal — we
-        // don't store it on our side; newapi keeps it.
+        // don't store it on our side; newapi keeps it. We DO store the
+        // sha256 of the raw key so chatProxyCore can resolve sk-xxx →
+        // userId for free-tier model rewriting.
         const session = await newapi.loginUser({
           username: newapiUsername,
           password: newapiPassword,
         });
-        await newapi.createAndRevealToken({
+        const { tokenId, apiKey } = await newapi.createAndRevealToken({
           session,
           name: "default",
           unlimited_quota: true,
         });
+        try {
+          putApiKeyIndex({
+            userId,
+            newapiTokenId: tokenId,
+            keyHash: createHash("sha256").update(apiKey).digest("hex"),
+          });
+        } catch (idxErr) {
+          console.error(`[verifyCode] api_key_index write failed for ${userId}:`, (idxErr as Error).message);
+        }
       } catch (err) {
         const msg = err instanceof NewapiError ? err.message : (err as Error).message;
         console.error(`[verifyCode] newapi provisioning failed for ${userId}:`, msg);
