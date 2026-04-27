@@ -38,6 +38,67 @@ const AGENTS: AgentMark[] = [
 ];
 
 /**
+ * Differentiator card · used in the Slock-style features row. Each card is
+ * a tinted block (bg-[#FFF4E6] etc) with a tiny mono tag on top, a short
+ * h3 in the middle, and one paragraph of body copy.
+ */
+function FeatureCard({
+  tag,
+  title,
+  body,
+  accentBg,
+}: {
+  tag: string;
+  title: string;
+  body: string;
+  accentBg: string;
+}) {
+  return (
+    <div className={`${accentBg} rounded-2xl p-6 md:p-7 border border-hairline`}>
+      <p className="font-mono text-[10.5px] font-bold tracking-[0.16em] uppercase text-ink-3 mb-4">
+        {tag}
+      </p>
+      <h3 className="text-[18px] md:text-[20px] font-bold tracking-tight mb-2.5 leading-tight">
+        {title}
+      </h3>
+      <p className="text-[13.5px] text-ink-2 leading-relaxed">
+        {body}
+      </p>
+    </div>
+  );
+}
+
+interface FooterLink {
+  text: string;
+  to?: string;
+  href?: string;
+}
+function FooterCol({ label, links }: { label: string; links: FooterLink[] }) {
+  return (
+    <div>
+      <p className="font-mono text-[10.5px] font-bold tracking-[0.18em] uppercase text-white/35 mb-4">
+        {label}
+      </p>
+      <ul className="space-y-2.5">
+        {links.map((l) => (
+          <li key={l.text}>
+            {l.to ? (
+              <Link to={l.to} className="text-[13px] text-white/65 hover:text-white transition-colors">
+                {l.text}
+              </Link>
+            ) : (
+              <a href={l.href} className="text-[13px] text-white/65 hover:text-white transition-colors">
+                {l.text}
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * Animated terminal demo on the hero right side. Pure CSS keyframes loop a
  * 6-second cycle showing the four steps after a user runs the install
  * command in their Agent: typing the command → fetching → registering skill
@@ -161,6 +222,52 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Manifesto color band — full-bleed dark */}
+      <section className="bg-ink text-white">
+        <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-28 text-center">
+          <p className="font-mono text-[10.5px] font-bold tracking-[0.2em] uppercase text-white/45 mb-6">
+            Manifesto
+          </p>
+          <h2 className="font-sans text-[32px] md:text-[48px] lg:text-[56px] font-extrabold leading-[1.1] tracking-tight">
+            一份钱包<span className="text-white/40">·</span>所有 Agent<span className="text-white/40">·</span>所有顶级模型。
+          </h2>
+          <p className="text-white/55 max-w-2xl mx-auto mt-5 text-[15px] md:text-[16px] leading-relaxed">
+            OpenClaw / Codex / Hermes / Claude Code 共用一份额度。<br className="hidden md:block" />
+            <span className="text-white/35">¥ 人民币付款 · $ 美金透明计价 · 智能路由自动选最便宜可用模型。</span>
+          </p>
+        </div>
+      </section>
+
+      {/* Features · 3 cards, slock-style */}
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-20 md:py-28">
+        <p className="font-mono text-[10.5px] font-bold tracking-[0.2em] uppercase text-ink-3 mb-3 text-center">
+          What makes TokenBoss different
+        </p>
+        <h2 className="font-sans text-[28px] md:text-[40px] font-extrabold leading-[1.1] tracking-tight text-center mb-12 md:mb-16">
+          只解决一件事 — <span className="text-accent">让你的 Agent 顺手开工。</span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+          <FeatureCard
+            tag="01 · 双币计费"
+            title="¥ 付款，$ 算账"
+            body="国内人民币付款，按上游官方美金价透明计费 — 不溢价、不截断、不绑卡。"
+            accentBg="bg-[#FFF4E6]"
+          />
+          <FeatureCard
+            tag="02 · 一钱包多 Agent"
+            title="装一次，处处通"
+            body="OpenClaw / Codex / Hermes / Claude Code 共用一份额度。换 Agent 不用换钱包。"
+            accentBg="bg-[#F0EBE3]"
+          />
+          <FeatureCard
+            tag="03 · 一行装"
+            title="skill.md 零配置"
+            body="在你的 Agent 终端粘贴 set up tokenboss.com/skill.md ─ 24 h 试用直接到账。"
+            accentBg="bg-[#EAF1ED]"
+          />
+        </div>
+      </section>
+
       {/* 01 · Membership tiers */}
       <section id="pricing" className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
         <SectionHeader num="01" cn="套餐" en="Membership" />
@@ -233,12 +340,78 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-border py-7 text-center font-mono text-[10.5px] text-ink-3 max-w-[1200px] mx-auto px-6">
-        <div className="flex flex-wrap justify-center gap-3.5 mb-2.5">
-          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
+      {/* Final CTA color band — full-bleed terracotta */}
+      {!isLoggedIn && (
+        <section className="bg-accent text-white">
+          <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-24 text-center">
+            <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-3">
+              现在试试？
+            </h2>
+            <p className="text-white/85 text-[15px] md:text-[17px] mb-8">
+              免费开始 · 送 $10 体验额度 · 无需绑卡。
+            </p>
+            <div className="flex items-center justify-center gap-5 flex-wrap">
+              <Link
+                to="/register"
+                className="px-6 py-3 bg-ink text-white rounded-lg font-semibold hover:bg-ink-2 transition-colors shadow-[0_8px_24px_-8px_rgba(0,0,0,0.3)]"
+              >
+                免费开始 →
+              </Link>
+              <span className="text-white/85 text-[14px]">
+                已有账户？<Link to="/login" className="underline hover:text-white">登录</Link>
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Footer · dark Slock-style */}
+      <footer className="bg-ink text-white/60">
+        <div className="max-w-[1200px] mx-auto px-6 md:px-14 py-14 md:py-16">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-10 mb-10">
+            {/* Brand col */}
+            <div className="col-span-2 md:col-span-1">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-7 h-7 bg-accent rounded-md flex items-center justify-center text-white font-mono text-[10px] font-bold">TB</div>
+                <span className="text-white font-bold text-[15px]">TokenBoss</span>
+              </div>
+              <p className="text-white/40 text-[12.5px] leading-relaxed max-w-xs">
+                你的 Agent 钱包 ─ 一份额度，所有 Agent 通用。
+              </p>
+            </div>
+
+            <FooterCol
+              label="PRODUCT"
+              links={[
+                { text: '套餐', href: '/#pricing' },
+                { text: '原语', to: '/primitive' },
+                { text: '完整定价', to: '/pricing' },
+              ]}
+            />
+            <FooterCol
+              label="DEVELOPERS"
+              links={[
+                { text: 'skill.md', href: 'https://tokenboss.com/skill.md' },
+                { text: '快速接入', to: '/install/manual' },
+              ]}
+            />
+            <FooterCol
+              label="ACCOUNT"
+              links={
+                isLoggedIn
+                  ? [{ text: '控制台', to: '/dashboard' }]
+                  : [
+                      { text: '登录', to: '/login' },
+                      { text: '免费开始', to: '/register' },
+                    ]
+              }
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-white/10 font-mono text-[10.5px] text-white/35">
+            <span>© 2026 TokenBoss · All rights reserved.</span>
+            <span>Made with care for AI agents.</span>
+          </div>
         </div>
-        <div>© 2026 TokenBoss</div>
       </footer>
 
       {/* Animated terminal demo keyframes (scoped via CSS class names, single 6s loop) */}

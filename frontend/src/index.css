@@ -8,6 +8,16 @@ body,
   height: 100%;
 }
 
+/* Smooth-scroll for in-page anchor links (e.g. 套餐 → #pricing). */
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 body {
   font-family: "DM Sans", "Noto Sans SC", -apple-system, BlinkMacSystemFont,
     system-ui, sans-serif;
