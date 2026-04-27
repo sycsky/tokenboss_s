@@ -29,18 +29,20 @@ export function TierCard({
   onCtaClick,
   className = '',
 }: TierCardProps) {
-  const cardBase = 'relative bg-surface rounded-[14px] p-[22px_20px] border';
+  const cardBase = 'relative rounded-md p-[22px_20px] border-2 border-ink';
   const cardVariant = featured
-    ? 'border-ink border-[1.5px] bg-[#FFFAF5]'
-    : 'border-border';
+    ? 'bg-[#FFFAF5] shadow-[4px_4px_0_0_#1C1917]'
+    : 'bg-surface shadow-[3px_3px_0_0_#1C1917]';
 
-  const ctaBase = 'block w-full text-center py-[11px] rounded-[9px] text-[13px] font-semibold leading-snug cursor-pointer';
+  // Slock-pixel CTA: filled fill, 2px ink border, 3px hard shadow, hover depresses.
+  const ctaBase =
+    'block w-full text-center py-[10px] rounded-md text-[13px] font-bold leading-snug cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] transition-all';
   const ctaVariantCls =
     ctaVariant === 'primary'
-      ? 'bg-ink text-bg border-0'
+      ? 'bg-accent text-white'
       : ctaVariant === 'disabled'
-      ? 'bg-transparent text-ink-3 border border-border cursor-not-allowed'
-      : 'bg-transparent text-ink border border-border-2';
+      ? 'bg-surface text-ink-3 cursor-not-allowed shadow-none hover:translate-x-0 hover:translate-y-0 hover:shadow-none'
+      : 'bg-bg text-ink';
 
   return (
     <div

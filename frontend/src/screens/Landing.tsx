@@ -54,7 +54,7 @@ function FeatureCard({
   accentBg: string;
 }) {
   return (
-    <div className={`${accentBg} rounded-2xl p-6 md:p-7 border border-hairline`}>
+    <div className={`${accentBg} rounded-md p-6 md:p-7 border-2 border-ink shadow-[4px_4px_0_0_#1C1917]`}>
       <p className="font-mono text-[10.5px] font-bold tracking-[0.16em] uppercase text-ink-3 mb-4">
         {tag}
       </p>
@@ -66,6 +66,23 @@ function FeatureCard({
       </p>
     </div>
   );
+}
+
+/**
+ * Slock-pixel button helper. Filled fill + 2px hard ink border + 3px hard
+ * offset shadow. Hover "depresses" — translates 1px to bottom-right and
+ * shrinks the shadow.
+ */
+function slockBtn(variant: 'primary' | 'secondary' | 'dark' = 'primary') {
+  const base =
+    'inline-block border-2 border-ink rounded-md font-bold tracking-tight px-5 py-2.5 md:px-6 md:py-3 text-[14px] md:text-[15px] shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] transition-all whitespace-nowrap';
+  const fill =
+    variant === 'primary'
+      ? 'bg-accent text-white'
+      : variant === 'dark'
+        ? 'bg-ink text-white'
+        : 'bg-bg text-ink';
+  return `${base} ${fill}`;
 }
 
 interface FooterLink {
@@ -193,22 +210,16 @@ export default function Landing() {
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
               {isLoggedIn ? (
-                <Link
-                  to="/dashboard"
-                  className="px-5 py-3 bg-accent text-white rounded-lg font-semibold hover:bg-accent-deep transition-colors shadow-[0_8px_28px_-10px_rgba(232,105,42,0.55)]"
-                >
+                <Link to="/dashboard" className={slockBtn('primary')}>
                   去控制台 →
                 </Link>
               ) : (
                 <>
-                  <Link
-                    to="/register"
-                    className="px-5 py-3 bg-accent text-white rounded-lg font-semibold hover:bg-accent-deep transition-colors shadow-[0_8px_28px_-10px_rgba(232,105,42,0.55)]"
-                  >
+                  <Link to="/register" className={slockBtn('primary')}>
                     免费开始 · 送 $10 体验
                   </Link>
                   <span className="text-[13px] text-ink-2">
-                    已有账户？<Link to="/login" className="text-accent hover:underline">登录</Link>
+                    已有账户？<Link to="/login" className="text-ink underline underline-offset-2 hover:text-accent">登录</Link>
                   </span>
                 </>
               )}
@@ -222,19 +233,12 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Manifesto color band — full-bleed dark */}
-      <section className="bg-ink text-white">
-        <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-28 text-center">
-          <p className="font-mono text-[10.5px] font-bold tracking-[0.2em] uppercase text-white/45 mb-6">
-            Manifesto
-          </p>
-          <h2 className="font-sans text-[32px] md:text-[48px] lg:text-[56px] font-extrabold leading-[1.1] tracking-tight">
-            一份钱包<span className="text-white/40">·</span>所有 Agent<span className="text-white/40">·</span>所有顶级模型。
+      {/* Manifesto color band — Slock yellow-band equivalent (terracotta). */}
+      <section className="bg-accent text-white border-y-2 border-ink">
+        <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-16 md:py-20 text-center">
+          <h2 className="font-sans text-[26px] md:text-[40px] lg:text-[44px] font-extrabold leading-[1.15] tracking-tight">
+            "一份钱包<span className="opacity-50">·</span>所有 Agent<span className="opacity-50">·</span>所有顶级模型。"
           </h2>
-          <p className="text-white/55 max-w-2xl mx-auto mt-5 text-[15px] md:text-[16px] leading-relaxed">
-            OpenClaw / Codex / Hermes / Claude Code 共用一份额度。<br className="hidden md:block" />
-            <span className="text-white/35">¥ 人民币付款 · $ 美金透明计价 · 智能路由自动选最便宜可用模型。</span>
-          </p>
         </div>
       </section>
 
@@ -316,7 +320,7 @@ export default function Landing() {
       {/* 02 · Pay-as-you-go */}
       <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
         <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 border border-hairline rounded-xl mt-6 hover:border-border-2 transition-colors">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 bg-bg border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] mt-6">
           <div>
             <div className="font-mono text-2xl font-bold">
               <span className="text-base text-ink-2 align-top">¥</span>1
@@ -326,38 +330,32 @@ export default function Landing() {
             <div className="text-sm text-ink-3 mt-1">充值 ¥50 起 · 永不过期 · 全模型解锁</div>
           </div>
           {standardCta.onClick ? (
-            <button
-              onClick={standardCta.onClick}
-              className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap hover:border-ink transition-colors"
-            >
+            <button onClick={standardCta.onClick} className={slockBtn('secondary')}>
               {standardCta.text}
             </button>
           ) : (
-            <span className="px-5 py-2.5 bg-surface border border-border-2 rounded-lg text-sm font-semibold whitespace-nowrap">
+            <span className={slockBtn('secondary') + ' cursor-default'}>
               {standardCta.text}
             </span>
           )}
         </div>
       </section>
 
-      {/* Final CTA color band — full-bleed terracotta */}
+      {/* Final CTA color band — full-bleed terracotta with hard borders */}
       {!isLoggedIn && (
-        <section className="bg-accent text-white">
+        <section className="bg-accent text-white border-y-2 border-ink">
           <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-24 text-center">
             <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-3">
               现在试试？
             </h2>
-            <p className="text-white/85 text-[15px] md:text-[17px] mb-8">
+            <p className="text-white/90 text-[15px] md:text-[17px] mb-8">
               免费开始 · 送 $10 体验额度 · 无需绑卡。
             </p>
             <div className="flex items-center justify-center gap-5 flex-wrap">
-              <Link
-                to="/register"
-                className="px-6 py-3 bg-ink text-white rounded-lg font-semibold hover:bg-ink-2 transition-colors shadow-[0_8px_24px_-8px_rgba(0,0,0,0.3)]"
-              >
+              <Link to="/register" className={slockBtn('dark')}>
                 免费开始 →
               </Link>
-              <span className="text-white/85 text-[14px]">
+              <span className="text-white/90 text-[14px]">
                 已有账户？<Link to="/login" className="underline hover:text-white">登录</Link>
               </span>
             </div>
