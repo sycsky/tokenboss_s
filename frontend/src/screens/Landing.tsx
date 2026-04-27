@@ -172,16 +172,16 @@ export default function Landing() {
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] gap-x-12 gap-y-10 items-start">
           {/* LEFT: H1 + terminal + meta + CTA */}
           <div>
-            <h1 className="font-sans text-[44px] md:text-[64px] lg:text-[72px] font-extrabold leading-none tracking-tight">
-              你的 Agent<br />
-              <span className="text-accent">钱包</span>
+            <h1 className="font-sans text-[44px] md:text-[60px] lg:text-[68px] font-extrabold leading-[1.05] tracking-tight">
+              你的 Agent，
+              <br />
+              <span className="text-accent">立刻用得起好模型。</span>
             </h1>
 
             <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
             <p className="text-[13.5px] sm:text-[14px] text-ink-2 max-w-[520px] mt-4 leading-relaxed">
-              一行装好 → Agent 立刻用得起顶级模型。<br className="hidden sm:block" />
-              <span className="text-ink-3">不用挑模型，不用各处找额度，剩下交给我们。</span>
+              一行装好 → 顶级模型立刻可用 · 多 Agent 共用一份额度 · ¥ 付，按 $ 算。
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
@@ -192,7 +192,12 @@ export default function Landing() {
               ) : (
                 <>
                   <Link to="/register" className={slockBtn('primary')}>
-                    免费开始 · 送 $10 体验
+                    <span className="inline-flex items-baseline gap-2">
+                      免费开始
+                      <span className="font-mono text-[12px] font-bold tracking-tight px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
+                        送 $10
+                      </span>
+                    </span>
                   </Link>
                   <span className="text-[13px] text-ink-2">
                     已有账户？<Link to="/login" className="text-ink underline underline-offset-2 hover:text-accent">登录</Link>
@@ -209,11 +214,13 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Manifesto color band — Slock yellow-band equivalent (terracotta). */}
+      {/* Manifesto color band — Slock yellow-band equivalent (terracotta).
+          Carries the canonical brand sentence; Hero subtitle and Footer
+          intro echo it. */}
       <section className="bg-accent text-white border-y-2 border-ink">
         <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-16 md:py-20 text-center">
           <h2 className="font-sans text-[26px] md:text-[40px] lg:text-[44px] font-extrabold leading-[1.15] tracking-tight">
-            你专心创造<span className="opacity-55">,</span> 模型的事我们想好了。
+            你专心创造<span className="opacity-55">，</span>剩下交给我们。
           </h2>
         </div>
       </section>
@@ -296,14 +303,17 @@ export default function Landing() {
       {/* 02 · Pay-as-you-go */}
       <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
         <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-7 bg-bg border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] mt-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 p-6 md:p-7 bg-surface border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] mt-6">
           <div>
-            <div className="font-mono text-2xl font-bold">
-              <span className="text-base text-ink-2 align-top">¥</span>1
-              <span className="text-ink-4 mx-2">/</span>
-              <span className="text-base text-ink-2 align-top">$</span>1 美金
+            <div className="font-mono text-[28px] md:text-[32px] font-bold leading-none text-ink mb-2">
+              <span className="text-[16px] text-ink-3 align-top mr-px">¥</span>1
+              <span className="text-ink-4 mx-2.5 font-medium">=</span>
+              <span className="text-[16px] text-ink-3 align-top mr-px">$</span>1
+              <span className="text-[14px] text-ink-3 ml-2 font-medium">美金额度</span>
             </div>
-            <div className="text-sm text-ink-3 mt-1">充值 ¥50 起 · 永不过期 · 全模型解锁</div>
+            <div className="font-mono text-[12px] text-ink-3 tracking-tight">
+              充值 ¥50 起 · 永不过期 · 全模型解锁
+            </div>
           </div>
           {standardCta.onClick ? (
             <button onClick={standardCta.onClick} className={slockBtn('secondary')}>
@@ -321,11 +331,15 @@ export default function Landing() {
       {!isLoggedIn && (
         <section className="bg-accent text-white border-y-2 border-ink">
           <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-24 text-center">
-            <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-3">
+            <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-4">
               现在试试？
             </h2>
-            <p className="text-white/90 text-[15px] md:text-[17px] mb-8">
-              免费开始 · 送 $10 体验额度 · 无需绑卡。
+            <p className="text-white/90 text-[15px] md:text-[17px] mb-8 inline-flex items-baseline gap-2 flex-wrap justify-center">
+              免费开始 · 送
+              <span className="font-mono text-[13px] font-bold tracking-tight px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
+                $10
+              </span>
+              体验额度 · 无需绑卡。
             </p>
             <div className="flex items-center justify-center gap-5 flex-wrap">
               <Link to="/register" className={slockBtn('secondary')}>
