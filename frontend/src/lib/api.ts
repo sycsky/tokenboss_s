@@ -228,6 +228,18 @@ export interface UsageDetailResponse {
   hourly24h: HourlyUsage[];
 }
 
+export interface UsageAggregateGroup {
+  /** Group key — source string or keyHint, depending on the aggregateBy value. null when the field was unset on those records. */
+  groupKey: string | null;
+  callCount: number;
+  totalConsumedUsd: number;
+  lastUsedAt: string;
+}
+
+export interface UsageAggregateResponse {
+  groups: UsageAggregateGroup[];
+}
+
 export interface MeResponse {
   user: UserProfile;
 }
@@ -317,5 +329,22 @@ export const api = {
         .map(([k, v]) => [k, String(v)]),
     ).toString();
     return request<UsageDetailResponse>(`/v1/usage${qs ? "?" + qs : ""}`, { method: "GET" });
+  },
+  /**
+   * Aggregate consume events grouped by `source` (Agent identifier) or
+   * `keyHint` (last 8 chars of the bearer token). Returns a tiny
+   * `groups` array — much cheaper than pulling 200 raw records and
+   * reducing client-side, and stays correct as volume grows.
+   */
+  getUsageAggregate(
+    by: 'source' | 'keyHint',
+    opts: { from?: string; to?: string; limit?: number } = {},
+  ): Promise<UsageAggregateResponse> {
+    const qs = new URLSearchParams(
+      Object.entries({ aggregateBy: by, ...opts })
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    return request<UsageAggregateResponse>(`/v1/usage?${qs}`, { method: 'GET' });
   },
 };

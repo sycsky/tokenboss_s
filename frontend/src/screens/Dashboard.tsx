@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { api, type BucketRecord, type ProxyKeySummary, type UsageDetailResponse, type UsageRecord } from '../lib/api';
+import {
+  api,
+  type BucketRecord,
+  type ProxyKeySummary,
+  type UsageAggregateGroup,
+  type UsageDetailResponse,
+} from '../lib/api';
 import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { UsageRow } from '../components/UsageRow';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
@@ -14,10 +20,10 @@ interface AgentStat {
   source: string;          // raw source identifier ("openclaw" / "hermes" / etc.)
   label: string;           // pretty display name
   initials: string;        // 2-letter avatar block
+  color: string;           // tailwind classes for the avatar block
   callCount: number;
   totalSpent: number;
   lastUsedAt: string;      // ISO
-  topModel: string | null;
 }
 
 const AGENT_REGISTRY: Record<string, { label: string; initials: string; color: string }> = {
@@ -37,54 +43,34 @@ function describeAgent(source: string): { label: string; initials: string; color
   };
 }
 
-function deriveAgents(records: UsageRecord[]): AgentStat[] {
-  const map = new Map<string, AgentStat & { modelCounts: Map<string, number> }>();
-  for (const r of records) {
-    if (r.eventType !== 'consume' || !r.source) continue;
-    const key = r.source;
-    const existing = map.get(key);
-    const meta = describeAgent(key);
-    if (!existing) {
-      const modelCounts = new Map<string, number>();
-      if (r.model) modelCounts.set(r.model, 1);
-      map.set(key, {
-        source: key,
+function shapeAgents(groups: UsageAggregateGroup[]): AgentStat[] {
+  return groups
+    .filter((g) => g.groupKey != null && g.groupKey.length > 0)
+    .map((g) => {
+      const source = g.groupKey as string;
+      const meta = describeAgent(source);
+      return {
+        source,
         label: meta.label,
         initials: meta.initials,
-        callCount: 1,
-        totalSpent: r.amountUsd ?? 0,
-        lastUsedAt: r.createdAt,
-        topModel: r.model,
-        modelCounts,
-      });
-    } else {
-      existing.callCount++;
-      existing.totalSpent += r.amountUsd ?? 0;
-      if (r.createdAt > existing.lastUsedAt) existing.lastUsedAt = r.createdAt;
-      if (r.model) existing.modelCounts.set(r.model, (existing.modelCounts.get(r.model) ?? 0) + 1);
-      let top: string | null = null;
-      let topN = 0;
-      for (const [m, n] of existing.modelCounts) {
-        if (n > topN) { top = m; topN = n; }
-      }
-      existing.topModel = top;
-    }
-  }
-  return [...map.values()]
-    .sort((a, b) => (a.lastUsedAt > b.lastUsedAt ? -1 : 1))
-    .map(({ modelCounts: _, ...rest }) => rest);
+        color: meta.color,
+        callCount: g.callCount,
+        totalSpent: g.totalConsumedUsd,
+        lastUsedAt: g.lastUsedAt,
+      };
+    });
 }
 
-function deriveKeyStats(records: UsageRecord[]): Map<string, KeyStats> {
+function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
   const m = new Map<string, KeyStats>();
-  for (const r of records) {
-    if (r.eventType !== 'consume' || !r.keyHint) continue;
-    const tail = r.keyHint.slice(-4);
-    const cur = m.get(tail) ?? { callCount: 0, totalSpent: 0, lastUsedAt: r.createdAt };
-    cur.callCount++;
-    cur.totalSpent += r.amountUsd ?? 0;
-    if (r.createdAt > cur.lastUsedAt) cur.lastUsedAt = r.createdAt;
-    m.set(tail, cur);
+  for (const g of groups) {
+    if (!g.groupKey) continue;
+    const tail = g.groupKey.slice(-4);
+    m.set(tail, {
+      callCount: g.callCount,
+      totalSpent: g.totalConsumedUsd,
+      lastUsedAt: g.lastUsedAt,
+    });
   }
   return m;
 }
@@ -101,6 +87,8 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [buckets, setBuckets] = useState<BucketRecord[]>([]);
   const [usage, setUsage] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
+  const [agentGroups, setAgentGroups] = useState<UsageAggregateGroup[]>([]);
+  const [keyHintGroups, setKeyHintGroups] = useState<UsageAggregateGroup[]>([]);
   const [keys, setKeys] = useState<ProxyKeySummary[]>([]);
   const [keysError, setKeysError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,13 +106,18 @@ export default function Dashboard() {
   useEffect(() => {
     Promise.all([
       api.getBuckets().then((r) => setBuckets(r.buckets || [])),
-      api.getUsage({ limit: 200 }).then((r) => setUsage(r)),
+      // Recent-call list + balance hero totals — keep small.
+      api.getUsage({ limit: 4 }).then((r) => setUsage(r)),
+      // AGENTS panel — server-side GROUP BY source.
+      api.getUsageAggregate('source').then((r) => setAgentGroups(r.groups)),
+      // Per-key stats — server-side GROUP BY keyHint.
+      api.getUsageAggregate('keyHint').then((r) => setKeyHintGroups(r.groups)),
       reloadKeys(),
     ]).finally(() => setLoading(false));
   }, []);
 
-  const agents = useMemo(() => deriveAgents(usage.records ?? []), [usage.records]);
-  const keyStats = useMemo(() => deriveKeyStats(usage.records ?? []), [usage.records]);
+  const agents = useMemo(() => shapeAgents(agentGroups), [agentGroups]);
+  const keyStats = useMemo(() => shapeKeyStats(keyHintGroups), [keyHintGroups]);
   const noActivity = (usage.totals?.calls ?? 0) === 0;
   const noKeys = keys.length === 0;
 
@@ -307,10 +300,9 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-1.5 mb-2.5">
                     {agents.map((a) => {
-                      const meta = describeAgent(a.source);
                       return (
                         <div key={a.source} className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2.5">
-                          <div className={`w-7 h-7 ${meta.color} border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center flex-shrink-0`}>
+                          <div className={`w-7 h-7 ${a.color} border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center flex-shrink-0`}>
                             {a.initials}
                           </div>
                           <div className="flex-1 min-w-0">
