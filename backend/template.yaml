@@ -102,7 +102,11 @@ Resources:
     Properties:
       StageName: !Ref Stage
       CorsConfiguration:
-        AllowOrigins: ['*']
+        AllowOrigins:
+          - https://tokenboss.com
+          - https://www.tokenboss.com
+          - http://localhost:5173
+          - http://localhost:5174
         AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
         AllowHeaders: ['*']
 
@@ -270,7 +274,11 @@ Resources:
         AuthType: NONE
         InvokeMode: RESPONSE_STREAM
         Cors:
-          AllowOrigins: ['*']
+          AllowOrigins:
+            - https://tokenboss.com
+            - https://www.tokenboss.com
+            - http://localhost:5173
+            - http://localhost:5174
           AllowMethods: [POST, OPTIONS]
           AllowHeaders: [authorization, content-type]
 

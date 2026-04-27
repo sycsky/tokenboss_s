@@ -1,150 +1,199 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react';
+import { api, type UsageDetailResponse } from '../lib/api';
+import { AppNav, SectionLabel } from '../components/AppNav';
+import { BalancePill } from '../components/BalancePill';
+import { ConsumeChart24h, type HourBucket } from '../components/ConsumeChart24h';
+import { UsageRow } from '../components/UsageRow';
 
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { BackButton } from "../components/BackButton.js";
-import { api, ApiError, type UsageResponse } from "../lib/api.js";
+const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
+const selectCls =
+  'px-3 py-1.5 bg-white border-2 border-ink rounded text-[12.5px] font-bold text-ink ' +
+  'shadow-[2px_2px_0_0_#1C1917] focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] ' +
+  'focus:shadow-[1px_1px_0_0_#1C1917] transition-all cursor-pointer';
 
-type Range = "today" | "week" | "month";
-
-const RANGE_LABELS: Record<Range, string> = {
-  today: "今日",
-  week: "本周",
-  month: "本月",
-};
-
-function formatTime(iso: string, range: Range): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  if (range === "today") {
-    return d.toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  }
-  return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
-}
-
-/**
- * Usage history with today / week / month tabs. Wired to GET /v1/usage.
- * Charges come back from the backend as absolute credit counts; we show
- * them as negatives so the UI reads as a ledger.
- */
 export default function UsageHistory() {
-  const [range, setRange] = useState<Range>("today");
-  const [data, setData] = useState<UsageResponse | null>(null);
+  const [data, setData] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
+  const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    (async () => {
-      try {
-        const res = await api.usage(range);
-        if (!cancelled) setData(res);
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof ApiError
-              ? err.message
-              : `加载失败: ${(err as Error).message}`,
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [range]);
+    Promise.all([
+      api.getUsage({ limit: 50 }).then((r) => setData(r)),
+      api.getBuckets().then((r) => {
+        const total = (r.buckets || []).reduce((s: number, b) => {
+          if (b.skuType === 'topup' || b.skuType === 'trial') return s + (b.totalRemainingUsd ?? 0);
+          return s + (b.dailyRemainingUsd ?? 0);
+        }, 0);
+        setBalance(total);
+      }),
+    ]).finally(() => setLoading(false));
+  }, []);
 
-  const records = data?.records ?? [];
-  const totalCharged = data?.totalCreditsCharged ?? 0;
-  const totalTokens = data?.totalTokens ?? 0;
+  const buckets: HourBucket[] = (data.hourly24h || []).map((h) => {
+    const hourNum = parseInt(h.hour.split(':')[0], 10);
+    return { hour: hourNum, consumeUsd: h.consumed };
+  });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-bg flex items-center justify-center font-mono text-[#A89A8D]">
+        加载中…
+      </div>
+    );
+  }
 
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-6 flex flex-col">
-        <div className="mb-4">
-          <BackButton to="/dashboard" label="账户" />
-        </div>
+    <div className="min-h-screen bg-bg pb-12">
+      <AppNav current="history" />
 
-        <h1 className="text-h2 mb-4">使用记录</h1>
-
-        {/* Range tabs */}
-        <div className="flex bg-bg-alt rounded-sm p-1 mb-4">
-          {(["today", "week", "month"] as Range[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={[
-                "flex-1 py-2 rounded-sm text-label transition-colors",
-                range === r
-                  ? "bg-surface text-text-primary shadow-warm-sm"
-                  : "text-text-secondary",
-              ].join(" ")}
-            >
-              {RANGE_LABELS[r]}
-            </button>
-          ))}
-        </div>
-
-        {/* Total */}
-        <div className="bg-surface border border-border rounded-[14px] p-4 mb-4">
-          <div className="flex items-baseline justify-between">
-            <div className="text-caption text-text-secondary">
-              {RANGE_LABELS[range]}合计
+      <main className="max-w-[1340px] mx-auto px-5 sm:px-9 pt-6">
+        {/* Hero row — h1 left, BalancePill right */}
+        <div className="flex items-end justify-between mb-9 flex-wrap gap-4">
+          <div>
+            <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] mb-2 font-bold">
+              USAGE · 使用历史
             </div>
-            <div className="text-caption text-text-muted">
-              {loading
-                ? "…"
-                : `${data?.count ?? 0} 次 · ${totalTokens.toLocaleString()} tokens`}
+            <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-none mb-3">
+              每一笔都对得上账。
+            </h1>
+            <div className="font-mono text-[13px] text-[#6B5E52]">
+              共 <span className="text-ink font-bold">{data.totals?.calls ?? 0}</span> 次调用 ·
+              <span className="text-ink font-bold ml-1">${(data.totals?.consumed ?? 0).toFixed(2)}</span> 已用 ·
+              <span className="text-ink font-bold ml-1">4 月以来</span>
             </div>
           </div>
-          <div className="font-mono text-h2 mt-1">
-            -{totalCharged.toLocaleString()} credits
-          </div>
+          <BalancePill amount={`$${balance.toFixed(2)}`} label="当前余额" />
         </div>
 
-        {error && (
-          <div className="text-caption text-danger-text bg-danger-subtle border border-danger-border rounded-sm px-3 py-2 mb-4">
-            {error}
-          </div>
-        )}
+        {/* 24h chart */}
+        <section className="mb-7">
+          <SectionLabel
+            action={
+              <span className="font-mono text-[10px] flex gap-3 normal-case tracking-tight text-[#6B5E52]">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 bg-accent border-2 border-ink rounded-sm" />消耗
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 bg-accent-deep border-2 border-ink rounded-sm" />峰值
+                </span>
+              </span>
+            }
+          >
+            近 24 小时变化
+          </SectionLabel>
+          <ConsumeChart24h buckets={buckets} variant="desktop" />
+        </section>
 
-        {/* Transaction list */}
-        <div className="flex-1 space-y-1 overflow-y-auto">
-          {loading && (
-            <div className="text-center text-caption text-text-muted py-6">
-              加载中…
-            </div>
-          )}
-          {!loading && records.length === 0 && !error && (
-            <div className="text-center text-caption text-text-muted py-6">
-              暂无记录
-            </div>
-          )}
-          {records.map((t) => (
-            <div
-              key={t.id}
-              className="flex items-start justify-between px-2 py-3 border-b border-border-subtle"
-            >
-              <div>
-                <div className="text-body">{t.model}</div>
-                <div className="text-caption text-text-muted font-mono">
-                  {formatTime(t.at, range)} · {t.totalTokens.toLocaleString()} tokens
-                </div>
-              </div>
-              <div className="font-mono text-body text-text-primary">
-                -{t.creditsCharged.toLocaleString()}
-              </div>
-            </div>
-          ))}
+        {/* Filter bar */}
+        <div className={`${card} flex flex-wrap items-center gap-2.5 p-3 mb-5`}>
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mr-1">
+            筛选
+          </span>
+          <select className={selectCls}>
+            <option>近 7 天</option>
+            <option>近 30 天</option>
+            <option>4 月以来</option>
+          </select>
+          <select className={selectCls}>
+            <option>全部模型</option>
+          </select>
+          <select className={selectCls}>
+            <option>全部来源</option>
+          </select>
         </div>
-      </div>
-    </PhoneFrame>
+
+        {/* Table */}
+        <div className={`${card} overflow-hidden mb-5`}>
+          <table className="w-full">
+            <thead>
+              <tr className="bg-ink text-bg border-b-2 border-ink">
+                <Th className="w-32">时间 ↓</Th>
+                <Th className="w-24">类型</Th>
+                <Th className="w-32">来源</Th>
+                <Th>模型</Th>
+                <Th className="w-28 text-right">$ 变化</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.records?.length > 0 ? (
+                data.records.map((r) => (
+                  <UsageRow
+                    key={r.id}
+                    variant="desktop"
+                    time={new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    eventType={r.eventType}
+                    model={r.model || undefined}
+                    source={r.source || undefined}
+                    amount={`${r.amountUsd >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd).toFixed(3)}`}
+                  />
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="text-center text-[#A89A8D] text-[13px] p-8 font-mono">
+                    暂无使用记录 · 试着用一次 Agent，再回来这里看
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        <div className="flex justify-between items-center flex-wrap gap-3">
+          <div className="font-mono text-[12px] text-[#6B5E52]">
+            显示第 <span className="text-ink font-bold">1 至 {Math.min(50, data.records?.length ?? 0)}</span> 条，共{' '}
+            <span className="text-ink font-bold">{data.totals?.calls ?? 0}</span> 条记录
+          </div>
+          <div className="flex gap-1.5">
+            <PageBtn disabled>首页</PageBtn>
+            <PageBtn disabled>上一页</PageBtn>
+            <PageBtn active>1</PageBtn>
+            <PageBtn>下一页</PageBtn>
+            <PageBtn>末页</PageBtn>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <th className={`text-left font-mono text-[10.5px] font-bold tracking-[0.14em] uppercase text-bg/85 px-4 py-3 ${className}`}>
+      {children}
+    </th>
+  );
+}
+
+function PageBtn({
+  children,
+  active = false,
+  disabled = false,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+}) {
+  if (active) {
+    return (
+      <button className="px-3 py-1.5 font-mono text-[12px] font-bold border-2 border-ink rounded bg-ink text-bg shadow-[2px_2px_0_0_#1C1917]/40">
+        {children}
+      </button>
+    );
+  }
+  return (
+    <button
+      disabled={disabled}
+      className={
+        'px-3 py-1.5 font-mono text-[12px] font-bold border-2 border-ink rounded bg-white text-ink ' +
+        'shadow-[2px_2px_0_0_#1C1917] ' +
+        'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+        'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+        'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[2px_2px_0_0_#1C1917] ' +
+        'transition-all'
+      }
+    >
+      {children}
+    </button>
   );
 }

@@ -17,6 +17,7 @@
 import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
 
 // ---------- Record types ----------
 
@@ -27,6 +28,8 @@ export interface UserRecord {
   phone?: string;
   passwordHash?: string;
   createdAt: string;
+  /** True after the user clicks the verification link sent on register. */
+  emailVerified?: boolean;
   /** newapi user ID (if provisioned). */
   newapiUserId?: number;
   /**
@@ -57,9 +60,11 @@ export interface OrderRecord {
   paidAt?: string;
 }
 
-// ---------- Database init ----------
+// ---------- Database singleton ----------
 
-const DB_PATH = process.env.DATABASE_PATH ?? "data/tokenboss.db";
+// Assigned by init() which is called immediately at module load below.
+// eslint-disable-next-line prefer-const
+export let db: Database.Database = null!;
 
 function ensureDir(filePath: string) {
   const dir = dirname(filePath);
@@ -68,110 +73,158 @@ function ensureDir(filePath: string) {
   }
 }
 
-ensureDir(DB_PATH);
+/**
+ * (Re-)initialise the database. Must be called before any CRUD functions.
+ * Reads SQLITE_PATH (test override) or DATABASE_PATH (production) from env.
+ * Safe to call multiple times — closes any existing connection first.
+ */
+export function init(): void {
+  const dbPath =
+    process.env.SQLITE_PATH ?? process.env.DATABASE_PATH ?? "data/tokenboss.db";
 
-const db = new Database(DB_PATH);
-
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    userId         TEXT PRIMARY KEY,
-    displayName    TEXT,
-    email          TEXT,
-    phone          TEXT,
-    passwordHash   TEXT,
-    createdAt      TEXT NOT NULL,
-    newapiUserId   INTEGER,
-    newapiPassword TEXT
-  );
-
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
-    ON users(email) WHERE email IS NOT NULL;
-
-  CREATE TABLE IF NOT EXISTS orders (
-    orderId            TEXT PRIMARY KEY,
-    userId             TEXT NOT NULL,
-    planId             TEXT NOT NULL,
-    channel            TEXT NOT NULL,
-    amountCNY          REAL NOT NULL,
-    amountActual       REAL,
-    status             TEXT NOT NULL,
-    upstreamTradeId    TEXT,
-    upstreamPaymentUrl TEXT,
-    blockTxId          TEXT,
-    receiveAddress     TEXT,
-    createdAt          TEXT NOT NULL,
-    paidAt             TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_orders_user
-    ON orders(userId, createdAt DESC);
-`);
-
-// Lightweight migrations — add missing columns on pre-existing dev DBs.
-{
-  const cols = db
-    .prepare(`PRAGMA table_info(users)`)
-    .all() as { name: string }[];
-  const have = new Set(cols.map((c) => c.name));
-  if (!have.has("newapiPassword")) {
-    db.exec(`ALTER TABLE users ADD COLUMN newapiPassword TEXT`);
+  if (db) {
+    db.close();
   }
+
+  if (dbPath !== ":memory:") {
+    ensureDir(dbPath);
+  }
+
+  db = new Database(dbPath);
+
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      userId         TEXT PRIMARY KEY,
+      displayName    TEXT,
+      email          TEXT,
+      phone          TEXT,
+      passwordHash   TEXT,
+      createdAt      TEXT NOT NULL,
+      emailVerified  INTEGER NOT NULL DEFAULT 0,
+      newapiUserId   INTEGER,
+      newapiPassword TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+      ON users(email) WHERE email IS NOT NULL;
+  `);
+
+  // Lightweight migrations — add missing columns on pre-existing dev DBs.
+  {
+    const cols = db
+      .prepare(`PRAGMA table_info(users)`)
+      .all() as { name: string }[];
+    const have = new Set(cols.map((c) => c.name));
+    if (!have.has("newapiPassword")) {
+      db.exec(`ALTER TABLE users ADD COLUMN newapiPassword TEXT`);
+    }
+    if (!have.has("emailVerified")) {
+      db.exec(`ALTER TABLE users ADD COLUMN emailVerified INTEGER NOT NULL DEFAULT 0`);
+    }
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_verify_tokens (
+      token       TEXT PRIMARY KEY,
+      userId      TEXT NOT NULL,
+      email       TEXT NOT NULL,
+      createdAt   TEXT NOT NULL,
+      expiresAt   TEXT NOT NULL,
+      consumedAt  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_evt_user ON email_verify_tokens(userId, createdAt DESC);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credit_bucket (
+      id                  TEXT PRIMARY KEY,
+      userId              TEXT NOT NULL,
+      skuType             TEXT NOT NULL CHECK (skuType IN ('trial','topup','plan_plus','plan_super','plan_ultra')),
+      amountUsd           REAL NOT NULL,
+      dailyCapUsd         REAL,
+      dailyRemainingUsd   REAL,
+      totalRemainingUsd   REAL,
+      startedAt           TEXT NOT NULL,
+      expiresAt           TEXT,
+      modeLock            TEXT NOT NULL CHECK (modeLock IN ('none','auto_only','auto_eco_only')),
+      modelPool           TEXT NOT NULL CHECK (modelPool IN ('all','codex_only','eco_only')),
+      createdAt           TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bucket_user ON credit_bucket(userId, skuType);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS verification_codes (
+      email          TEXT NOT NULL,
+      code           TEXT NOT NULL,
+      expiresAt      TEXT NOT NULL,
+      consumed       INTEGER NOT NULL DEFAULT 0,
+      createdAt      TEXT NOT NULL,
+      failedAttempts INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_codes_email ON verification_codes(email, code);
+  `);
+
+  // Idempotent migration: add failedAttempts column to pre-existing DBs.
+  try {
+    db.exec(`ALTER TABLE verification_codes ADD COLUMN failedAttempts INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists — ignore.
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId      TEXT NOT NULL,
+      bucketId    TEXT,
+      eventType   TEXT NOT NULL CHECK (eventType IN ('consume','reset','expire','topup','refund')),
+      amountUsd   REAL NOT NULL,
+      model       TEXT,
+      source      TEXT,
+      keyHint     TEXT,
+      tokensIn    INTEGER,
+      tokensOut   INTEGER,
+      createdAt   TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(userId, createdAt DESC);
+  `);
+
+  // Idempotent migration: add keyHint to pre-existing DBs (last 8 chars
+  // of the bearer token used for the request, so the dashboard can
+  // attribute each call to one of the user's API keys).
+  try {
+    db.exec(`ALTER TABLE usage_log ADD COLUMN keyHint TEXT`);
+  } catch {
+    // Column already exists — ignore.
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS orders (
+      orderId            TEXT PRIMARY KEY,
+      userId             TEXT NOT NULL,
+      planId             TEXT NOT NULL,
+      channel            TEXT NOT NULL,
+      amountCNY          REAL NOT NULL,
+      amountActual       REAL,
+      status             TEXT NOT NULL,
+      upstreamTradeId    TEXT,
+      upstreamPaymentUrl TEXT,
+      blockTxId          TEXT,
+      receiveAddress     TEXT,
+      createdAt          TEXT NOT NULL,
+      paidAt             TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_orders_user
+      ON orders(userId, createdAt DESC);
+  `);
 }
 
-// ---------- Prepared statements ----------
-
-const stmts = {
-  getUser: db.prepare(`SELECT * FROM users WHERE userId = ?`),
-  putUser: db.prepare(`
-    INSERT OR REPLACE INTO users
-      (userId, displayName, email, phone, passwordHash, createdAt, newapiUserId, newapiPassword)
-    VALUES
-      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @newapiUserId, @newapiPassword)
-  `),
-  getUserByEmail: db.prepare(`SELECT userId FROM users WHERE email = ?`),
-
-  insertOrder: db.prepare(`
-    INSERT INTO orders
-      (orderId, userId, planId, channel, amountCNY, amountActual, status,
-       upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
-       createdAt, paidAt)
-    VALUES
-      (@orderId, @userId, @planId, @channel, @amountCNY, @amountActual, @status,
-       @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
-       @createdAt, @paidAt)
-  `),
-  getOrder: db.prepare(`SELECT * FROM orders WHERE orderId = ?`),
-  listOrdersByUser: db.prepare(
-    `SELECT * FROM orders WHERE userId = ? ORDER BY createdAt DESC LIMIT ?`,
-  ),
-  attachUpstream: db.prepare(`
-    UPDATE orders
-       SET upstreamTradeId = @upstreamTradeId,
-           upstreamPaymentUrl = @upstreamPaymentUrl,
-           amountActual = @amountActual
-     WHERE orderId = @orderId
-  `),
-  // Conditional update: only flip pending→paid. RowsChanged=0 means the
-  // row was already paid (or expired/failed) — duplicate webhooks become
-  // no-ops, giving us idempotent settlement.
-  markPaidIfPending: db.prepare(`
-    UPDATE orders
-       SET status = 'paid',
-           paidAt = @paidAt,
-           amountActual = COALESCE(@amountActual, amountActual),
-           blockTxId = COALESCE(@blockTxId, blockTxId),
-           receiveAddress = COALESCE(@receiveAddress, receiveAddress)
-     WHERE orderId = @orderId AND status = 'pending'
-  `),
-  markStatus: db.prepare(`
-    UPDATE orders
-       SET status = @status
-     WHERE orderId = @orderId AND status = 'pending'
-  `),
-};
+// Initialise on module load (production default path).
+// Tests call init() again after setting process.env.SQLITE_PATH = ':memory:'.
+init();
 
 // ---------- Row → Record mappers ----------
 
@@ -183,6 +236,7 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     phone: (row.phone as string) ?? undefined,
     passwordHash: (row.passwordHash as string) ?? undefined,
     createdAt: row.createdAt as string,
+    emailVerified: ((row.emailVerified as number) ?? 0) === 1,
     newapiUserId: (row.newapiUserId as number) ?? undefined,
     newapiPassword: (row.newapiPassword as string) ?? undefined,
   };
@@ -206,43 +260,397 @@ function rowToOrder(row: Record<string, unknown>): OrderRecord {
   };
 }
 
-// ---------- Public API ----------
+// ---------- Public API — Users ----------
 
 export async function getUser(userId: string): Promise<UserRecord | null> {
-  const row = stmts.getUser.get(userId) as Record<string, unknown> | undefined;
+  const row = db
+    .prepare(`SELECT * FROM users WHERE userId = ?`)
+    .get(userId) as Record<string, unknown> | undefined;
   return row ? rowToUser(row) : null;
 }
 
-export async function putUser(rec: UserRecord): Promise<void> {
-  stmts.putUser.run({
+export function putUser(rec: UserRecord): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO users
+      (userId, displayName, email, phone, passwordHash, createdAt, emailVerified, newapiUserId, newapiPassword)
+    VALUES
+      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified, @newapiUserId, @newapiPassword)
+  `).run({
     userId: rec.userId,
     displayName: rec.displayName ?? null,
     email: rec.email ?? null,
     phone: rec.phone ?? null,
     passwordHash: rec.passwordHash ?? null,
     createdAt: rec.createdAt,
+    emailVerified: rec.emailVerified ? 1 : 0,
     newapiUserId: rec.newapiUserId ?? null,
     newapiPassword: rec.newapiPassword ?? null,
   });
 }
 
-export async function getUserIdByEmail(email: string): Promise<string | null> {
+export function getUserIdByEmail(email: string): string | null {
   const norm = email.trim().toLowerCase();
   if (!norm) return null;
-  const row = stmts.getUserByEmail.get(norm) as { userId: string } | undefined;
+  const row = db
+    .prepare(`SELECT userId FROM users WHERE email = ?`)
+    .get(norm) as { userId: string } | undefined;
   return row?.userId ?? null;
 }
 
-export async function putEmailIndex(_email: string, _userId: string): Promise<void> {
+export async function putEmailIndex(
+  _email: string,
+  _userId: string
+): Promise<void> {
   // Email uniqueness is enforced by the UNIQUE index on users.email.
   // This function is kept for API compatibility but is now a no-op —
   // the email is written as part of putUser().
 }
 
-// ---------- Orders ----------
+// ---------- Bucket types ----------
+
+export type BucketSku =
+  | "trial"
+  | "topup"
+  | "plan_plus"
+  | "plan_super"
+  | "plan_ultra";
+export type ModeLock = "none" | "auto_only" | "auto_eco_only";
+export type ModelPool = "all" | "codex_only" | "eco_only";
+
+export interface Bucket {
+  id: string;
+  userId: string;
+  skuType: BucketSku;
+  amountUsd: number;
+  dailyCapUsd: number | null;
+  dailyRemainingUsd: number | null;
+  totalRemainingUsd: number | null;
+  startedAt: string;
+  expiresAt: string | null;
+  modeLock: ModeLock;
+  modelPool: ModelPool;
+  createdAt: string;
+}
+
+// ---------- Public API — Buckets ----------
+
+export function createBucket(b: Omit<Bucket, "id" | "createdAt">): Bucket {
+  const id = randomBytes(16).toString("hex");
+  const createdAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO credit_bucket (id, userId, skuType, amountUsd, dailyCapUsd, dailyRemainingUsd,
+      totalRemainingUsd, startedAt, expiresAt, modeLock, modelPool, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    b.userId,
+    b.skuType,
+    b.amountUsd,
+    b.dailyCapUsd,
+    b.dailyRemainingUsd,
+    b.totalRemainingUsd,
+    b.startedAt,
+    b.expiresAt,
+    b.modeLock,
+    b.modelPool,
+    createdAt
+  );
+  return { id, createdAt, ...b };
+}
+
+export function getActiveBucketsForUser(userId: string): Bucket[] {
+  return db
+    .prepare(
+      `
+    SELECT * FROM credit_bucket
+    WHERE userId = ?
+      AND (expiresAt IS NULL OR datetime(expiresAt) > datetime('now'))
+      AND (
+        (skuType IN ('plan_plus','plan_super','plan_ultra') AND COALESCE(dailyRemainingUsd, 0) > 0)
+        OR (skuType IN ('trial','topup') AND COALESCE(totalRemainingUsd, 0) > 0)
+      )
+    ORDER BY
+      CASE WHEN skuType = 'topup' THEN 1 ELSE 0 END,
+      expiresAt ASC,
+      createdAt ASC
+  `
+    )
+    .all(userId) as Bucket[];
+}
+
+export function getActiveSubscriptionBuckets(): Bucket[] {
+  return db
+    .prepare(
+      `
+    SELECT * FROM credit_bucket
+    WHERE skuType != 'topup'
+      AND (expiresAt IS NULL OR datetime(expiresAt) > datetime('now'))
+  `
+    )
+    .all() as Bucket[];
+}
+
+export function consumeBucket(bucketId: string, amountUsd: number): void {
+  db.prepare(`
+    UPDATE credit_bucket
+    SET dailyRemainingUsd = COALESCE(dailyRemainingUsd, 0) - ?,
+        totalRemainingUsd = CASE WHEN totalRemainingUsd IS NOT NULL THEN totalRemainingUsd - ? ELSE NULL END
+    WHERE id = ?
+  `).run(amountUsd, amountUsd, bucketId);
+}
+
+export function resetBucketDaily(bucketId: string, dailyCapUsd: number): void {
+  db.prepare(`UPDATE credit_bucket SET dailyRemainingUsd = ? WHERE id = ?`).run(
+    dailyCapUsd,
+    bucketId
+  );
+}
+
+export function expireBucketDaily(bucketId: string): number {
+  const row = db
+    .prepare(`SELECT dailyRemainingUsd FROM credit_bucket WHERE id = ?`)
+    .get(bucketId) as { dailyRemainingUsd: number | null } | undefined;
+  const remaining = row?.dailyRemainingUsd ?? 0;
+  db.prepare(
+    `UPDATE credit_bucket SET dailyRemainingUsd = 0 WHERE id = ?`
+  ).run(bucketId);
+  return remaining;
+}
+
+// ---------- Public API — Verification Codes ----------
+
+export function saveVerificationCode(email: string, code: string, ttlSeconds: number): void {
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  db.prepare(`
+    INSERT INTO verification_codes (email, code, expiresAt, consumed, createdAt)
+    VALUES (?, ?, ?, 0, ?)
+  `).run(email.toLowerCase(), code, expiresAt, new Date().toISOString());
+}
+
+export function consumeVerificationCode(email: string, code: string): boolean {
+  // Find the latest unconsumed code for this email (regardless of code value).
+  const latest = db.prepare(`
+    SELECT rowid AS id, code AS storedCode, expiresAt, failedAttempts FROM verification_codes
+    WHERE email = ? AND consumed = 0
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(email.toLowerCase()) as { id: number; storedCode: string; expiresAt: string; failedAttempts: number } | undefined;
+
+  if (!latest) return false;
+  if (new Date(latest.expiresAt) < new Date()) return false;
+
+  if (latest.storedCode === code) {
+    // Correct code — consume it.
+    db.prepare(`UPDATE verification_codes SET consumed = 1 WHERE rowid = ?`).run(latest.id);
+    return true;
+  }
+
+  // Wrong code — increment failedAttempts and lock out after 5 failures.
+  const newCount = latest.failedAttempts + 1;
+  if (newCount >= 5) {
+    db.prepare(`UPDATE verification_codes SET consumed = 1 WHERE rowid = ?`).run(latest.id);
+  } else {
+    db.prepare(`UPDATE verification_codes SET failedAttempts = ? WHERE rowid = ?`).run(newCount, latest.id);
+  }
+  return false;
+}
+
+export function recentCodeCount(email: string, sinceSeconds: number): number {
+  const since = new Date(Date.now() - sinceSeconds * 1000).toISOString();
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM verification_codes
+    WHERE email = ? AND createdAt > ? AND consumed = 0
+  `).get(email.toLowerCase(), since) as { n: number };
+  return row.n;
+}
+
+// ---------- Public API — Email Verification (link-based) ----------
+
+const EMAIL_VERIFY_TTL_HOURS = 24;
+
+/**
+ * Mint a one-shot URL-safe token tied to (userId, email). Caller embeds
+ * the token in a verification link delivered by email.
+ */
+export function createEmailVerifyToken(userId: string, email: string): {
+  token: string;
+  expiresAt: string;
+} {
+  const token = randomBytes(32).toString("base64url");
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + EMAIL_VERIFY_TTL_HOURS * 3600e3).toISOString();
+  db.prepare(`
+    INSERT INTO email_verify_tokens (token, userId, email, createdAt, expiresAt, consumedAt)
+    VALUES (?, ?, ?, ?, ?, NULL)
+  `).run(token, userId, email.toLowerCase(), now.toISOString(), expiresAt);
+  return { token, expiresAt };
+}
+
+/**
+ * Atomically consume a token. Returns the (userId, email) pair on success,
+ * or null when the token is unknown, expired, or already consumed.
+ */
+export function consumeEmailVerifyToken(token: string): {
+  userId: string;
+  email: string;
+} | null {
+  const row = db.prepare(`
+    SELECT userId, email, expiresAt, consumedAt
+    FROM email_verify_tokens
+    WHERE token = ?
+  `).get(token) as
+    | { userId: string; email: string; expiresAt: string; consumedAt: string | null }
+    | undefined;
+  if (!row) return null;
+  if (row.consumedAt) return null;
+  if (new Date(row.expiresAt) < new Date()) return null;
+
+  db.prepare(`
+    UPDATE email_verify_tokens SET consumedAt = ? WHERE token = ?
+  `).run(new Date().toISOString(), token);
+  return { userId: row.userId, email: row.email };
+}
+
+/** Mark a user's email verified after a successful token consume. */
+export function markEmailVerified(userId: string): void {
+  db.prepare(`UPDATE users SET emailVerified = 1 WHERE userId = ?`).run(userId);
+}
+
+/**
+ * How many verify-token rows have been minted for this user in the past N
+ * seconds. Used to rate-limit the resend endpoint (1 / 60s, 5 / hour).
+ */
+export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number): number {
+  const since = new Date(Date.now() - sinceSeconds * 1000).toISOString();
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM email_verify_tokens
+    WHERE userId = ? AND createdAt > ?
+  `).get(userId, since) as { n: number };
+  return row.n;
+}
+
+// ---------- Public API — Usage Log ----------
+
+export type EventType = 'consume' | 'reset' | 'expire' | 'topup' | 'refund';
+
+export interface UsageRecord {
+  id: number;
+  userId: string;
+  bucketId: string | null;
+  eventType: EventType;
+  amountUsd: number;
+  model: string | null;
+  source: string | null;
+  keyHint: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  createdAt: string;
+}
+
+export function logUsage(
+  r: Omit<UsageRecord, 'id' | 'createdAt' | 'keyHint'> & { keyHint?: string | null },
+): UsageRecord {
+  const createdAt = new Date().toISOString();
+  const keyHint = r.keyHint ?? null;
+  const result = db.prepare(`
+    INSERT INTO usage_log (userId, bucketId, eventType, amountUsd, model, source, keyHint, tokensIn, tokensOut, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(r.userId, r.bucketId, r.eventType, r.amountUsd, r.model, r.source, keyHint, r.tokensIn, r.tokensOut, createdAt);
+  return { id: Number(result.lastInsertRowid), createdAt, keyHint, ...r };
+}
+
+export interface HourlyUsage {
+  hour: string;   // "HH:00"
+  consumed: number;
+}
+
+export function getHourlyUsage24h(userId: string): HourlyUsage[] {
+  const now = new Date();
+  const buckets: HourlyUsage[] = [];
+  for (let i = 23; i >= 0; i--) {
+    const hourStart = new Date(now.getTime() - i * 3600e3);
+    hourStart.setMinutes(0, 0, 0);
+    const hourEnd = new Date(hourStart.getTime() + 3600e3);
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(amountUsd), 0) AS total
+      FROM usage_log
+      WHERE userId = ?
+        AND eventType = 'consume'
+        AND createdAt >= ? AND createdAt < ?
+    `).get(userId, hourStart.toISOString(), hourEnd.toISOString()) as { total: number };
+    buckets.push({
+      hour: `${hourStart.getUTCHours().toString().padStart(2, '0')}:00`,
+      consumed: row.total ?? 0,
+    });
+  }
+  return buckets;
+}
+
+export interface UsageAggregate {
+  /** The grouping key (source string or keyHint). null when the field was unset on those records. */
+  groupKey: string | null;
+  callCount: number;
+  totalConsumedUsd: number;
+  lastUsedAt: string;
+}
+
+/**
+ * Aggregate consume-events for a user grouped by a field. Used by the
+ * dashboard's AGENTS panel ("which Agents have used my account") and
+ * keys panel ("which keys have been used and how much"). Always
+ * filtered to consume events; reset/expire/topup/refund are bookkeeping
+ * and would skew the totals.
+ */
+export function aggregateUsageForUser(
+  userId: string,
+  groupBy: 'source' | 'keyHint',
+  opts: { from?: string; to?: string; limit?: number } = {},
+): UsageAggregate[] {
+  const limit = opts.limit ?? 50;
+  let where = `userId = ? AND eventType = 'consume'`;
+  const params: unknown[] = [userId];
+  if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
+  if (opts.to)   { where += ` AND createdAt <= ?`; params.push(opts.to); }
+  return db.prepare(`
+    SELECT ${groupBy} AS groupKey,
+           COUNT(*) AS callCount,
+           COALESCE(SUM(amountUsd), 0) AS totalConsumedUsd,
+           MAX(createdAt) AS lastUsedAt
+    FROM usage_log
+    WHERE ${where}
+    GROUP BY ${groupBy}
+    ORDER BY lastUsedAt DESC
+    LIMIT ?
+  `).all(...params, limit) as UsageAggregate[];
+}
+
+export function getUsageForUser(userId: string, opts: { limit?: number; offset?: number; eventTypes?: EventType[]; from?: string; to?: string } = {}): UsageRecord[] {
+  const limit = opts.limit ?? 50;
+  const offset = opts.offset ?? 0;
+  let where = `userId = ?`;
+  const params: unknown[] = [userId];
+  if (opts.eventTypes?.length) {
+    where += ` AND eventType IN (${opts.eventTypes.map(() => '?').join(',')})`;
+    params.push(...opts.eventTypes);
+  }
+  if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
+  if (opts.to) { where += ` AND createdAt <= ?`; params.push(opts.to); }
+  return db.prepare(`SELECT * FROM usage_log WHERE ${where} ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset) as UsageRecord[];
+}
+
+// ---------- Public API — Orders ----------
 
 export async function createOrder(rec: OrderRecord): Promise<void> {
-  stmts.insertOrder.run({
+  db.prepare(`
+    INSERT INTO orders
+      (orderId, userId, planId, channel, amountCNY, amountActual, status,
+       upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
+       createdAt, paidAt)
+    VALUES
+      (@orderId, @userId, @planId, @channel, @amountCNY, @amountActual, @status,
+       @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
+       @createdAt, @paidAt)
+  `).run({
     orderId: rec.orderId,
     userId: rec.userId,
     planId: rec.planId,
@@ -260,7 +668,9 @@ export async function createOrder(rec: OrderRecord): Promise<void> {
 }
 
 export async function getOrder(orderId: string): Promise<OrderRecord | null> {
-  const row = stmts.getOrder.get(orderId) as Record<string, unknown> | undefined;
+  const row = db
+    .prepare(`SELECT * FROM orders WHERE orderId = ?`)
+    .get(orderId) as Record<string, unknown> | undefined;
   return row ? rowToOrder(row) : null;
 }
 
@@ -268,7 +678,9 @@ export async function listOrdersByUser(
   userId: string,
   limit = 50,
 ): Promise<OrderRecord[]> {
-  const rows = stmts.listOrdersByUser.all(userId, limit) as Record<string, unknown>[];
+  const rows = db
+    .prepare(`SELECT * FROM orders WHERE userId = ? ORDER BY createdAt DESC LIMIT ?`)
+    .all(userId, limit) as Record<string, unknown>[];
   return rows.map(rowToOrder);
 }
 
@@ -278,14 +690,18 @@ export async function attachUpstreamFields(args: {
   upstreamPaymentUrl: string;
   amountActual: number;
 }): Promise<void> {
-  stmts.attachUpstream.run(args);
+  db.prepare(`
+    UPDATE orders
+       SET upstreamTradeId = @upstreamTradeId,
+           upstreamPaymentUrl = @upstreamPaymentUrl,
+           amountActual = @amountActual
+     WHERE orderId = @orderId
+  `).run(args);
 }
 
-/**
- * Settle a payment. Returns true on the first successful pending→paid
- * transition; subsequent calls (duplicate webhooks) return false without
- * mutating the row. Callers use this to decide whether to credit balance.
- */
+// Conditional update: only flip pending→paid. RowsChanged=0 means the
+// row was already paid (or expired/failed) — duplicate webhooks become
+// no-ops, giving us idempotent settlement.
 export async function markOrderPaidIfPending(args: {
   orderId: string;
   paidAt: string;
@@ -293,7 +709,15 @@ export async function markOrderPaidIfPending(args: {
   blockTxId?: string;
   receiveAddress?: string;
 }): Promise<boolean> {
-  const result = stmts.markPaidIfPending.run({
+  const result = db.prepare(`
+    UPDATE orders
+       SET status = 'paid',
+           paidAt = @paidAt,
+           amountActual = COALESCE(@amountActual, amountActual),
+           blockTxId = COALESCE(@blockTxId, blockTxId),
+           receiveAddress = COALESCE(@receiveAddress, receiveAddress)
+     WHERE orderId = @orderId AND status = 'pending'
+  `).run({
     orderId: args.orderId,
     paidAt: args.paidAt,
     amountActual: args.amountActual ?? null,
@@ -307,6 +731,10 @@ export async function markOrderStatus(args: {
   orderId: string;
   status: Exclude<OrderStatus, "paid">;
 }): Promise<boolean> {
-  const result = stmts.markStatus.run(args);
+  const result = db.prepare(`
+    UPDATE orders
+       SET status = @status
+     WHERE orderId = @orderId AND status = 'pending'
+  `).run(args);
   return result.changes > 0;
 }

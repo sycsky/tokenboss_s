@@ -12,3 +12,21 @@ samconfig.toml
 .worktrees/
 .gstack/
 vendor/
+
+# brainstorming visual companion
+.superpowers/
+
+# Playwright screenshots
+*.png
+!frontend/src/assets/**/*.png
+
+# SQLite WAL/SHM (dev artifacts)
+*.db-shm
+*.db-wal
+
+# Sibling project (separate repo)
+clawd-on-desk/
+
+# Vite config compiled outputs (vite.config.ts is the source of truth)
+frontend/vite.config.js
+frontend/vite.config.d.ts

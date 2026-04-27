@@ -1,121 +1,463 @@
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { LinkButton } from "../components/Button.js";
-import { Card } from "../components/Card.js";
+import { Link, useNavigate } from 'react-router-dom';
+import { CompatRow, AgentMark } from '../components/CompatRow';
+import { TerminalBlock } from '../components/TerminalBlock';
+import { TierCard } from '../components/TierCard';
+import { SectionHeader } from '../components/SectionHeader';
+import { TopNav, BrandPlate } from '../components/TopNav';
+import { CurrencySwitcher } from '../components/CurrencySwitcher';
+import { useAuth } from '../lib/auth';
+import { useCurrency } from '../lib/currency';
+import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
+import { slockBtn } from '../lib/slockBtn';
+import openClawIcon from '../assets/agents/openclaw.svg';
+import hermesIcon from '../assets/agents/hermes.png';
+
+// Compat row: only true Agent products (not coding CLIs). Codex / Claude
+// Code are dev-environments, not agents — keeping the row honest.
+const AGENTS: AgentMark[] = [
+  {
+    id: 'oc',
+    name: 'OpenClaw',
+    className: 'bg-[#0A0807] p-1',
+    icon: <img src={openClawIcon} alt="" className="w-full h-full" style={{ imageRendering: 'pixelated' }} />,
+  },
+  {
+    id: 'hm',
+    name: 'Hermes Agent',
+    className: 'bg-white p-0',
+    icon: <img src={hermesIcon} alt="" className="w-full h-full object-cover rounded-lg" />,
+  },
+];
 
 /**
- * Screen 1a — Landing (current version).
- * Value-prop-forward: savings, agent-ready, open-source, supported models,
- * local payment badges.
+ * Differentiator card · used in the Slock-style features row. Each card is
+ * a tinted block (bg-[#FFF4E6] etc) with a tiny mono tag on top, a short
+ * h3 in the middle, and one paragraph of body copy.
  */
-export default function Landing() {
+function FeatureCard({
+  tag,
+  title,
+  body,
+  accentBg,
+}: {
+  tag: string;
+  title: string;
+  body: string;
+  accentBg: string;
+}) {
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-8 flex flex-col">
-        {/* Nav row */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="text-[18px] font-bold tracking-tight">TokenBoss</div>
-          <a
-            href="/landing/vision"
-            className="text-label text-text-secondary hover:text-accent"
-          >
-            愿景
-          </a>
+    <div className={`${accentBg} rounded-md p-6 md:p-7 border-2 border-ink shadow-[4px_4px_0_0_#1C1917]`}>
+      <p className="font-mono text-[10.5px] font-bold tracking-[0.16em] uppercase text-ink-3 mb-4">
+        {tag}
+      </p>
+      <h3 className="text-[18px] md:text-[20px] font-bold tracking-tight mb-2.5 leading-tight">
+        {title}
+      </h3>
+      <p className="text-[13.5px] text-ink-2 leading-relaxed">
+        {body}
+      </p>
+    </div>
+  );
+}
+
+
+interface FooterLink {
+  text: string;
+  to?: string;
+  href?: string;
+}
+function FooterCol({ label, links }: { label: string; links: FooterLink[] }) {
+  return (
+    <div>
+      <p className="font-mono text-[10.5px] font-bold tracking-[0.18em] uppercase text-white/35 mb-4">
+        {label}
+      </p>
+      <ul className="space-y-2.5">
+        {links.map((l) => (
+          <li key={l.text}>
+            {l.to ? (
+              <Link to={l.to} className="text-[13px] text-white/65 hover:text-white transition-colors">
+                {l.text}
+              </Link>
+            ) : (
+              <a href={l.href} className="text-[13px] text-white/65 hover:text-white transition-colors">
+                {l.text}
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Animated terminal demo on the hero right side. Pure CSS keyframes loop a
+ * 6-second cycle showing the four steps after a user runs the install
+ * command in their Agent: typing the command → fetching → registering skill
+ * → activating $10 trial → idle waiting for instructions.
+ */
+function HeroTerminalDemo() {
+  return (
+    <div className="font-mono text-[13px] leading-relaxed bg-[#1C1917] rounded-2xl border border-[#3A332D] shadow-[0_30px_60px_-30px_rgba(60,40,20,0.45),0_8px_24px_-10px_rgba(60,40,20,0.25)] overflow-hidden select-none">
+      {/* chrome — alternates between HERMES AGENT and OPENCLAW every 6s */}
+      <div className="px-4 py-2.5 bg-[#0F0D0B] border-b border-[#3A332D] flex items-center gap-1.5">
+        <span className="w-2.5 h-2.5 rounded-full bg-[#FB7185]"></span>
+        <span className="w-2.5 h-2.5 rounded-full bg-[#FBBF24]"></span>
+        <span className="w-2.5 h-2.5 rounded-full bg-[#34D399]"></span>
+        <span className="ml-3 font-mono text-[10px] text-[#A89A8D] tracking-[0.16em] uppercase relative inline-block min-w-[160px]">
+          <span className="td-header td-header-hermes">hermes agent</span>
+          <span className="td-header td-header-openclaw absolute left-0 top-0">openclaw</span>
+        </span>
+      </div>
+
+      {/* body */}
+      <div className="p-5 min-h-[260px] text-[#A89A8D]">
+        <div className="flex items-baseline gap-2">
+          <span className="text-accent font-semibold">$</span>
+          <span className="text-[#FFF8F0] td-typing whitespace-nowrap overflow-hidden inline-block">set up tokenboss.com/skill.md</span>
+          <span className="td-cursor inline-block w-[7px] h-[14px] bg-[#FFF8F0] -mb-[2px]"></span>
         </div>
 
-        {/* Hero */}
-        <h1 className="text-hero mb-4">
-          一张卡
-          <br />
-          用遍所有
-          <br />
-          <span className="text-accent">AI 工具</span>
-        </h1>
-        <p className="text-body text-text-secondary mb-8">
-          面向非程序员的 AI API 中转站。支付宝 / 微信充值，
-          <br />
-          智能路由最多省 95% token。
-        </p>
-
-        {/* CTA */}
-        <LinkButton to="/onboard/welcome" fullWidth className="mb-3">
-          免费体验 →
-        </LinkButton>
-        <p className="text-caption text-text-muted text-center mb-8">
-          注册即送 $5 · 无需信用卡
-        </p>
-
-        {/* Feature cards */}
-        <div className="space-y-3 mb-8">
-          <Card>
-            <div className="flex items-start gap-3">
-              <span className="text-[22px]">⚡</span>
-              <div>
-                <div className="text-h3">最多省 95% token</div>
-                <div className="text-caption text-text-secondary mt-1">
-                  智能路由到最合适的模型，不为轻问题付重价
-                </div>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <div className="flex items-start gap-3">
-              <span className="text-[22px]">🤖</span>
-              <div>
-                <div className="text-h3">Agent-ready</div>
-                <div className="text-caption text-text-secondary mt-1">
-                  兼容 OpenAI / Anthropic / Claude Code 接口
-                </div>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <div className="flex items-start gap-3">
-              <span className="text-[22px]">🔓</span>
-              <div>
-                <div className="text-h3">开源可审计</div>
-                <div className="text-caption text-text-secondary mt-1">
-                  基于 ClawRouter 开源构建，路由逻辑透明
-                </div>
-              </div>
-            </div>
-          </Card>
+        <div className="td-line td-line-1 mt-2 flex items-center gap-2">
+          <span className="text-[#34D399]">→</span>
+          <span>fetching <span className="text-[#FFF8F0]">tokenboss.com/skill.md</span></span>
         </div>
 
-        {/* Model grid */}
-        <div className="mb-8">
-          <div className="text-label text-text-secondary mb-3">
-            已接入模型
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { name: "Claude Opus", color: "badge-claude" },
-              { name: "Claude Sonnet", color: "badge-claude" },
-              { name: "GPT-5.4", color: "success" },
-              { name: "GPT-5.3", color: "success" },
-            ].map((m) => (
-              <div
-                key={m.name}
-                className="bg-surface border border-border rounded-sm px-3 py-2 text-caption font-mono"
-              >
-                {m.name}
-              </div>
-            ))}
-          </div>
+        <div className="td-line td-line-2 mt-1 flex items-center gap-2">
+          <span className="text-[#34D399]">✓</span>
+          <span>registered skill <span className="text-accent">tokenboss</span> <span className="opacity-60">v1.0.0</span></span>
         </div>
 
-        {/* Payment badges */}
-        <div className="mt-auto flex items-center justify-center gap-3 pt-4 border-t border-border">
-          <div className="text-caption text-text-muted">支持支付方式</div>
-          <div className="flex items-center gap-2">
-            <span className="bg-info-subtle text-info-text rounded-sm px-2 py-1 text-caption font-medium">
-              支付宝
-            </span>
-            <span className="bg-success-subtle text-success-text rounded-sm px-2 py-1 text-caption font-medium">
-              微信支付
-            </span>
-          </div>
+        <div className="td-line td-line-3 mt-1 flex items-center gap-2">
+          <span className="text-[#34D399]">✓</span>
+          <span>activated <span className="text-[#FFF8F0]">$10</span> · <span className="opacity-60">24 h trial</span></span>
+        </div>
+
+        <div className="td-line td-line-4 mt-4 flex items-center gap-2 text-[#FFF8F0]">
+          <span className="text-accent">›</span>
+          <span>ready for instructions</span>
+          <span className="td-cursor-blink inline-block w-[7px] h-[14px] bg-[#FFF8F0] -mb-[2px]"></span>
         </div>
       </div>
-    </PhoneFrame>
+    </div>
+  );
+}
+
+export default function Landing() {
+  const { user } = useAuth();
+  const { currency } = useCurrency();
+  const isLoggedIn = !!user;
+  const navigate = useNavigate();
+  const goRegister = () => navigate('/register');
+  const std = STANDARD_RATE[currency];
+  const [plusTier, superTier, ultraTier] = TIERS;
+
+  // v1.0 has no self-checkout. Visitors → /register; logged-in → contact 客服.
+  // Ultra is sold-out for logged-in users per spec, but visitors still see the
+  // try CTA so we can funnel them into /register first.
+  const tierCta = isLoggedIn
+    ? { text: '联系客服购买', onClick: undefined }
+    : { text: '免费开始 →', onClick: goRegister };
+  const ultraCta = isLoggedIn
+    ? { text: '名额已满', onClick: undefined, soldOut: true, variant: 'disabled' as const }
+    : { text: '免费开始 →', onClick: goRegister, soldOut: false, variant: 'secondary' as const };
+  const standardCta = isLoggedIn
+    ? { text: '联系客服充值', onClick: undefined }
+    : { text: '免费开始 →', onClick: goRegister };
+
+  return (
+    <div className="min-h-screen bg-bg overflow-hidden">
+      <TopNav current="home" />
+
+      {/* Hero */}
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 pt-12 md:pt-20 pb-10 md:pb-12">
+        <CompatRow label="你已经在用的 Agent · 开箱接管" agents={AGENTS} className="mb-7" />
+
+        {/* 2-col on lg+, single col stacked on mobile */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] gap-x-12 gap-y-10 items-start">
+          {/* LEFT: H1 + terminal + meta + CTA */}
+          <div>
+            <h1 className="font-sans text-[44px] md:text-[60px] lg:text-[68px] font-extrabold leading-[1.05] tracking-tight">
+              你的 Agent，
+              <br />
+              <span className="text-accent">立刻用得起好模型。</span>
+            </h1>
+
+            <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
+
+            <p className="text-[13.5px] sm:text-[14px] text-ink-2 max-w-[520px] mt-4 leading-relaxed">
+              一行装好 → 顶级模型立刻可用 · 多 Agent 共用一份额度。
+            </p>
+
+            <div className="flex flex-wrap items-center gap-4 mt-8">
+              {isLoggedIn ? (
+                <Link to="/console" className={slockBtn('primary')}>
+                  去控制台 →
+                </Link>
+              ) : (
+                <>
+                  <Link to="/register" className={slockBtn('primary')}>
+                    <span className="inline-flex items-baseline gap-2">
+                      免费开始
+                      <span className="font-mono text-[12px] font-bold tracking-tight px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
+                        送 $10
+                      </span>
+                    </span>
+                  </Link>
+                  <span className="text-[13px] text-ink-2">
+                    已有账户？<Link to="/login" className="text-ink underline underline-offset-2 hover:text-accent">登录</Link>
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT: animated terminal demo (lg+ only) */}
+          <div className="hidden lg:block lg:pl-2">
+            <HeroTerminalDemo />
+          </div>
+        </div>
+      </section>
+
+      {/* Manifesto color band — Slock yellow-band equivalent (terracotta).
+          Carries the canonical brand sentence; Hero subtitle and Footer
+          intro echo it. */}
+      <section className="bg-accent text-white border-y-2 border-ink">
+        <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-16 md:py-20 text-center">
+          <h2 className="font-sans text-[26px] md:text-[40px] lg:text-[44px] font-extrabold leading-[1.15] tracking-tight">
+            你专心创造<span className="opacity-55">，</span>剩下交给我们。
+          </h2>
+        </div>
+      </section>
+
+      {/* Features · 3 cards, slock-style */}
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-20 md:py-28">
+        <p className="font-mono text-[10.5px] font-bold tracking-[0.2em] uppercase text-ink-3 mb-3 text-center">
+          What makes TokenBoss different
+        </p>
+        <h2 className="font-sans text-[28px] md:text-[40px] font-extrabold leading-[1.1] tracking-tight text-center mb-12 md:mb-16">
+          只解决一件事 — <span className="text-accent">让你的 Agent 顺手开工。</span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+          <FeatureCard
+            tag="01"
+            title="开局立刻用得起好模型"
+            body="$10 免费额度直接到账。Claude Opus / GPT-5 / Codex 顶级模型随便调，不用懂 API key。"
+            accentBg="bg-[#FFF4E6]"
+          />
+          <FeatureCard
+            tag="02"
+            title="换 Agent 不用换钱包"
+            body="今天 Hermes 写文案，明天 OpenClaw 跑研究 — 用同一份额度。换工具不重新开通。"
+            accentBg="bg-[#F0EBE3]"
+          />
+          <FeatureCard
+            tag="03"
+            title="Agent 自己接好"
+            body="在终端粘贴一行 → Agent 自己读 skill.md、自己接好 → 你专心创造，钱我来管。"
+            accentBg="bg-[#EAF1ED]"
+          />
+        </div>
+      </section>
+
+      {/* 01 · Membership tiers */}
+      <section id="pricing" className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
+        <div className="flex items-start justify-between gap-4">
+          <SectionHeader num="01" cn="套餐" en="Membership" />
+          <CurrencySwitcher className="mt-1" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mt-6">
+          <TierCard
+            name={plusTier.name}
+            pricePeriod={tierPricePeriod(plusTier, currency)}
+            leverage={plusTier.leverage}
+            totalUsd={plusTier.totalQuota}
+            dailyCap={plusTier.dailyCap}
+            models={plusTier.models}
+            ctaText={tierCta.text}
+            onCtaClick={tierCta.onClick}
+            ctaVariant="secondary"
+            tooltipExtras={plusTier.tooltipExtras}
+          />
+          <TierCard
+            name={superTier.name}
+            pricePeriod={tierPricePeriod(superTier, currency)}
+            leverage={superTier.leverage}
+            totalUsd={superTier.totalQuota}
+            dailyCap={superTier.dailyCap}
+            models={superTier.models}
+            ctaText={tierCta.text}
+            onCtaClick={tierCta.onClick}
+            ctaVariant="primary"
+            featured
+            tooltipExtras={superTier.tooltipExtras}
+          />
+          <TierCard
+            name={ultraTier.name}
+            pricePeriod={tierPricePeriod(ultraTier, currency)}
+            leverage={ultraTier.leverage}
+            totalUsd={ultraTier.totalQuota}
+            dailyCap={ultraTier.dailyCap}
+            models={ultraTier.models}
+            ctaText={ultraCta.text}
+            onCtaClick={ultraCta.onClick}
+            ctaVariant={ultraCta.variant}
+            soldOut={ultraCta.soldOut}
+            tooltipExtras={ultraTier.tooltipExtras}
+          />
+        </div>
+      </section>
+
+      {/* 02 · Pay-as-you-go */}
+      <section className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
+        <SectionHeader num="02" cn="按量充值" en="Pay as you go" />
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 p-6 md:p-7 bg-surface border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] mt-6">
+          <div>
+            <div className="font-mono text-[28px] md:text-[32px] font-bold leading-none text-ink mb-2">
+              <span className="font-medium">{std.unit}</span>
+              <span className="text-ink-4 mx-2.5 font-medium">=</span>
+              <span className="text-[16px] text-ink-3 align-top mr-px">$</span>
+              {std.quota.replace(/^\$/, '')}
+              <span className="text-[14px] text-ink-3 ml-2 font-medium">调用额度</span>
+            </div>
+            <div className="font-mono text-[12px] text-ink-3 tracking-tight">
+              {std.minTopup}
+            </div>
+          </div>
+          {standardCta.onClick ? (
+            <button onClick={standardCta.onClick} className={slockBtn('secondary')}>
+              {standardCta.text}
+            </button>
+          ) : (
+            <span className={slockBtn('secondary') + ' cursor-default'}>
+              {standardCta.text}
+            </span>
+          )}
+        </div>
+      </section>
+
+      {/* Final CTA color band — full-bleed terracotta with hard borders */}
+      {!isLoggedIn && (
+        <section className="bg-accent text-white border-y-2 border-ink">
+          <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-24 text-center">
+            <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-4">
+              现在试试？
+            </h2>
+            <p className="text-white/90 text-[15px] md:text-[17px] mb-8 inline-flex items-baseline gap-2 flex-wrap justify-center">
+              免费开始 · 送
+              <span className="font-mono text-[13px] font-bold tracking-tight px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
+                $10
+              </span>
+              体验额度 · 无需绑卡。
+            </p>
+            <div className="flex items-center justify-center gap-5 flex-wrap">
+              <Link to="/register" className={slockBtn('secondary')}>
+                免费开始 →
+              </Link>
+              <span className="text-white/90 text-[14px]">
+                已有账户？<Link to="/login" className="underline hover:text-white">登录</Link>
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Footer · dark Slock-style */}
+      <footer className="bg-ink text-white/60">
+        <div className="max-w-[1200px] mx-auto px-6 md:px-14 py-14 md:py-16">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 md:gap-12 mb-10">
+            {/* Brand col — uses the same tilted plate as the top nav */}
+            <div className="col-span-2 md:col-span-1">
+              <BrandPlate dark />
+              <p className="text-white/45 text-[13px] leading-relaxed max-w-xs mt-4">
+                你专心创造，剩下交给我们。
+              </p>
+            </div>
+
+            <FooterCol
+              label="PRODUCT"
+              links={[
+                { text: 'Wallet', to: '/' },
+                { text: 'Primitives', to: '/primitive' },
+              ]}
+            />
+            <FooterCol
+              label="DEVELOPERS"
+              links={[
+                { text: '快速接入', to: '/install/manual' },
+              ]}
+            />
+          </div>
+          <div className="pt-6 border-t border-white/10 font-mono text-[10.5px] text-white/35">
+            © 2026 TokenBoss · All rights reserved.
+          </div>
+        </div>
+      </footer>
+
+      {/* Animated terminal demo keyframes (scoped via CSS class names, single 6s loop) */}
+      <style>{`
+        @keyframes td-type {
+          0%   { width: 0; }
+          15%  { width: 100%; }
+          90%  { width: 100%; }
+          100% { width: 0; }
+        }
+        @keyframes td-fadeup {
+          0%, 100% { opacity: 0; transform: translateY(-3px); }
+          /* hold visible 25-90% of cycle */
+        }
+        @keyframes td-cursor {
+          0%, 12%   { opacity: 1; }
+          12.01%, 100% { opacity: 0; }
+        }
+        @keyframes td-cursor-blink {
+          0%, 60%   { opacity: 0; }
+          70%, 100% { opacity: 1; }
+          85%       { opacity: 0; }
+        }
+        .td-typing  { animation: td-type 6s steps(30, end) infinite; }
+        .td-cursor  { animation: td-cursor 6s steps(1, end) infinite; }
+        .td-line    { opacity: 0; animation-iteration-count: infinite; animation-duration: 6s; animation-timing-function: ease-out; animation-fill-mode: forwards; }
+        .td-line-1  { animation-name: td-line-1; }
+        .td-line-2  { animation-name: td-line-2; }
+        .td-line-3  { animation-name: td-line-3; }
+        .td-line-4  { animation-name: td-line-4; }
+        @keyframes td-line-1 {
+          0%, 24%  { opacity: 0; transform: translateY(-2px); }
+          28%, 92% { opacity: 1; transform: translateY(0); }
+          100%     { opacity: 0; transform: translateY(-2px); }
+        }
+        @keyframes td-line-2 {
+          0%, 36%  { opacity: 0; transform: translateY(-2px); }
+          40%, 92% { opacity: 1; transform: translateY(0); }
+          100%     { opacity: 0; transform: translateY(-2px); }
+        }
+        @keyframes td-line-3 {
+          0%, 48%  { opacity: 0; transform: translateY(-2px); }
+          52%, 92% { opacity: 1; transform: translateY(0); }
+          100%     { opacity: 0; transform: translateY(-2px); }
+        }
+        @keyframes td-line-4 {
+          0%, 62%  { opacity: 0; transform: translateY(-2px); }
+          66%, 92% { opacity: 1; transform: translateY(0); }
+          100%     { opacity: 0; transform: translateY(-2px); }
+        }
+        .td-cursor-blink { animation: td-cursor-blink 1s steps(2, end) infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .td-typing, .td-cursor, .td-line, .td-cursor-blink { animation: none !important; opacity: 1 !important; width: 100% !important; }
+        }
+        /* Terminal header swap — 12s loop, hermes 0-6s, openclaw 6-12s. */
+        @keyframes td-header-hermes   { 0%, 49.99% { opacity: 1; } 50%, 100% { opacity: 0; } }
+        @keyframes td-header-openclaw { 0%, 49.99% { opacity: 0; } 50%, 100% { opacity: 1; } }
+        .td-header           { animation-duration: 12s; animation-iteration-count: infinite; animation-timing-function: steps(1, end); }
+        .td-header-hermes    { animation-name: td-header-hermes; }
+        .td-header-openclaw  { animation-name: td-header-openclaw; opacity: 0; }
+        @media (prefers-reduced-motion: reduce) {
+          .td-header { animation: none !important; }
+          .td-header-openclaw { opacity: 0 !important; }
+        }
+      `}</style>
+    </div>
   );
 }

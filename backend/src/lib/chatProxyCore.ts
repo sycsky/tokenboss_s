@@ -3,7 +3,12 @@
  *
  * The caller's `Authorization: Bearer sk-xxx` header is passed through to
  * newapi verbatim; newapi owns key verification, quota enforcement, and
- * usage logging. TokenBoss does no per-request auth or billing here.
+ * usage logging.
+ *
+ * Bucket gating: if `x-tb-user-id` header is present, we run pre-flight
+ * bucket consumption before forwarding upstream, and reconcile actual cost
+ * after the stream finishes (non-stream responses only — streaming
+ * reconciliation is best-effort via `finish_usage` tracking).
  *
  * The only reshaping we do is:
  *   - Strip ClawRouter's `provider/` model prefix for flat-namespace
@@ -16,6 +21,7 @@ import { Agent } from "undici";
 
 import { isMockMode } from "./upstream.js";
 import { detectVirtualProfile, resolveVirtualModel } from "../router/resolve.js";
+import { consumeForRequest, type ChatMode, type ModelTier } from "./buckets.js";
 
 /**
  * Dedicated undici dispatcher for upstream calls.
@@ -48,6 +54,279 @@ export interface StreamWriter {
   end(): void;
 }
 
+// ---------- Bucket gating helpers ----------
+
+/**
+ * Per-million-token USD prices (input / output) keyed on partial model name
+ * patterns. Used by estimateCost() to convert token counts → USD.
+ *
+ * Prices are conservative (slightly above market) so we never under-charge.
+ * Real reconciliation happens after the upstream reports actual usage.
+ */
+const MODEL_PRICES: { pattern: RegExp; inputPer1M: number; outputPer1M: number }[] = [
+  // Claude Opus — most expensive
+  { pattern: /opus/i,   inputPer1M: 15,  outputPer1M: 75  },
+  // Claude Sonnet
+  { pattern: /sonnet/i, inputPer1M: 3,   outputPer1M: 15  },
+  // Claude Haiku — cheapest Claude
+  { pattern: /haiku/i,  inputPer1M: 0.8, outputPer1M: 4   },
+  // OpenAI o-series reasoning
+  { pattern: /^o[13]\b/i, inputPer1M: 15, outputPer1M: 60 },
+  // GPT-5 (non-mini)
+  { pattern: /gpt-5(?!.*mini)/i, inputPer1M: 10, outputPer1M: 40 },
+  // GPT-5-mini / gpt-4o-mini family
+  { pattern: /mini/i,   inputPer1M: 0.15, outputPer1M: 0.6 },
+  // GPT-4o
+  { pattern: /gpt-4o/i, inputPer1M: 5,  outputPer1M: 15  },
+  // GPT-4 generic
+  { pattern: /gpt-4/i,  inputPer1M: 10, outputPer1M: 30  },
+  // Gemini Flash (used by classifier)
+  { pattern: /gemini.*flash/i, inputPer1M: 0.075, outputPer1M: 0.3 },
+];
+
+/**
+ * Map a concrete model ID to a bucket ModelTier.
+ *
+ * - eco:       haiku / mini / flash — cheapest
+ * - standard:  sonnet / gpt-4o-mini / gpt-5-mini
+ * - premium:   opus / sonnet (flagship) / gpt-4o
+ * - reasoning: o1 / o3 / gpt-5 non-mini / reasoning models
+ *
+ * For 'auto' (not yet resolved) we return 'eco' as the safest fallback; the
+ * real tier will be known after virtual-model resolution.
+ */
+export function inferTierFromModelId(modelId: string): ModelTier {
+  const m = modelId.toLowerCase();
+  // Explicit 'auto' virtual model → eco (will be resolved before upstream)
+  if (m === "auto" || m === "eco" || m === "premium" || m === "agentic") return "eco";
+  // Reasoning / o-series
+  if (/\bo[13]\b/.test(m) || (/gpt-5/.test(m) && !/mini/.test(m))) return "reasoning";
+  // Eco / cheap
+  if (/haiku/.test(m) || /mini/.test(m) || /flash/.test(m)) return "eco";
+  // Premium (opus takes precedence over sonnet)
+  if (/opus/.test(m)) return "premium";
+  // Standard (sonnet, gpt-4o, etc.)
+  if (/sonnet/.test(m) || /gpt-4o/.test(m) || /gpt-4/.test(m)) return "standard";
+  // Fallback: standard is the safest middle ground
+  return "standard";
+}
+
+/**
+ * Rough up-front cost estimate in USD.
+ *
+ * We count characters / 4 as a proxy for input tokens (good enough for
+ * pre-flight reservation). We assume a 200-token output as the baseline.
+ * Always returns ≥ 0.0001 so a zero-cost bypass is impossible.
+ */
+export function estimateCost(modelId: string, messages: unknown[]): number {
+  const m = modelId.toLowerCase();
+  let inputPer1M = 3;   // default: mid-tier sonnet-like
+  let outputPer1M = 15;
+
+  for (const { pattern, inputPer1M: i, outputPer1M: o } of MODEL_PRICES) {
+    if (pattern.test(m)) {
+      inputPer1M = i;
+      outputPer1M = o;
+      break;
+    }
+  }
+
+  // Estimate input tokens from message content length
+  let charCount = 0;
+  if (Array.isArray(messages)) {
+    for (const msg of messages) {
+      if (msg && typeof msg === "object") {
+        const content = (msg as Record<string, unknown>).content;
+        if (typeof content === "string") charCount += content.length;
+        else if (Array.isArray(content)) {
+          for (const part of content) {
+            if (part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string") {
+              charCount += ((part as Record<string, unknown>).text as string).length;
+            }
+          }
+        }
+      }
+    }
+  }
+  const inputTokens = Math.max(10, charCount / 4);
+  const outputTokens = 200; // conservative baseline
+
+  const cost = (inputTokens * inputPer1M + outputTokens * outputPer1M) / 1_000_000;
+  return Math.max(0.0001, cost);
+}
+
+/**
+ * Compute actual USD cost from observed token counts after the upstream
+ * returns. Falls back to estimate if no usage is available.
+ */
+export function computeActualCost(
+  modelId: string,
+  tokensIn: number,
+  tokensOut: number,
+): number {
+  const m = modelId.toLowerCase();
+  let inputPer1M = 3;
+  let outputPer1M = 15;
+  for (const { pattern, inputPer1M: i, outputPer1M: o } of MODEL_PRICES) {
+    if (pattern.test(m)) {
+      inputPer1M = i;
+      outputPer1M = o;
+      break;
+    }
+  }
+  const cost = (tokensIn * inputPer1M + tokensOut * outputPer1M) / 1_000_000;
+  return Math.max(0.0001, cost);
+}
+
+/**
+ * Gate a request against the user's bucket. Extracts userId from the
+ * `x-tb-user-id` header only when the request is authenticated as an
+ * internal call via `x-tb-internal-secret`. If the secret is absent or
+ * wrong the header is ignored, preventing header-spoofing attacks.
+ *
+ * Env var `TB_INTERNAL_SECRET` must be set (non-empty) for internal gating
+ * to activate. When it is not set, bucket gating is skipped entirely so
+ * existing local-dev / key-only callers continue to work unchanged.
+ *
+ * Returns `null` if the request may proceed, or a `StreamWriter`-ready
+ * error payload if it should be rejected.
+ */
+export interface GateResult {
+  userId: string;
+  mode: ChatMode;
+  modelTier: ModelTier;
+  estimatedCost: number;
+  keyHint?: string;
+}
+
+/**
+ * Last 8 chars of the bearer token (after stripping "Bearer "), used as
+ * a stable key hint for usage attribution. Returns null if missing /
+ * malformed. The token's first/middle bytes are highly entropic so the
+ * tail is unique enough across one user's keys.
+ */
+export function extractKeyHint(authHeader: string | undefined): string | null {
+  if (!authHeader) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+  const token = m ? m[1].trim() : authHeader.trim();
+  if (token.length < 4) return null;
+  return token.slice(-8);
+}
+
+export function gateRequest(
+  headers: Record<string, string | undefined>,
+  modelId: string,
+  messages: unknown[],
+): { ok: true; gate: GateResult } | { ok: false; errorBody: string } {
+  const expectedSecret = process.env.TB_INTERNAL_SECRET?.trim() ?? "";
+  const providedSecret = headers["x-tb-internal-secret"] ?? "";
+
+  // Validate the internal secret before trusting x-tb-user-id.
+  // If TB_INTERNAL_SECRET is not configured, skip gating entirely (pass-through).
+  const secretValid =
+    expectedSecret.length > 0 && providedSecret === expectedSecret;
+
+  const userId = secretValid ? headers["x-tb-user-id"] : undefined;
+  if (!userId) {
+    // No verified user context — skip gating (key-only callers bypass bucket gating)
+    return {
+      ok: true,
+      gate: { userId: "", mode: "auto", modelTier: "eco", estimatedCost: 0 },
+    };
+  }
+
+  const rawModelId = modelId || "auto";
+  const mode: ChatMode = rawModelId === "auto" ? "auto" : "manual";
+  const modelTier = inferTierFromModelId(rawModelId);
+  const estimatedCost = estimateCost(rawModelId, messages);
+  const keyHint = extractKeyHint(headers.authorization ?? headers.Authorization);
+
+  const result = consumeForRequest({
+    userId,
+    mode,
+    modelId: rawModelId,
+    modelTier,
+    costUsd: estimatedCost,
+    source: headers["x-source"] ?? undefined,
+    keyHint: keyHint ?? undefined,
+  });
+
+  if (!result.ok) {
+    return { ok: false, errorBody: buildInChatErrorBody(result.error!, rawModelId) };
+  }
+
+  return {
+    ok: true,
+    gate: { userId, mode, modelTier, estimatedCost, keyHint: keyHint ?? undefined },
+  };
+}
+
+const IN_CHAT_MESSAGES: Record<string, string> = {
+  insufficient_balance: "今日额度已用完。明日 0:00 自动刷新，或立即加买额度：tokenboss.com/pricing",
+  model_locked: "此模型需 Super 套餐或加买充值额度。升级：tokenboss.com/pricing",
+  mode_locked: "免费试用仅可用智能路由。升级：tokenboss.com/pricing",
+};
+
+function buildInChatErrorBody(error: string, modelId: string): string {
+  const text = IN_CHAT_MESSAGES[error] ?? IN_CHAT_MESSAGES.insufficient_balance;
+  return JSON.stringify({
+    id: `chatcmpl-tb-error-${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: modelId,
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: text },
+        finish_reason: "stop",
+      },
+    ],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+  });
+}
+
+/**
+ * Post-stream cost reconciliation.
+ *
+ * If the actual cost differs from the estimate by more than $0.0001:
+ *   - delta > 0 (under-charged): consume the difference
+ *   - delta < 0 (over-charged): no automated refund in v1; log for manual review
+ *
+ * Silently no-ops when userId is empty (gating was skipped).
+ */
+function reconcileActualCost(
+  gate: GateResult,
+  actualTokensIn: number,
+  actualTokensOut: number,
+  resolvedModelId: string,
+  source?: string,
+): void {
+  if (!gate.userId) return;
+  const actualCost = computeActualCost(resolvedModelId, actualTokensIn, actualTokensOut);
+  const delta = actualCost - gate.estimatedCost;
+  if (Math.abs(delta) <= 0.0001) return;
+  if (delta > 0) {
+    // Under-charged — top up consumption
+    consumeForRequest({
+      userId: gate.userId,
+      mode: gate.mode,
+      modelId: resolvedModelId,
+      modelTier: gate.modelTier,
+      costUsd: delta,
+      source: source ?? undefined,
+      keyHint: gate.keyHint,
+      tokensIn: actualTokensIn,
+      tokensOut: actualTokensOut,
+    });
+  } else {
+    // Over-charged — log for manual reconciliation (no automated refund in v1)
+    console.log(
+      `[chatProxy] over-charged user=${gate.userId} model=${resolvedModelId} ` +
+        `delta=$${delta.toFixed(6)} (estimated=$${gate.estimatedCost.toFixed(6)} actual=$${actualCost.toFixed(6)})`,
+    );
+  }
+}
+
 function getNewapiBase(): string | null {
   const raw = process.env.NEWAPI_BASE_URL?.trim().replace(/\/+$/, "");
   return raw && raw.length > 0 ? raw : null;
@@ -77,6 +356,25 @@ export async function streamChatCore(
     );
     return;
   }
+
+  // ---------- Bucket gating (pre-flight) ----------
+  // Uses x-tb-user-id header to identify caller, but only trusts it when
+  // the request is accompanied by a valid x-tb-internal-secret (set via
+  // TB_INTERNAL_SECRET env var). Without the secret the header is ignored so
+  // direct key-only callers bypass gating and spoofed headers have no effect.
+  const modelIdForGating = typeof body.model === "string" ? body.model : "auto";
+  const gateOutcome = gateRequest(
+    event.headers as Record<string, string | undefined>,
+    modelIdForGating,
+    Array.isArray(body.messages) ? body.messages : [],
+  );
+  if (!gateOutcome.ok) {
+    writer.writeHead(200, { "content-type": "application/json" });
+    writer.write(gateOutcome.errorBody);
+    writer.end();
+    return;
+  }
+  const gateCtx = gateOutcome.gate;
 
   // Resolve virtual models (auto/eco/premium/agentic) — before any prefix
   // stripping so `detectVirtualProfile` sees the original name. The rules
@@ -269,6 +567,17 @@ export async function streamChatCore(
         upstreamRes.body,
         modelName,
       );
+      // Reconcile actual cost from usage data embedded in aggregated response
+      if (gateCtx.userId && aggregated.usage) {
+        const u = aggregated.usage as Record<string, unknown>;
+        reconcileActualCost(
+          gateCtx,
+          typeof u.prompt_tokens === "number" ? u.prompt_tokens : 0,
+          typeof u.completion_tokens === "number" ? u.completion_tokens : 0,
+          modelName || gateCtx.modelTier,
+          event.headers?.["x-source"],
+        );
+      }
       writer.writeHead(upstreamRes.status, { "content-type": "application/json" });
       writer.write(JSON.stringify(aggregated));
       writer.end();
@@ -276,6 +585,24 @@ export async function streamChatCore(
     }
 
     const responseText = await upstreamRes.text();
+    // Reconcile actual cost from buffered JSON response
+    if (gateCtx.userId) {
+      try {
+        const parsed = JSON.parse(responseText) as Record<string, unknown>;
+        if (parsed.usage) {
+          const u = parsed.usage as Record<string, unknown>;
+          reconcileActualCost(
+            gateCtx,
+            typeof u.prompt_tokens === "number" ? u.prompt_tokens : 0,
+            typeof u.completion_tokens === "number" ? u.completion_tokens : 0,
+            modelName || gateCtx.modelTier,
+            event.headers?.["x-source"],
+          );
+        }
+      } catch {
+        /* ignore parse failures — reconciliation is best-effort */
+      }
+    }
     writer.writeHead(upstreamRes.status, { "content-type": contentType });
     writer.write(responseText);
     writer.end();

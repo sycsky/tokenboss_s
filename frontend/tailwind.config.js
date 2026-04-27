@@ -48,10 +48,36 @@ export default {
         // Brand badges
         "badge-claude-bg": "#FEE9DC",
         "badge-claude-text": "#9A3412",
+
+        // Extended tokens (Task 5.1)
+        "ink": "#1C1917",
+        "ink-3": "#A89A8D",
+        "ink-4": "#D9CEC2",
+        "accent-deep": "#B85020",
+        "accent-soft": "#FEE9DC",
+        "accent-ink": "#92400E",
+        "green-soft": "#DCFCE7",
+        "green-ink": "#15803D",
+        "red-soft": "#FEE2E2",
+        "red-ink": "#991B1B",
+        "hairline": "#EBE3DA",
+        "border-2": "#D9CEC2",
+
+        // Status palette (Slock-pixel) — only for status pills, type
+        // badges, and avatar blocks. Never as primary brand color.
+        "lime-stamp": "#A3E635",
+        "lime-stamp-ink": "#365314",
+        "cyan-stamp": "#67E8F9",
+        "cyan-stamp-ink": "#155E75",
+        "lavender": "#C4B5FD",
+        "lavender-ink": "#4C1D95",
+        "yellow-stamp": "#FACC15",
+        "yellow-stamp-ink": "#713F12",
       },
       fontFamily: {
         sans: ['"DM Sans"', '"Noto Sans SC"', "sans-serif"],
         mono: ['"Geist Mono"', "ui-monospace", "monospace"],
+        serif: ['"Noto Serif SC"', "serif"],
       },
       fontSize: {
         hero: ["40px", { lineHeight: "1.05", letterSpacing: "-0.03em", fontWeight: "700" }],

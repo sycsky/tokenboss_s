@@ -21,6 +21,7 @@ import {
   api,
   getStoredSession,
   setStoredSession,
+  type AuthResponse,
   type UserProfile,
 } from "./api.js";
 
@@ -32,12 +33,21 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (email: string, password: string) => Promise<void>;
-  register: (input: {
-    email: string;
-    password: string;
-    displayName?: string;
-  }) => Promise<void>;
+  /** Create a new account with email + password. Returns the AuthResponse with isNew=true. */
+  register: (input: { email: string; password: string; displayName?: string }) => Promise<import("./api.js").AuthResponse>;
+  /** Log in with email + password. */
+  login: (email: string, password: string) => Promise<import("./api.js").AuthResponse>;
+  /** Consume a verification token from the email link. Auto-logs the user in. */
+  verifyEmail: (token: string) => Promise<import("./api.js").AuthResponse>;
+  /** Resend the verification email for the current session. */
+  resendVerification: () => Promise<{ ok: true; alreadyVerified?: boolean }>;
+  /** Send a one-time code to the given email address (used by recovery / magic-link flow). */
+  sendCode: (email: string) => Promise<void>;
+  /**
+   * Exchange an email + OTP code for a session. Used by the recovery flow.
+   * Returns the full AuthResponse (includes `isNew` flag for new accounts).
+   */
+  loginWithCode: (email: string, code: string) => Promise<import("./api.js").AuthResponse>;
   logout: () => void;
   /** Re-fetch the profile (e.g. after a chat call changes the balance). */
   refresh: () => Promise<void>;
@@ -81,20 +91,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await api.login({ email, password });
-    setStoredSession(res.token);
-    setState({ user: res.user, token: res.token });
-  }, []);
-
   const register = useCallback(
-    async (input: { email: string; password: string; displayName?: string }) => {
+    async (input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> => {
       const res = await api.register(input);
       setStoredSession(res.token);
       setState({ user: res.user, token: res.token });
+      return res;
     },
     [],
   );
+
+  const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
+    const res = await api.login(email, password);
+    setStoredSession(res.token);
+    setState({ user: res.user, token: res.token });
+    return res;
+  }, []);
+
+  const verifyEmail = useCallback(async (token: string): Promise<AuthResponse> => {
+    const res = await api.verifyEmail(token);
+    setStoredSession(res.token);
+    setState({ user: res.user, token: res.token });
+    return res;
+  }, []);
+
+  const resendVerification = useCallback(async () => {
+    return api.resendVerification();
+  }, []);
+
+  const sendCode = useCallback(async (email: string) => {
+    await api.sendCode(email);
+  }, []);
+
+  const loginWithCode = useCallback(async (email: string, code: string): Promise<AuthResponse> => {
+    const res = await api.verifyCode(email, code);
+    setStoredSession(res.token);
+    setState({ user: res.user, token: res.token });
+    return res;
+  }, []);
 
   const logout = useCallback(() => {
     setStoredSession(null);
@@ -118,12 +152,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user: state.user,
       token: state.token,
-      login,
       register,
+      login,
+      verifyEmail,
+      resendVerification,
+      sendCode,
+      loginWithCode,
       logout,
       refresh,
     }),
-    [state, login, register, logout, refresh],
+    [state, register, login, verifyEmail, resendVerification, sendCode, loginWithCode, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

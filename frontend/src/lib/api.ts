@@ -123,6 +123,8 @@ export interface UserProfile {
   userId: string;
   email: string;
   displayName?: string;
+  /** True after the user clicks the verification link sent on register. */
+  emailVerified: boolean;
   balance: number;
   freeQuota: number;
   createdAt: string;
@@ -131,6 +133,8 @@ export interface UserProfile {
 export interface AuthResponse {
   token: string;
   user: UserProfile;
+  /** Present on verifyCode — true when the user was newly created. */
+  isNew?: boolean;
 }
 
 export interface ProxyKeySummary {
@@ -173,10 +177,77 @@ export interface UsageResponse {
   records: UsageRecordView[];
 }
 
+// ---------- API response types (v1 backend) ----------
+
+export type BucketSkuType = "trial" | "topup" | "plan_plus" | "plan_super" | "plan_ultra";
+
+export interface BucketRecord {
+  id: string;
+  userId: string;
+  skuType: BucketSkuType;
+  amountUsd: number;
+  dailyCapUsd: number | null;
+  dailyRemainingUsd: number | null;
+  totalRemainingUsd: number | null;
+  startedAt: string;
+  expiresAt: string | null;
+  modeLock: "none" | "auto_only" | "auto_eco_only";
+  modelPool: "all" | "codex_only" | "eco_only";
+  createdAt: string;
+}
+
+export interface BucketsResponse {
+  buckets: BucketRecord[];
+}
+
+export interface UsageRecord {
+  id: number;
+  userId: string;
+  bucketId: string | null;
+  eventType: "consume" | "reset" | "expire" | "topup" | "refund";
+  amountUsd: number;
+  model: string | null;
+  source: string | null;
+  /** Last 8 chars of the bearer token used. Match against the same suffix
+   * of `ProxyKeySummary.key` (which already shows ...-last4) to attribute
+   * each call to one of the user's API keys. */
+  keyHint: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  createdAt: string;
+}
+
+export interface HourlyUsage {
+  hour: string;
+  consumed: number;
+}
+
+export interface UsageDetailResponse {
+  records: UsageRecord[];
+  totals: { consumed: number; calls: number };
+  hourly24h: HourlyUsage[];
+}
+
+export interface UsageAggregateGroup {
+  /** Group key — source string or keyHint, depending on the aggregateBy value. null when the field was unset on those records. */
+  groupKey: string | null;
+  callCount: number;
+  totalConsumedUsd: number;
+  lastUsedAt: string;
+}
+
+export interface UsageAggregateResponse {
+  groups: UsageAggregateGroup[];
+}
+
+export interface MeResponse {
+  user: UserProfile;
+}
+
 // ---------- public API ----------
 
 export const api = {
-  // auth
+  // auth — password flow (primary)
   register(input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> {
     return request<AuthResponse>("/v1/auth/register", {
       method: "POST",
@@ -184,15 +255,44 @@ export const api = {
       token: null,
     });
   },
-  login(input: { email: string; password: string }): Promise<AuthResponse> {
+  login(email: string, password: string): Promise<AuthResponse> {
     return request<AuthResponse>("/v1/auth/login", {
       method: "POST",
-      body: input,
+      body: { email, password },
       token: null,
     });
   },
-  me(): Promise<{ user: UserProfile }> {
-    return request<{ user: UserProfile }>("/v1/me");
+  verifyEmail(token: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/verify-email", {
+      method: "POST",
+      body: { token },
+      token: null,
+    });
+  },
+  resendVerification(): Promise<{ ok: true; alreadyVerified?: boolean }> {
+    return request<{ ok: true; alreadyVerified?: boolean }>(
+      "/v1/auth/resend-verification",
+      { method: "POST", body: {} },
+    );
+  },
+
+  // auth — email-code flow (passwordless / "forgot password" recovery)
+  sendCode(email: string): Promise<{ ok: true }> {
+    return request<{ ok: true }>("/v1/auth/send-code", {
+      method: "POST",
+      body: { email },
+      token: null,
+    });
+  },
+  verifyCode(email: string, code: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/verify-code", {
+      method: "POST",
+      body: { email, code },
+      token: null,
+    });
+  },
+  me(): Promise<MeResponse> {
+    return request<MeResponse>("/v1/me");
   },
 
   // keys
@@ -213,8 +313,38 @@ export const api = {
     );
   },
 
+  // buckets
+  getBuckets(): Promise<BucketsResponse> {
+    return request<BucketsResponse>("/v1/buckets");
+  },
+
   // usage
   usage(range: "today" | "week" | "month" = "today"): Promise<UsageResponse> {
     return request<UsageResponse>("/v1/usage", { query: { range } });
+  },
+  getUsage(opts: { from?: string; to?: string; eventType?: string; limit?: number; offset?: number } = {}): Promise<UsageDetailResponse> {
+    const qs = new URLSearchParams(
+      Object.entries(opts)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    return request<UsageDetailResponse>(`/v1/usage${qs ? "?" + qs : ""}`, { method: "GET" });
+  },
+  /**
+   * Aggregate consume events grouped by `source` (Agent identifier) or
+   * `keyHint` (last 8 chars of the bearer token). Returns a tiny
+   * `groups` array — much cheaper than pulling 200 raw records and
+   * reducing client-side, and stays correct as volume grows.
+   */
+  getUsageAggregate(
+    by: 'source' | 'keyHint',
+    opts: { from?: string; to?: string; limit?: number } = {},
+  ): Promise<UsageAggregateResponse> {
+    const qs = new URLSearchParams(
+      Object.entries({ aggregateBy: by, ...opts })
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)]),
+    ).toString();
+    return request<UsageAggregateResponse>(`/v1/usage?${qs}`, { method: 'GET' });
   },
 };

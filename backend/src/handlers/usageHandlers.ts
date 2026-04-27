@@ -1,8 +1,24 @@
 /**
- * GET /v1/usage?range=today|week|month — dashboard usage history.
+ * GET /v1/usage — dashboard usage history with event-type filtering and
+ * 24-hour hourly aggregation.
  *
- * Session-authed. Reads newapi's log endpoint — the single source of truth
- * for consumption. Results are newest-first. `range` defaults to `today`.
+ * Auth: reads `x-tb-user-id` header (Task 3.4 pattern). Falls back to
+ * session-JWT via `verifySessionHeader` so the endpoint also works from
+ * the browser dashboard.
+ *
+ * Query params:
+ *   eventType  — filter records to a single event type (e.g. "consume")
+ *   from       — ISO timestamp lower bound (inclusive)
+ *   to         — ISO timestamp upper bound (inclusive)
+ *   limit      — max records returned (default 50)
+ *   offset     — pagination offset (default 0)
+ *
+ * Response shape:
+ *   {
+ *     records:   UsageRecord[],
+ *     totals:    { consumed: number, calls: number },
+ *     hourly24h: { hour: "HH:00", consumed: number }[]
+ *   }
  */
 
 import type {
@@ -11,45 +27,14 @@ import type {
 } from "aws-lambda";
 
 import { isAuthFailure, verifySessionHeader } from "../lib/auth.js";
-import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
-import { getUser } from "../lib/store.js";
-import { getTier } from "../lib/tiers.js";
+import {
+  getUsageForUser,
+  getHourlyUsage24h,
+  aggregateUsageForUser,
+  type EventType,
+} from "../lib/store.js";
 
-type Range = "today" | "week" | "month";
-
-/**
- * Compute [from, to) as ISO strings for a given range, relative to `now`.
- * The bounds are aligned to UTC day/week/month starts — good enough for
- * an MVP dashboard; timezone-aware bucketing can come later.
- */
-function rangeBounds(range: Range, now: Date): { fromIso: string; toIso: string } {
-  const end = new Date(now);
-  end.setUTCSeconds(end.getUTCSeconds() + 1);
-
-  const start = new Date(now);
-  switch (range) {
-    case "today": {
-      start.setUTCHours(0, 0, 0, 0);
-      break;
-    }
-    case "week": {
-      start.setUTCDate(start.getUTCDate() - 6);
-      start.setUTCHours(0, 0, 0, 0);
-      break;
-    }
-    case "month": {
-      start.setUTCDate(1);
-      start.setUTCHours(0, 0, 0, 0);
-      break;
-    }
-  }
-  return { fromIso: start.toISOString(), toIso: end.toISOString() };
-}
-
-function parseRange(raw: string | undefined): Range {
-  if (raw === "week" || raw === "month" || raw === "today") return raw;
-  return "today";
-}
+// ---------- Helpers ----------
 
 function jsonResponse(
   statusCode: number,
@@ -73,102 +58,129 @@ function jsonError(
   });
 }
 
-interface UsageView {
-  id: string;
-  model: string;
-  tier: number;
-  at: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  creditsCharged: number;
+const VALID_EVENT_TYPES: EventType[] = [
+  "consume",
+  "reset",
+  "expire",
+  "topup",
+  "refund",
+];
+
+function isValidEventType(v: string): v is EventType {
+  return VALID_EVENT_TYPES.includes(v as EventType);
 }
+
+// ---------- Handler ----------
 
 export const usageHandler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> => {
-  const authHeader =
-    event.headers?.authorization ?? event.headers?.Authorization ?? undefined;
-  const auth = await verifySessionHeader(authHeader);
-  if (isAuthFailure(auth)) {
-    return jsonError(auth.status, "authentication_error", auth.message, auth.code);
+  // Auth: prefer x-tb-user-id header (Task 3.4 pattern / internal gateway),
+  // fall back to session JWT for browser clients.
+  const headers = event.headers ?? {};
+  const headerUserId =
+    headers["x-tb-user-id"] ?? headers["X-Tb-User-Id"] ?? undefined;
+
+  let userId: string;
+
+  if (headerUserId) {
+    userId = headerUserId;
+  } else {
+    const authHeader =
+      headers.authorization ?? headers.Authorization ?? undefined;
+    const auth = await verifySessionHeader(authHeader);
+    if (isAuthFailure(auth)) {
+      return jsonError(
+        auth.status,
+        "authentication_error",
+        auth.message,
+        auth.code,
+      );
+    }
+    userId = auth.userId;
   }
 
-  const rangeRaw = event.queryStringParameters?.range;
-  const range = parseRange(rangeRaw);
-  const { fromIso, toIso } = rangeBounds(range, new Date());
+  // Parse query params
+  const qs = event.queryStringParameters ?? {};
 
-  // When newapi is not configured (e.g. local dev with MOCK_UPSTREAM=1 and
-  // no self-hosted newapi), there's no consumption data to read. Return an
-  // empty window rather than 501 so the dashboard still renders.
-  const userRec = await getUser(auth.userId);
-  if (!isNewapiConfigured() || !userRec?.newapiUserId) {
-    return jsonResponse(200, {
-      range,
-      from: fromIso,
-      to: toIso,
-      totalCreditsCharged: 0,
-      totalTokens: 0,
-      count: 0,
-      records: [],
+  // Aggregation mode: ?aggregateBy=source | keyHint
+  // Returns groupKey / callCount / totalConsumedUsd / lastUsedAt for
+  // each distinct value, replacing the per-record records[] payload.
+  // Lets the dashboard show "Agent X used Y times" without pulling the
+  // full record list and reducing client-side.
+  const aggBy = qs.aggregateBy;
+  if (aggBy) {
+    if (aggBy !== "source" && aggBy !== "keyHint") {
+      return jsonError(
+        400,
+        "validation_error",
+        `Invalid aggregateBy: ${aggBy}`,
+        "invalid_aggregate_by",
+      );
+    }
+    const limitRaw = qs.limit ? parseInt(qs.limit, 10) : 50;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 50;
+    const groups = aggregateUsageForUser(userId, aggBy, {
+      from: qs.from,
+      to: qs.to,
+      limit,
     });
+    return jsonResponse(200, { groups });
   }
 
-  const startSec = Math.floor(new Date(fromIso).getTime() / 1000);
-  const endSec = Math.floor(new Date(toIso).getTime() / 1000);
-
-  let page;
-  try {
-    page = await newapi.getLogs({
-      page: 0,
-      // 200 rows covers a month of moderate use without pagination and
-      // keeps the request cheap. Users who exceed this see a truncated
-      // list — fine for the MVP dashboard; deep history can page later.
-      per_page: 200,
-      start_timestamp: startSec,
-      end_timestamp: endSec,
-      username: newapiUsername(auth.userId),
-      type: 2, // consumption logs only
-    });
-  } catch (err) {
-    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-    console.error(`[usage] newapi query failed:`, msg);
-    return jsonError(502, "upstream_error", "Could not read usage from metering service.", "newapi_query_failed");
+  const eventTypeRaw = qs.eventType;
+  let eventTypes: EventType[] | undefined;
+  if (eventTypeRaw) {
+    if (!isValidEventType(eventTypeRaw)) {
+      return jsonError(
+        400,
+        "validation_error",
+        `Invalid eventType: ${eventTypeRaw}`,
+        "invalid_event_type",
+      );
+    }
+    eventTypes = [eventTypeRaw];
   }
 
-  const items = page.items ?? [];
-  const records: UsageView[] = items.map((e) => ({
-    id: String(e.id),
-    model: e.model_name,
-    tier: getTier(e.model_name),
-    at: new Date(e.created_at * 1000).toISOString(),
-    promptTokens: e.prompt_tokens,
-    completionTokens: e.completion_tokens,
-    totalTokens: (e.prompt_tokens ?? 0) + (e.completion_tokens ?? 0),
-    // newapi's `quota` unit is its internal billing unit (500,000 ≈ $1).
-    // We surface it raw and let the dashboard format it.
-    creditsCharged: e.quota,
-  }));
+  const from = qs.from;
+  const to = qs.to;
+  const limitRaw = qs.limit ? parseInt(qs.limit, 10) : 50;
+  const offsetRaw = qs.offset ? parseInt(qs.offset, 10) : 0;
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 50;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
-  const totalCreditsCharged = records.reduce((s, r) => s + r.creditsCharged, 0);
-  const totalTokens = records.reduce((s, r) => s + r.totalTokens, 0);
+  // Fetch paginated records (with filter)
+  const records = getUsageForUser(userId, {
+    eventTypes,
+    from,
+    to,
+    limit,
+    offset,
+  });
+
+  // Compute totals: always across ALL consume events (not limited by
+  // pagination/filter so the totals reflect the full account history).
+  const allConsumeRecords = getUsageForUser(userId, {
+    eventTypes: ["consume"],
+    from,
+    to,
+    limit: 100_000, // effectively unbounded
+    offset: 0,
+  });
+  const totalConsumed = allConsumeRecords.reduce(
+    (sum, r) => sum + r.amountUsd,
+    0,
+  );
+
+  // 24-hour hourly chart
+  const hourly24h = getHourlyUsage24h(userId);
 
   return jsonResponse(200, {
-    range,
-    from: fromIso,
-    to: toIso,
-    totalCreditsCharged,
-    totalTokens,
-    count: records.length,
     records,
+    totals: {
+      consumed: Math.round(totalConsumed * 1e6) / 1e6,
+      calls: allConsumeRecords.length,
+    },
+    hourly24h,
   });
 };
-
-/**
- * Translate a TokenBoss userId into the newapi username we provisioned it
- * under. Must mirror the scheme in authHandlers#register exactly, otherwise
- * the log filter returns zero rows.
- */
-function newapiUsername(userId: string): string {
-  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
-}

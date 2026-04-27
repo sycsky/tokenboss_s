@@ -1,130 +1,122 @@
-import { useState } from "react";
-
-import { PhoneFrame } from "../components/PhoneFrame.js";
-import { LinkButton } from "../components/Button.js";
-import { BackButton } from "../components/BackButton.js";
-import { CHAT_COMPLETIONS_URL } from "../lib/api.js";
-
-type Tab = "curl" | "python" | "node";
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { TerminalBlock } from '../components/TerminalBlock';
+import { OnboardShell } from '../components/OnboardShell';
+import { api } from '../lib/api';
+import { slockBtn } from '../lib/slockBtn';
 
 /**
- * Developer onboarding. TokenBoss speaks the OpenAI chat-completions
- * protocol so any SDK that supports a custom `base_url` just works —
- * this screen shows the three most common ways to call it.
+ * Step 02 — paste-and-go. The user's default API key (auto-provisioned at
+ * verifyCode time) is fetched and rendered inline with the install spell so
+ * a single copy lands the agent fully configured. After "我已经发给它了"
+ * the flow advances to /onboard/success.
  */
 export default function OnboardInstall() {
-  const [tab, setTab] = useState<Tab>("curl");
-  const [copied, setCopied] = useState(false);
+  const nav = useNavigate();
+  const [waiting, setWaiting] = useState(true);
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
 
-  const baseUrl = CHAT_COMPLETIONS_URL.replace(/\/v1\/chat\/completions$/, "");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { keys } = await api.listKeys();
+        if (cancelled) return;
+        // Prefer a key explicitly labelled "default" (auto-created at
+        // verifyCode time); fall back to the first key the user owns.
+        const target = keys.find((k) => k.label === 'default') ?? keys[0];
+        if (!target) {
+          setKeyError('default key 未找到');
+          return;
+        }
+        const revealed = await api.revealKey(target.keyId);
+        if (cancelled) return;
+        setApiKey(revealed.key);
+      } catch (e) {
+        if (!cancelled) setKeyError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const snippets: Record<Tab, string> = {
-    curl: `curl ${CHAT_COMPLETIONS_URL} \\
-  -H "Authorization: Bearer tb_live_YOUR_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "model": "claude-sonnet-4-6",
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'`,
-    python: `from openai import OpenAI
-
-client = OpenAI(
-    base_url="${baseUrl}/v1",
-    api_key="tb_live_YOUR_KEY",
-)
-
-resp = client.chat.completions.create(
-    model="claude-sonnet-4-6",
-    messages=[{"role": "user", "content": "Hello"}],
-)
-print(resp.choices[0].message.content)`,
-    node: `import OpenAI from "openai";
-
-const client = new OpenAI({
-  baseURL: "${baseUrl}/v1",
-  apiKey: "tb_live_YOUR_KEY",
-});
-
-const resp = await client.chat.completions.create({
-  model: "claude-sonnet-4-6",
-  messages: [{ role: "user", content: "Hello" }],
-});
-console.log(resp.choices[0].message.content);`,
-  };
-
-  const current = snippets[tab];
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(current);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* non-secure context — user can select manually */
-    }
-  }
+  // TODO(production): replace this 3-second simulation with polling /v1/usage
+  // for the first chat call — when the API returns at least one usage record,
+  // setWaiting(false) and auto-advance to /onboard/success.
+  useEffect(() => {
+    const timer = setTimeout(() => setWaiting(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
-    <PhoneFrame>
-      <div className="flex-1 px-6 py-8 flex flex-col">
-        <div className="mb-4">
-          <BackButton />
-        </div>
+    <OnboardShell
+      step="02"
+      cnLabel="发咒语"
+      enLabel="Send to Agent"
+      title="一行就接好。"
+      width="lg"
+    >
+      <TerminalBlock
+        cmd="set up tokenboss.com/skill.md"
+        extra={apiKey ? `TOKENBOSS_API_KEY=${apiKey}` : undefined}
+        loading={!apiKey && !keyError}
+        size="lg"
+        className="mb-4"
+        prompt={
+          <>
+            <span aria-hidden="true" className="mr-1.5">↓</span>
+            把这两行整体发给你的 Agent
+            <span className="text-white/40 mx-1.5">·</span>
+            30 秒自动接入
+            <span className="text-white/40 mx-1.5">·</span>
+            <span className="text-white">$10 试用立刻能用</span>
+          </>
+        }
+      />
 
-        <h1 className="text-h2 mb-2">接入 TokenBoss</h1>
-        <p className="text-body text-text-secondary mb-4">
-          TokenBoss 兼容 OpenAI API — 把 base URL 改成下面的地址，api_key
-          换成你的 tb_live_ key，就能直接跑。
+      {keyError && (
+        <p className="font-mono text-[11px] text-accent mb-2">
+          ⚠ 拉取 key 出错：{keyError}
         </p>
+      )}
 
-        {/* Base URL card */}
-        <div className="bg-accent-subtle border border-accent/30 rounded-[14px] p-3 mb-4">
-          <div className="text-caption text-text-secondary mb-1">Base URL</div>
-          <div className="font-mono text-caption break-all">{baseUrl}/v1</div>
-        </div>
+      <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-9">
+        已支持 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
+        <span className="text-ink font-semibold">Hermes Agent</span> ·{' '}
+        <span className="text-ink font-semibold">Claude Code</span>
+      </p>
 
-        {/* Language tabs */}
-        <div className="flex bg-bg-alt rounded-sm p-1 mb-3">
-          {(["curl", "python", "node"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={[
-                "flex-1 py-2 rounded-sm text-label transition-colors",
-                tab === t
-                  ? "bg-surface text-text-primary shadow-warm-sm"
-                  : "text-text-secondary",
-              ].join(" ")}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        {/* Snippet */}
-        <div className="bg-text-primary rounded-[14px] p-4 mb-4 flex-1 flex flex-col min-h-0">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-caption text-white/60 font-mono">{tab}</div>
-            <button
-              onClick={handleCopy}
-              className="text-caption text-accent hover:text-accent-hover font-medium"
-            >
-              {copied ? "已复制 ✓" : "复制"}
-            </button>
+      {waiting ? (
+        <div className="flex items-center gap-4 px-5 py-4 bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]">
+          <span aria-hidden="true" className="relative flex-shrink-0">
+            <span className="absolute inset-0 bg-accent/40 rounded-full animate-ping" />
+            <span className="relative block w-3 h-3 bg-accent border-2 border-ink rounded-full" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-bold text-ink">等 Agent 回话…</div>
+            <div className="text-[12px] text-[#6B5E52] mt-0.5">检测到首次调用即自动跳转</div>
           </div>
-          <pre className="font-mono text-[12px] text-white leading-relaxed whitespace-pre-wrap break-all flex-1 overflow-auto">
-            {current}
-          </pre>
         </div>
+      ) : (
+        <button
+          onClick={() => nav('/onboard/success')}
+          className={slockBtn('primary') + ' w-full'}
+        >
+          我已经发给它了 →
+        </button>
+      )}
 
-        <div className="text-caption text-text-muted mb-3">
-          还没有 key？到控制台「管理 API Key」页面创建。
-        </div>
-
-        <LinkButton to="/dashboard/keys" fullWidth>
-          去创建 API Key
-        </LinkButton>
+      <div className="mt-6 text-center">
+        <button
+          type="button"
+          onClick={() => nav('/onboard/welcome')}
+          className="font-mono text-[11.5px] text-[#A89A8D] hover:text-ink underline underline-offset-4 decoration-2 transition-colors"
+        >
+          ← 我点错了，重选入口
+        </button>
       </div>
-    </PhoneFrame>
+    </OnboardShell>
   );
 }
