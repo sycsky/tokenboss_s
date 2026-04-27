@@ -179,13 +179,18 @@ export default function Dashboard() {
 
         {/* SIDE COL */}
         <aside className="space-y-5 mt-5 lg:mt-0">
-          {/* 接入中心 */}
+          {/* 接入 — Agent + API Key 一张卡片，内部分隔 */}
           <section className={`${card} p-4`}>
-            <div className="flex justify-between items-baseline mb-3.5">
-              <span className="text-[14px] font-bold text-ink">接入中心</span>
+            <div className="flex justify-between items-baseline mb-3">
+              <span className="text-[14px] font-bold text-ink">接入</span>
               <span className="font-mono text-[10px] text-[#A89A8D] tracking-wider">v1.0</span>
             </div>
-            <div className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2 mb-3">
+
+            {/* AGENTS sub-section */}
+            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
+              AGENTS
+            </div>
+            <div className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2 mb-2.5">
               <div className="w-5 h-5 bg-accent border-2 border-ink rounded text-white font-mono text-[8.5px] font-bold flex items-center justify-center">OC</div>
               <span className="text-[12.5px] font-semibold text-ink flex-1">OpenClaw</span>
               <span className="font-mono text-[9.5px] font-bold tracking-wider uppercase text-lime-stamp-ink bg-lime-stamp border-2 border-ink px-1.5 py-px rounded">
@@ -194,7 +199,7 @@ export default function Dashboard() {
             </div>
             <a
               className={
-                'block text-center px-4 py-2.5 bg-accent-soft border-2 border-dashed border-ink rounded ' +
+                'block text-center px-4 py-2 bg-accent-soft border-2 border-dashed border-ink rounded ' +
                 'text-[12.5px] font-bold tracking-tight text-accent-ink cursor-pointer ' +
                 'shadow-[3px_3px_0_0_#1C1917] ' +
                 'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
@@ -203,6 +208,15 @@ export default function Dashboard() {
             >
               + 接入新 Agent
             </a>
+
+            {/* divider */}
+            <div className="my-4 border-t-2 border-ink/10" />
+
+            {/* API KEY sub-section */}
+            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
+              API KEY
+            </div>
+            <APIKeyList />
           </section>
 
           {/* Recent usage */}
@@ -232,12 +246,6 @@ export default function Dashboard() {
                 <div className="text-center text-[#A89A8D] text-[13px] p-6">暂无使用记录</div>
               )}
             </div>
-          </section>
-
-          {/* API Keys */}
-          <section>
-            <SectionLabel>API Key</SectionLabel>
-            <APIKeyList />
           </section>
         </aside>
       </main>

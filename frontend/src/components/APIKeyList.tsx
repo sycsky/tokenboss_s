@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { api, ApiError, type ProxyKeySummary } from '../lib/api';
 
 /**
- * Slock-pixel list of the user's TokenBoss proxy keys (`tb_live_...`). Each
- * key sits in its own bordered card; the "+ 创建新 Key" affordance is a
- * dashed-border slot at the bottom that depresses on hover/active so it
- * feels like the rest of the system.
+ * Renders the user's TokenBoss proxy keys as flat rows. Designed to live
+ * inside a parent Slock-pixel card (e.g. the merged 接入 section on
+ * Dashboard) — so each key is a row separated by hairlines, not its own
+ * bordered card. The "+ 创建新 Key" CTA is a dashed-border pill that
+ * matches the agent-add CTA above it.
  */
 export function APIKeyList() {
   const [keys, setKeys] = useState<ProxyKeySummary[]>([]);
@@ -31,7 +32,7 @@ export function APIKeyList() {
 
   async function handleCreate() {
     const label = prompt('Key 名称（可选）');
-    if (label === null) return; // user cancelled
+    if (label === null) return;
     try {
       const newKey = await api.createKey({ label: label.trim() || undefined });
       alert(`新 key（仅显示一次）:\n${newKey.key}`);
@@ -51,20 +52,23 @@ export function APIKeyList() {
     }
   }
 
-  if (loading) return <div className="text-[#A89A8D] text-sm">加载中…</div>;
-  if (error) return <div className="text-[13px] text-red-ink font-medium">{error}</div>;
+  if (loading) return <div className="text-[#A89A8D] text-[12px] py-1">加载中…</div>;
+  if (error) return <div className="text-[12px] text-red-ink font-medium py-1">{error}</div>;
 
   return (
-    <div className="space-y-2.5">
-      {keys.map((k) => (
+    <div>
+      {keys.length === 0 && (
+        <div className="font-mono text-[11px] text-[#A89A8D] py-2">还没有 Key</div>
+      )}
+      {keys.map((k, i) => (
         <div
           key={k.keyId}
-          className="bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] p-3"
+          className={`py-2.5 ${i < keys.length - 1 ? 'border-b border-ink/10' : ''}`}
         >
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-1.5">
             <span className="text-[12.5px] font-bold text-ink flex items-center gap-1.5">
               <span
-                className={`w-2 h-2 border-2 border-ink rounded-full ${k.disabled ? 'bg-red-ink' : 'bg-[#16A34A]'}`}
+                className={`w-2 h-2 border-2 border-ink rounded-full ${k.disabled ? 'bg-red-ink' : 'bg-lime-stamp'}`}
               />
               {k.label || 'default'}
             </span>
@@ -84,7 +88,7 @@ export function APIKeyList() {
           <div className="font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate">
             {k.key}
           </div>
-          <div className="font-mono text-[10px] text-[#A89A8D] mt-1.5">
+          <div className="font-mono text-[10px] text-[#A89A8D] mt-1">
             创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')}
           </div>
         </div>
@@ -92,7 +96,7 @@ export function APIKeyList() {
       <button
         onClick={handleCreate}
         className={
-          'w-full px-4 py-2.5 bg-white border-2 border-dashed border-ink rounded-md ' +
+          'w-full mt-3 px-4 py-2 bg-white border-2 border-dashed border-ink rounded ' +
           'text-[12.5px] font-bold tracking-tight text-ink ' +
           'shadow-[3px_3px_0_0_#1C1917] ' +
           'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
