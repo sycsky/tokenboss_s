@@ -30,6 +30,7 @@ import { isAuthFailure, verifySessionHeader } from "../lib/auth.js";
 import {
   getUsageForUser,
   getHourlyUsage24h,
+  aggregateUsageForUser,
   type EventType,
 } from "../lib/store.js";
 
@@ -101,6 +102,31 @@ export const usageHandler = async (
 
   // Parse query params
   const qs = event.queryStringParameters ?? {};
+
+  // Aggregation mode: ?aggregateBy=source | keyHint
+  // Returns groupKey / callCount / totalConsumedUsd / lastUsedAt for
+  // each distinct value, replacing the per-record records[] payload.
+  // Lets the dashboard show "Agent X used Y times" without pulling the
+  // full record list and reducing client-side.
+  const aggBy = qs.aggregateBy;
+  if (aggBy) {
+    if (aggBy !== "source" && aggBy !== "keyHint") {
+      return jsonError(
+        400,
+        "validation_error",
+        `Invalid aggregateBy: ${aggBy}`,
+        "invalid_aggregate_by",
+      );
+    }
+    const limitRaw = qs.limit ? parseInt(qs.limit, 10) : 50;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 50;
+    const groups = aggregateUsageForUser(userId, aggBy, {
+      from: qs.from,
+      to: qs.to,
+      limit,
+    });
+    return jsonResponse(200, { groups });
+  }
 
   const eventTypeRaw = qs.eventType;
   let eventTypes: EventType[] | undefined;

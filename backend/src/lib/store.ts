@@ -527,6 +527,44 @@ export function getHourlyUsage24h(userId: string): HourlyUsage[] {
   return buckets;
 }
 
+export interface UsageAggregate {
+  /** The grouping key (source string or keyHint). null when the field was unset on those records. */
+  groupKey: string | null;
+  callCount: number;
+  totalConsumedUsd: number;
+  lastUsedAt: string;
+}
+
+/**
+ * Aggregate consume-events for a user grouped by a field. Used by the
+ * dashboard's AGENTS panel ("which Agents have used my account") and
+ * keys panel ("which keys have been used and how much"). Always
+ * filtered to consume events; reset/expire/topup/refund are bookkeeping
+ * and would skew the totals.
+ */
+export function aggregateUsageForUser(
+  userId: string,
+  groupBy: 'source' | 'keyHint',
+  opts: { from?: string; to?: string; limit?: number } = {},
+): UsageAggregate[] {
+  const limit = opts.limit ?? 50;
+  let where = `userId = ? AND eventType = 'consume'`;
+  const params: unknown[] = [userId];
+  if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
+  if (opts.to)   { where += ` AND createdAt <= ?`; params.push(opts.to); }
+  return db.prepare(`
+    SELECT ${groupBy} AS groupKey,
+           COUNT(*) AS callCount,
+           COALESCE(SUM(amountUsd), 0) AS totalConsumedUsd,
+           MAX(createdAt) AS lastUsedAt
+    FROM usage_log
+    WHERE ${where}
+    GROUP BY ${groupBy}
+    ORDER BY lastUsedAt DESC
+    LIMIT ?
+  `).all(...params, limit) as UsageAggregate[];
+}
+
 export function getUsageForUser(userId: string, opts: { limit?: number; offset?: number; eventTypes?: EventType[]; from?: string; to?: string } = {}): UsageRecord[] {
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
