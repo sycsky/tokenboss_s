@@ -495,7 +495,70 @@ well; we adopt it.
 
 ---
 
-## 14 · Open questions / future iterations
+## 14 · Currency display
+
+Pricing surfaces support two currencies: **RMB** (¥) for mainland users
+who pay via Alipay/WeChat, and **USDC** ($) for crypto-native /
+overseas users. Both render the same product; the pricing string is
+the only thing that swaps.
+
+### Auto-detect default
+
+```ts
+navigator.language.startsWith('zh') ? 'rmb' : 'usdc'
+```
+
+First visit picks based on browser locale. User's manual choice
+persists in `localStorage.tb_currency` and syncs across tabs via the
+`storage` event.
+
+### Where the switcher lives
+
+**Inside pricing sections**, never in global nav. Currency is a
+local-to-this-section decision (low-frequency, contextual to "I'm
+looking at prices right now"). Three placements:
+
+1. `/pricing` hero — right of `PRICING · 套餐` mono eyebrow
+2. Landing pricing block — right of `01 / 套餐 / Membership` SectionHeader
+3. `/billing/pay` — right of `BILLING · 开通` mono eyebrow
+
+### `<CurrencySwitcher />`
+
+Two-segment Slock-pixel pill. Active segment ink-filled (`bg-ink
+text-bg`); inactive segment cream (`bg-bg text-ink-2`). 2px ink border
++ 2px hard offset. Single component, three render sites.
+
+### Pricing data source
+
+`frontend/src/lib/pricing.ts` is the single source of truth — `TIERS`
+const + `STANDARD_RATE` per-currency. Surface code calls
+`tierPricePeriod(tier, currency)` to format. Don't hardcode price
+strings in screen components.
+
+### Numbers (locked 2026-04-27)
+
+| Tier | RMB | USDC | Quota |
+|---|---|---|---|
+| Plus | ¥288 / 4 周 | $49 USDC / 4 周 | $840 调用额度 |
+| Super | ¥688 / 4 周 | $119 USDC / 4 周 | $2,240 调用额度 |
+| Ultra | ¥1688 / 4 周 | $289 USDC / 4 周 | $20,160 调用额度 |
+| Standard rate | ¥1 = $1 调用额度 | $1 USDC = $6.5 调用额度 | — |
+| Min top-up | ¥50 起 | $10 USDC 起 = $65 调用额度 | — |
+
+Internal ¥/USDC conversion locked at 6.5 (vs market FX ~6.83), giving
+~5% spread on standard rate. Subscription tiers carry ~10-12% USDC
+premium on top, covering crypto handling cost + FX buffer.
+
+### Quota terminology
+
+Always **「调用额度」** (call quota), never **「美金额度」**. With USDC
+pricing, a phrase like "$1 USDC = $6.5 美金额度" reads as
+"$1 = $6.5 USD" which is nonsensical. 调用额度 keeps the unit
+distinct from real-USD pricing.
+
+---
+
+## 15 · Open questions / future iterations
 
 - **Login / Register flow** — needs Slock-pixel pass. Currently uses raw form inputs without our 2px-border treatment. Audit pending.
 - **Dashboard** — same. The post-login surface should still feel like the same brand. Audit pending.

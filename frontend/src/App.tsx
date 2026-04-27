@@ -16,9 +16,11 @@ import Primitive from './screens/Primitive';
 import Payment from './screens/Payment';
 import ManualConfigPC from './screens/ManualConfigPC';
 import { RequireAuth } from './components/RequireAuth';
+import { CurrencyProvider } from './lib/currency';
 
 export default function App() {
   return (
+    <CurrencyProvider>
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
@@ -41,5 +43,6 @@ export default function App() {
 
       <Route path="/install/manual" element={<ManualConfigPC />} />
     </Routes>
+    </CurrencyProvider>
   );
 }

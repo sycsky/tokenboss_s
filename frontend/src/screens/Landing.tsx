@@ -4,7 +4,10 @@ import { TerminalBlock } from '../components/TerminalBlock';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
 import { TopNav, BrandPlate } from '../components/TopNav';
+import { CurrencySwitcher } from '../components/CurrencySwitcher';
 import { useAuth } from '../lib/auth';
+import { useCurrency } from '../lib/currency';
+import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
 import { slockBtn } from '../lib/slockBtn';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import hermesIcon from '../assets/agents/hermes.png';
@@ -143,9 +146,12 @@ function HeroTerminalDemo() {
 
 export default function Landing() {
   const { user } = useAuth();
+  const { currency } = useCurrency();
   const isLoggedIn = !!user;
   const navigate = useNavigate();
   const goRegister = () => navigate('/register');
+  const std = STANDARD_RATE[currency];
+  const [plusTier, superTier, ultraTier] = TIERS;
 
   // v1.0 has no self-checkout. Visitors → /register; logged-in → contact 客服.
   // Ultra is sold-out for logged-in users per spec, but visitors still see the
@@ -257,45 +263,48 @@ export default function Landing() {
 
       {/* 01 · Membership tiers */}
       <section id="pricing" className="max-w-[1200px] mx-auto px-6 md:px-14 py-12 md:py-16">
-        <SectionHeader num="01" cn="套餐" en="Membership" />
+        <div className="flex items-start justify-between gap-4">
+          <SectionHeader num="01" cn="套餐" en="Membership" />
+          <CurrencySwitcher className="mt-1" />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mt-6">
           <TierCard
-            name="Plus"
-            pricePeriod="¥288 / 4 周"
-            leverage="×3"
-            totalUsd="≈ $840 美金额度"
-            dailyCap="$30 美金 cap"
-            models="Codex 系列模型"
+            name={plusTier.name}
+            pricePeriod={tierPricePeriod(plusTier, currency)}
+            leverage={plusTier.leverage}
+            totalUsd={plusTier.totalQuota}
+            dailyCap={plusTier.dailyCap}
+            models={plusTier.models}
             ctaText={tierCta.text}
             onCtaClick={tierCta.onClick}
             ctaVariant="secondary"
-            tooltipExtras={['智能路由 · 多端复用 · API key 多端共享']}
+            tooltipExtras={plusTier.tooltipExtras}
           />
           <TierCard
-            name="Super"
-            pricePeriod="¥688 / 4 周"
-            leverage="×4"
-            totalUsd="≈ $2,240 美金额度"
-            dailyCap="$80 美金 cap"
-            models="Claude + Codex 系列模型"
+            name={superTier.name}
+            pricePeriod={tierPricePeriod(superTier, currency)}
+            leverage={superTier.leverage}
+            totalUsd={superTier.totalQuota}
+            dailyCap={superTier.dailyCap}
+            models={superTier.models}
             ctaText={tierCta.text}
             onCtaClick={tierCta.onClick}
             ctaVariant="primary"
             featured
-            tooltipExtras={['含 Sonnet 4.7 / Opus 4.7 · 优先排队 · 高峰不降级']}
+            tooltipExtras={superTier.tooltipExtras}
           />
           <TierCard
-            name="Ultra"
-            pricePeriod="¥1688 / 4 周"
-            leverage="×12"
-            totalUsd="≈ $20,160 美金额度"
-            dailyCap="$720 美金 cap"
-            models="Claude + Codex + reasoning"
+            name={ultraTier.name}
+            pricePeriod={tierPricePeriod(ultraTier, currency)}
+            leverage={ultraTier.leverage}
+            totalUsd={ultraTier.totalQuota}
+            dailyCap={ultraTier.dailyCap}
+            models={ultraTier.models}
             ctaText={ultraCta.text}
             onCtaClick={ultraCta.onClick}
             ctaVariant={ultraCta.variant}
             soldOut={ultraCta.soldOut}
-            tooltipExtras={['含 reasoning (o1/o3) · 专属客服 · SLA · 定制路由策略']}
+            tooltipExtras={ultraTier.tooltipExtras}
           />
         </div>
       </section>
@@ -306,13 +315,14 @@ export default function Landing() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 p-6 md:p-7 bg-surface border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] mt-6">
           <div>
             <div className="font-mono text-[28px] md:text-[32px] font-bold leading-none text-ink mb-2">
-              <span className="text-[16px] text-ink-3 align-top mr-px">¥</span>1
+              <span className="font-medium">{std.unit}</span>
               <span className="text-ink-4 mx-2.5 font-medium">=</span>
-              <span className="text-[16px] text-ink-3 align-top mr-px">$</span>1
-              <span className="text-[14px] text-ink-3 ml-2 font-medium">美金额度</span>
+              <span className="text-[16px] text-ink-3 align-top mr-px">$</span>
+              {std.quota.replace(/^\$/, '')}
+              <span className="text-[14px] text-ink-3 ml-2 font-medium">调用额度</span>
             </div>
             <div className="font-mono text-[12px] text-ink-3 tracking-tight">
-              充值 ¥50 起 · 永不过期 · 全模型解锁
+              {std.minTopup}
             </div>
           </div>
           {standardCta.onClick ? (

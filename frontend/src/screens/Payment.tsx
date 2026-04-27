@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AppNav } from '../components/AppNav';
+import { CurrencySwitcher } from '../components/CurrencySwitcher';
+import { useCurrency } from '../lib/currency';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
 export default function Payment() {
   const loc = useLocation();
   const plan = (loc.state as { plan?: string } | null)?.plan;
+  const { currency } = useCurrency();
   const wechatId = 'tokenboss_admin';
 
   const [copied, setCopied] = useState(false);
@@ -34,17 +37,22 @@ export default function Payment() {
           <span className="text-ink-2">开通</span>
         </div>
 
-        <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] mb-2 font-bold flex items-center gap-2">
-          <span className="bg-yellow-stamp text-yellow-stamp-ink border-2 border-ink rounded px-1.5 py-0.5 tracking-[0.12em]">
-            v1.0
-          </span>
-          <span>BILLING · 开通</span>
+        <div className="flex items-start justify-between gap-4 mb-2">
+          <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold flex items-center gap-2">
+            <span className="bg-yellow-stamp text-yellow-stamp-ink border-2 border-ink rounded px-1.5 py-0.5 tracking-[0.12em]">
+              v1.0
+            </span>
+            <span>BILLING · 开通</span>
+          </div>
+          <CurrencySwitcher />
         </div>
         <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3">
           {plan ? `${plan} 我们手动给你开通。` : '套餐我们手动给你开通。'}
         </h1>
         <p className="text-[14px] text-text-secondary mb-9 max-w-[520px] leading-relaxed">
-          v1.0 还没接入自助支付。加客服微信，把你的注册邮箱和想买的套餐告诉他——
+          {currency === 'usdc'
+            ? 'v1.0 还没接入自助支付。把注册邮箱、想买的套餐、USDC 收款地址需求告诉客服——'
+            : 'v1.0 还没接入自助支付。加客服微信，把你的注册邮箱和想买的套餐告诉他——'}
           <span className="text-ink font-semibold">2 小时内</span>开通到账。
         </p>
 
@@ -89,7 +97,7 @@ export default function Payment() {
           <ul className="space-y-2 text-[13.5px] text-text-secondary leading-relaxed">
             <Bullet>你的注册邮箱（控制台右上角 avatar 看得到）</Bullet>
             <Bullet>{plan ? `想买的套餐：${plan}` : '想买的套餐（Plus / Super / Ultra / 标准充值）'}</Bullet>
-            <Bullet>付款偏好（微信 / 支付宝）</Bullet>
+            <Bullet>{currency === 'usdc' ? '付款偏好：USDC（链 / 钱包地址客服会发给你）' : '付款偏好（微信 / 支付宝）'}</Bullet>
           </ul>
         </section>
 

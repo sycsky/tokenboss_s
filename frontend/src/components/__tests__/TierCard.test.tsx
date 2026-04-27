@@ -8,15 +8,15 @@ describe('<TierCard>', () => {
       name="Plus"
       pricePeriod="¥288 / 4 周"
       leverage="×3"
-      totalUsd="≈ $840 美金额度"
-      dailyCap="$30 美金 cap"
+      totalUsd="≈ $840 调用额度"
+      dailyCap="$30 每日 cap"
       models="Codex 系列"
       ctaText="联系客服开通"
     />);
     expect(screen.getByText('Plus')).toBeInTheDocument();
     expect(screen.getByText('¥288 / 4 周')).toBeInTheDocument();
     expect(screen.getByText('×3')).toBeInTheDocument();
-    expect(screen.getByText('≈ $840 美金额度')).toBeInTheDocument();
+    expect(screen.getByText('≈ $840 调用额度')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '联系客服开通' })).toBeInTheDocument();
   });
 
