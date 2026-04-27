@@ -12,6 +12,7 @@ import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { UsageRow } from '../components/UsageRow';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 import { AppNav, SectionLabel } from '../components/AppNav';
+import { TerminalBlock } from '../components/TerminalBlock';
 import { slockBtn } from '../lib/slockBtn';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
@@ -118,8 +119,6 @@ export default function Dashboard() {
 
   const agents = useMemo(() => shapeAgents(agentGroups), [agentGroups]);
   const keyStats = useMemo(() => shapeKeyStats(keyHintGroups), [keyHintGroups]);
-  const noActivity = (usage.totals?.calls ?? 0) === 0;
-  const noKeys = keys.length === 0;
 
   const balanceUsd = buckets.reduce((sum, b) => {
     if (b.skuType === 'topup' || b.skuType === 'trial') return sum + (b.totalRemainingUsd ?? 0);
@@ -277,68 +276,71 @@ export default function Dashboard() {
 
         {/* SIDE COL */}
         <aside className="space-y-5 mt-5 lg:mt-0">
-          {/* 接入 — Agent + API Key 一张卡片，内部分隔 */}
+          {/* 接入 — persistent spell + manual-doc fallback, then AGENTS / API Key state. */}
           <section className={`${card} p-4`}>
             <div className="flex justify-between items-baseline mb-3">
               <span className="text-[14px] font-bold text-ink">接入</span>
               <span className="font-mono text-[10px] text-[#A89A8D] tracking-wider">v1.0</span>
             </div>
 
-            {/* First-time guide — only when user has no keys AND no usage */}
-            {noKeys && noActivity ? (
-              <FirstTimeGuide />
+            {/* Always-visible spell — replaces both the empty-state guide
+                and the "+ 接入新 Agent" CTA. New users see what to do;
+                returning users can re-copy for a new machine / new agent. */}
+            <TerminalBlock
+              cmd="set up tokenboss.com/skill.md"
+              prompt={
+                <>
+                  <span aria-hidden="true" className="mr-1.5">↓</span>
+                  贴给 Agent
+                  <span className="text-white/40 mx-1.5">·</span>
+                  30 秒接好
+                </>
+              }
+            />
+            <Link
+              to="/install/manual"
+              className="block mt-2.5 font-mono text-[11px] text-[#A89A8D] hover:text-ink transition-colors"
+            >
+              手动配置文档 →
+            </Link>
+
+            {/* divider */}
+            <div className="my-4 border-t-2 border-ink/10" />
+
+            {/* AGENTS sub-section */}
+            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
+              AGENTS
+            </div>
+            {agents.length === 0 ? (
+              <div className="bg-bg border-2 border-dashed border-ink/30 rounded p-3 mb-3 text-center font-mono text-[11px] text-[#A89A8D]">
+                还没有 Agent 调用过 · 接入后会自动出现
+              </div>
             ) : (
-              <>
-                {/* AGENTS sub-section */}
-                <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
-                  AGENTS
-                </div>
-                {agents.length === 0 ? (
-                  <div className="bg-bg border-2 border-dashed border-ink/30 rounded p-3 mb-2.5 text-center font-mono text-[11px] text-[#A89A8D]">
-                    还没有 Agent 调用过 · 接入后会自动出现
+              <div className="space-y-1.5 mb-3">
+                {agents.map((a) => (
+                  <div key={a.source} className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2.5">
+                    <div className={`w-7 h-7 ${a.color} border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center flex-shrink-0`}>
+                      {a.initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-bold text-ink truncate">{a.label}</div>
+                      <div className="font-mono text-[10px] text-[#A89A8D] truncate">
+                        {timeAgo(a.lastUsedAt)} · {a.callCount} 次 · ${a.totalSpent.toFixed(3)}
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div className="space-y-1.5 mb-2.5">
-                    {agents.map((a) => {
-                      return (
-                        <div key={a.source} className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2.5">
-                          <div className={`w-7 h-7 ${a.color} border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center flex-shrink-0`}>
-                            {a.initials}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[12.5px] font-bold text-ink truncate">{a.label}</div>
-                            <div className="font-mono text-[10px] text-[#A89A8D] truncate">
-                              {timeAgo(a.lastUsedAt)} · {a.callCount} 次 · ${a.totalSpent.toFixed(3)}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <a
-                  href="/install/manual"
-                  className={
-                    'block text-center px-4 py-2 bg-accent-soft border-2 border-dashed border-ink rounded ' +
-                    'text-[12.5px] font-bold tracking-tight text-accent-ink cursor-pointer ' +
-                    'shadow-[3px_3px_0_0_#1C1917] ' +
-                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-                    'transition-all'
-                  }
-                >
-                  + 接入新 Agent
-                </a>
-
-                {/* divider */}
-                <div className="my-4 border-t-2 border-ink/10" />
-
-                {/* API KEY sub-section */}
-                <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
-                  API KEY
-                </div>
-                <APIKeyList keys={keys} loadError={keysError} keyStats={keyStats} onChanged={reloadKeys} />
-              </>
+                ))}
+              </div>
             )}
+
+            {/* divider */}
+            <div className="my-4 border-t-2 border-ink/10" />
+
+            {/* API KEY sub-section */}
+            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
+              API KEY
+            </div>
+            <APIKeyList keys={keys} loadError={keysError} keyStats={keyStats} onChanged={reloadKeys} />
           </section>
 
           {/* Recent usage */}
@@ -372,54 +374,6 @@ export default function Dashboard() {
         </aside>
       </main>
     </div>
-  );
-}
-
-function FirstTimeGuide() {
-  return (
-    <div>
-      <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
-        现在开始
-      </div>
-      <ol className="space-y-2 mb-3">
-        <Step n="1" title="新建一把 API Key" hint="点下面的「现在新建 →」" />
-        <Step n="2" title="粘到你的 Agent" hint="OpenClaw / Hermes / Codex 都支持" />
-        <Step n="3" title="让 Agent 跑一次" hint="这里就会出现真实数据" />
-      </ol>
-      <Link
-        to="/console/keys"
-        className={
-          'block text-center px-4 py-2 mb-3 bg-yellow-stamp border-2 border-ink rounded ' +
-          'text-[12.5px] font-bold tracking-tight text-yellow-stamp-ink ' +
-          'shadow-[3px_3px_0_0_#1C1917] ' +
-          'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-          'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-          'transition-all'
-        }
-      >
-        现在新建 →
-      </Link>
-      <Link
-        to="/install/manual"
-        className="block text-center font-mono text-[11px] text-[#A89A8D] hover:text-ink underline underline-offset-2 transition-colors"
-      >
-        或先看接入文档
-      </Link>
-    </div>
-  );
-}
-
-function Step({ n, title, hint }: { n: string; title: string; hint: string }) {
-  return (
-    <li className="flex items-start gap-2.5">
-      <span className="w-5 h-5 flex-shrink-0 bg-ink text-bg border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center mt-0.5">
-        {n}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] font-semibold text-ink leading-snug">{title}</div>
-        <div className="font-mono text-[10px] text-[#A89A8D] mt-px">{hint}</div>
-      </div>
-    </li>
   );
 }
 

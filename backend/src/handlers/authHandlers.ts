@@ -471,6 +471,20 @@ export async function verifyCodeHandler(
           quota: getSignupQuota(),
         });
         newapiUserId = provisioned.newapiUserId;
+
+        // Auto-create the user's default API key right after provisioning
+        // so /onboard/install can render the spell with the key inline,
+        // SkillBoss-style. Plaintext is fetched on demand via reveal — we
+        // don't store it on our side; newapi keeps it.
+        const session = await newapi.loginUser({
+          username: newapiUsername,
+          password: newapiPassword,
+        });
+        await newapi.createAndRevealToken({
+          session,
+          name: "default",
+          unlimited_quota: true,
+        });
       } catch (err) {
         const msg = err instanceof NewapiError ? err.message : (err as Error).message;
         console.error(`[verifyCode] newapi provisioning failed for ${userId}:`, msg);

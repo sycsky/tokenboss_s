@@ -2,17 +2,45 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { OnboardShell } from '../components/OnboardShell';
+import { api } from '../lib/api';
 import { slockBtn } from '../lib/slockBtn';
 
 /**
- * Step 02 — paste-and-wait. Shows the install spell as a Slock-pixel
- * terminal block, then a status card that auto-advances when the
- * backend reports the first chat call. Until polling is wired, a 3 s
- * timer simulates the detection.
+ * Step 02 — paste-and-go. The user's default API key (auto-provisioned at
+ * verifyCode time) is fetched and rendered inline with the install spell so
+ * a single copy lands the agent fully configured. After "我已经发给它了"
+ * the flow advances to /onboard/success.
  */
 export default function OnboardInstall() {
   const nav = useNavigate();
   const [waiting, setWaiting] = useState(true);
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { keys } = await api.listKeys();
+        if (cancelled) return;
+        // Prefer a key explicitly labelled "default" (auto-created at
+        // verifyCode time); fall back to the first key the user owns.
+        const target = keys.find((k) => k.label === 'default') ?? keys[0];
+        if (!target) {
+          setKeyError('default key 未找到');
+          return;
+        }
+        const revealed = await api.revealKey(target.keyId);
+        if (cancelled) return;
+        setApiKey(revealed.key);
+      } catch (e) {
+        if (!cancelled) setKeyError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // TODO(production): replace this 3-second simulation with polling /v1/usage
   // for the first chat call — when the API returns at least one usage record,
@@ -27,11 +55,32 @@ export default function OnboardInstall() {
       step="02"
       cnLabel="发咒语"
       enLabel="Send to Agent"
-      title="把下面这行发给你的 Agent"
-      subtitle="Agent 会自己读完 skill.md，30 秒接好。"
+      title="一行就接好。"
       width="lg"
     >
-      <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mb-4" />
+      <TerminalBlock
+        cmd="set up tokenboss.com/skill.md"
+        extra={apiKey ? `TOKENBOSS_API_KEY=${apiKey}` : undefined}
+        loading={!apiKey && !keyError}
+        size="lg"
+        className="mb-4"
+        prompt={
+          <>
+            <span aria-hidden="true" className="mr-1.5">↓</span>
+            把这两行整体发给你的 Agent
+            <span className="text-white/40 mx-1.5">·</span>
+            30 秒自动接入
+            <span className="text-white/40 mx-1.5">·</span>
+            <span className="text-white">$10 试用立刻能用</span>
+          </>
+        }
+      />
+
+      {keyError && (
+        <p className="font-mono text-[11px] text-accent mb-2">
+          ⚠ 拉取 key 出错：{keyError}
+        </p>
+      )}
 
       <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-9">
         已支持 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
@@ -59,8 +108,6 @@ export default function OnboardInstall() {
         </button>
       )}
 
-      {/* Always-visible back-out so a user who picked the wrong path
-          on /welcome isn't stuck — restores the previous step. */}
       <div className="mt-6 text-center">
         <button
           type="button"
