@@ -17,6 +17,7 @@ import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
+import { getCachedKey, setCachedKey } from '../lib/keyCache';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -171,20 +172,36 @@ export default function Dashboard() {
   // something the hero can't already say.
   const showBucketList = buckets.some((b) => b.skuType !== 'trial') || buckets.length > 1;
 
-  // Default-key target for the inline spell. We pass a lazy resolver to
-  // TerminalBlock instead of pre-revealing on mount — newapi rate-limits
-  // and most /console visits don't actually need the plaintext key.
-  // The masked key from listKeys is shown until the user clicks COPY,
-  // at which point the resolver runs and the plaintext both lands in
-  // the clipboard and replaces the visible masked value.
+  // Default-key target for the inline spell. The spell always points at
+  // the same default key, so once we've revealed its plaintext on this
+  // browser we cache it (per email+keyId in localStorage) — repeat
+  // /console visits then read the cache and bypass newapi entirely.
+  //
+  // First visit: spell shows the masked key from listKeys; COPY runs
+  // the resolver, which reveals via newapi, writes the plaintext to
+  // both the clipboard and the cache, and swaps the visible value.
+  //
+  // Subsequent visits: cache hit → spell shows plaintext immediately,
+  // no resolver needed, COPY is a pure-clipboard op with zero network.
+  //
+  // The bottom API KEY list rows still reveal-on-click (see APIKeyList)
+  // since those serve management, not the always-on copy spell.
   const defaultKey = keys.find((k) => k.label === 'default') ?? keys[0];
-  const maskedExtra = defaultKey ? `TOKENBOSS_API_KEY=${defaultKey.key}` : undefined;
-  const extraResolver = defaultKey
-    ? async () => {
-        const { key } = await api.revealKey(defaultKey.keyId);
-        return `TOKENBOSS_API_KEY=${key}`;
-      }
+  const cachedDefaultPlain =
+    user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
+  const spellExtra = defaultKey
+    ? cachedDefaultPlain
+      ? `TOKENBOSS_API_KEY=${cachedDefaultPlain}`
+      : `TOKENBOSS_API_KEY=${defaultKey.key}`
     : undefined;
+  const spellResolver =
+    defaultKey && !cachedDefaultPlain
+      ? async () => {
+          const { key } = await api.revealKey(defaultKey.keyId);
+          if (user?.email) setCachedKey(user.email, defaultKey.keyId, key);
+          return `TOKENBOSS_API_KEY=${key}`;
+        }
+      : undefined;
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
   // routes through here in v1 since there's no self-checkout yet.
@@ -439,8 +456,8 @@ export default function Dashboard() {
                 bundle from one COPY. */}
             <TerminalBlock
               cmd="set up tokenboss.com/skill.md"
-              extra={maskedExtra}
-              extraResolver={extraResolver}
+              extra={spellExtra}
+              extraResolver={spellResolver}
               loading={keys.length === 0 && !keysError}
               prompt={
                 <>
