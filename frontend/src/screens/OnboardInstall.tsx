@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TerminalBlock } from '../components/TerminalBlock';
+import { OnboardShell } from '../components/OnboardShell';
+import { slockBtn } from '../lib/slockBtn';
 
+/**
+ * Step 02 — paste-and-wait. Shows the install spell as a Slock-pixel
+ * terminal block, then a status card that auto-advances when the
+ * backend reports the first chat call. Until polling is wired, a 3 s
+ * timer simulates the detection.
+ */
 export default function OnboardInstall() {
   const nav = useNavigate();
   const [waiting, setWaiting] = useState(true);
@@ -15,35 +23,42 @@ export default function OnboardInstall() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-bg p-6 flex flex-col">
-      <div className="max-w-lg mx-auto w-full mt-12">
-        <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-ink-3 mb-3">第二步 · STEP 02</div>
-        <h1 className="text-3xl font-bold mb-2 tracking-tight">复制下面这行</h1>
-        <p className="text-ink-2 text-sm mb-8">在你的 Agent 终端里粘贴 → Agent 自动拉取 skill.md 并接入</p>
+    <OnboardShell
+      step="02"
+      cnLabel="复制咒语"
+      enLabel="Paste the spell"
+      title="复制下面这行"
+      subtitle="在你的 Agent 终端里粘贴 → Agent 自动拉取 skill.md 并接入。"
+      width="lg"
+    >
+      <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mb-4" />
 
-        <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mb-4" />
+      <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-9">
+        兼容 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
+        <span className="text-ink font-semibold">Hermes</span> ·{' '}
+        <span className="text-ink font-semibold">Claude Code</span> ·{' '}
+        <span className="text-ink font-semibold">Codex</span>
+      </p>
 
-        <p className="font-mono text-xs text-ink-3 mb-10">
-          在 <span className="text-ink-2 font-semibold">OpenClaw / Hermes / Claude Code</span> 等 Agent 终端里粘贴
-        </p>
-
-        {waiting ? (
-          <div className="bg-surface border border-border rounded-xl p-5 flex items-center gap-3">
-            <div className="w-3 h-3 bg-accent rounded-full animate-pulse" />
-            <div>
-              <div className="text-sm font-semibold">等待 Agent 拉取 skill.md…</div>
-              <div className="text-xs text-ink-3 mt-0.5">检测到首次调用即自动跳转</div>
-            </div>
+      {waiting ? (
+        <div className="flex items-center gap-4 px-5 py-4 bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]">
+          <span aria-hidden="true" className="relative flex-shrink-0">
+            <span className="absolute inset-0 bg-accent/40 rounded-full animate-ping" />
+            <span className="relative block w-3 h-3 bg-accent border-2 border-ink rounded-full" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-bold text-ink">等待 Agent 拉取 skill.md…</div>
+            <div className="text-[12px] text-[#6B5E52] mt-0.5">检测到首次调用即自动跳转</div>
           </div>
-        ) : (
-          <button
-            onClick={() => nav('/onboard/success')}
-            className="w-full py-3 bg-accent text-white font-semibold rounded-lg"
-          >
-            我已经粘贴好了 →
-          </button>
-        )}
-      </div>
-    </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => nav('/onboard/success')}
+          className={slockBtn('primary') + ' w-full'}
+        >
+          我已经粘贴好了 →
+        </button>
+      )}
+    </OnboardShell>
   );
 }
