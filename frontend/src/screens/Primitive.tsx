@@ -46,22 +46,33 @@ export default function Primitive() {
           </span>
         </p>
 
-        {/* The morphing equation — loops between two states.
-            State A: Agent = Powerful.            → bar fills only to 及格 (60%)
-            State B: Agent + Primitive = Productive. → bar shoots to 100%, "Powered by TokenBoss" surfaces
-            Motion is the argument — capability gets you to passing,
-            Primitives push it past. Opt-out for prefers-reduced-motion. */}
-        <div className="bg-surface-warm border-2 border-ink rounded-md shadow-[5px_5px_0_0_#1C1917] p-6 md:p-9 mb-10 md:mb-12">
+        {/* The unfolding equation — one-directional 8s cycle.
+            empty → Agent appears → bar fills to 及格 (60%) → State A held →
+            + Primitive enters with "Powered by TokenBoss" credit →
+            bar shoots to 优秀 (100%) → State B held → fade out → loop.
+            No reverse motion: the message is a build-up. */}
+        <div className="eq-card bg-surface-warm border-2 border-ink rounded-md shadow-[5px_5px_0_0_#1C1917] p-6 md:p-9 mb-10 md:mb-12">
           <div className="eq-row flex items-center gap-2.5 md:gap-4 flex-wrap text-[26px] md:text-[40px] font-extrabold tracking-tight leading-none">
-            <Chip>Agent</Chip>
-
-            {/* "+ Primitive" — collapses to zero width in State A */}
-            <span className="eq-boss inline-flex items-center gap-2.5 md:gap-4 overflow-hidden whitespace-nowrap">
-              <Op>+</Op>
-              <ChipFeatured>Primitive</ChipFeatured>
+            <span className="eq-agent">
+              <Chip>Agent</Chip>
             </span>
 
-            <Op>=</Op>
+            {/* "+ Primitive" group. eq-boss collapses to zero width in
+                State A via overflow-hidden + max-width 0. The credit
+                lives OUTSIDE eq-boss (sibling) so its width isn't
+                clipped — it's positioned absolutely against the
+                relative outer wrapper, which sizes to eq-boss's content. */}
+            <span className="eq-boss-anchor relative inline-flex items-baseline">
+              <span className="eq-boss inline-flex items-center gap-2.5 md:gap-4 overflow-hidden whitespace-nowrap">
+                <Op>+</Op>
+                <ChipFeatured>Primitive</ChipFeatured>
+              </span>
+              <span className="eq-credit absolute left-1/2 -translate-x-1/2 top-full mt-2 whitespace-nowrap font-mono text-[9px] md:text-[10px] font-bold tracking-[0.14em] uppercase text-accent">
+                Powered by TokenBoss
+              </span>
+            </span>
+
+            <span className="eq-equals"><Op>=</Op></span>
 
             {/* Answer slot — two states stacked, opacity swaps in sync with the chip morph */}
             <span className="eq-answer relative inline-block leading-none">
@@ -76,8 +87,8 @@ export default function Primitive() {
             </span>
           </div>
 
-          {/* Energy bar — track + 及格 tick + fill + "Powered by TokenBoss" stamp */}
-          <div className="mt-7 md:mt-8">
+          {/* Energy bar — track + 及格 tick + 优秀 tick + animated fill */}
+          <div className="mt-9 md:mt-10">
             <div className="relative h-3 bg-bg border-2 border-ink rounded-sm overflow-hidden">
               {/* Passing line at 60% */}
               <div className="absolute inset-y-0 left-[60%] w-[2px] bg-ink/35" aria-hidden="true" />
@@ -85,13 +96,13 @@ export default function Primitive() {
               <div className="eq-bar-fill absolute inset-y-0 left-0 bg-accent border-r-2 border-ink" />
             </div>
 
-            {/* Labels — 及格 tick (always) + Powered by TokenBoss (State B only) */}
+            {/* Tick labels — 及格 (60%) and 优秀 (100%), both static */}
             <div className="relative mt-2 h-4">
               <span className="absolute left-[60%] -translate-x-1/2 font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-ink-3">
                 及格
               </span>
-              <span className="eq-bar-label absolute right-0 font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-accent">
-                Powered by TokenBoss
+              <span className="absolute right-0 font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-ink-3">
+                优秀
               </span>
             </div>
           </div>
@@ -142,69 +153,104 @@ export default function Primitive() {
         </div>
       </main>
 
-      {/* Equation morph keyframes — pure CSS, 7s loop.
-          0–14%   State A · Agent = Powerful · bar holds at 及格 (60%)
-          14–28%  morph: + Primitive slides in, answer flips, bar shoots to 100%
-          28–71%  State B · Agent + Primitive = Productive · bar at 100%
-                  · "Powered by TokenBoss" label fades in
-          71–86%  morph back: + Primitive slides out, answer reverts, bar drops
-          86–100% State A · holds at 及格
-          Honors prefers-reduced-motion: pin to State B static. */}
+      {/* Equation cycle — pure CSS, 8s, one-directional (no reverse).
+          Beats:
+            0–10%   card fades in, contents start invisible (empty)
+            10–22%  Agent chip fades in
+            22–32%  "= Powerful." fades in, bar fills 0 → 60% (及格)
+            32–50%  Hold A · Agent = Powerful · bar at 及格
+            50–58%  + Primitive slides in, "Powered by TokenBoss" credit
+                    fades in under it, Powerful → Productive flip starts
+            58–72%  bar fills 60 → 100% (优秀), answer settled on Productive
+            72–90%  Hold B · Agent + Primitive = Productive · bar at 优秀
+            90–100% card fades out (parent opacity 1 → 0). All width/transform
+                    snap-resets at the cycle boundary happen while the card
+                    is invisible, so the user never sees a reverse motion.
+          prefers-reduced-motion: pins to State B static. */}
       <style>{`
+        .eq-card {
+          animation: eq-card 8s ease-in-out infinite;
+          opacity: 0;
+        }
+        @keyframes eq-card {
+          0%, 8%    { opacity: 0; }
+          12%, 90%  { opacity: 1; }
+          100%      { opacity: 0; }
+        }
+
+        .eq-agent, .eq-equals {
+          opacity: 0;
+          animation: eq-agent 8s ease-in-out infinite;
+        }
+        .eq-equals { animation-name: eq-equals; }
+        @keyframes eq-agent {
+          0%, 10%   { opacity: 0; transform: translateY(2px); }
+          22%, 100% { opacity: 1; transform: translateY(0);   }
+        }
+        @keyframes eq-equals {
+          0%, 18%   { opacity: 0; }
+          28%, 100% { opacity: 1; }
+        }
+
         .eq-boss {
           max-width: 0;
           opacity: 0;
-          transform: translateX(-8px);
           margin-left: 0;
-          animation: eq-boss 7s ease-in-out infinite;
+          animation: eq-boss 8s ease-in-out infinite;
         }
         @keyframes eq-boss {
-          0%, 14%   { max-width: 0;     opacity: 0; transform: translateX(-8px); margin-left: 0;        }
-          28%, 71%  { max-width: 360px; opacity: 1; transform: translateX(0);    margin-left: 0.625rem; }
-          86%, 100% { max-width: 0;     opacity: 0; transform: translateX(-8px); margin-left: 0;        }
+          0%, 50%   { max-width: 0;     opacity: 0; margin-left: 0;        }
+          58%, 100% { max-width: 380px; opacity: 1; margin-left: 0.625rem; }
         }
-        .eq-powerful   { animation: eq-powerful   7s ease-in-out infinite; }
-        .eq-productive { animation: eq-productive 7s ease-in-out infinite; opacity: 0; }
+
+        .eq-credit {
+          opacity: 0;
+          transform: translateY(-3px);
+          animation: eq-credit 8s ease-in-out infinite;
+        }
+        @keyframes eq-credit {
+          0%, 52%   { opacity: 0; transform: translateY(-3px); }
+          62%, 100% { opacity: 1; transform: translateY(0);    }
+        }
+
+        .eq-powerful {
+          opacity: 0;
+          animation: eq-powerful 8s ease-in-out infinite;
+        }
         @keyframes eq-powerful {
-          0%, 14%   { opacity: 1; transform: translateY(0);   }
-          22%, 78%  { opacity: 0; transform: translateY(-4px); }
-          86%, 100% { opacity: 1; transform: translateY(0);   }
+          0%, 18%   { opacity: 0; }
+          28%, 50%  { opacity: 1; }
+          60%, 100% { opacity: 0; }
+        }
+
+        .eq-productive {
+          opacity: 0;
+          animation: eq-productive 8s ease-in-out infinite;
         }
         @keyframes eq-productive {
-          0%, 18%   { opacity: 0; transform: translateY(4px); }
-          28%, 71%  { opacity: 1; transform: translateY(0);   }
-          82%, 100% { opacity: 0; transform: translateY(4px); }
+          0%, 50%   { opacity: 0; }
+          62%, 100% { opacity: 1; }
         }
 
-        /* Energy bar — pinned to 60% in State A, shoots to 100% in State B. */
         .eq-bar-fill {
-          width: 60%;
-          animation: eq-bar-fill 7s ease-in-out infinite;
+          width: 0%;
+          animation: eq-bar-fill 8s ease-in-out infinite;
         }
         @keyframes eq-bar-fill {
-          0%, 14%   { width: 60%;  }
-          28%, 71%  { width: 100%; }
-          86%, 100% { width: 60%;  }
-        }
-
-        /* "Powered by TokenBoss" — only surfaces in State B, fades in from the right. */
-        .eq-bar-label {
-          opacity: 0;
-          transform: translateX(6px);
-          animation: eq-bar-label 7s ease-in-out infinite;
-        }
-        @keyframes eq-bar-label {
-          0%, 18%   { opacity: 0; transform: translateX(6px); }
-          28%, 71%  { opacity: 1; transform: translateX(0);   }
-          82%, 100% { opacity: 0; transform: translateX(6px); }
+          0%, 18%   { width: 0%;   }
+          32%, 50%  { width: 60%;  }
+          72%, 100% { width: 100%; }
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .eq-boss       { animation: none; max-width: 360px; opacity: 1; transform: none; margin-left: 0.625rem; }
+          .eq-card       { animation: none; opacity: 1; }
+          .eq-agent      { animation: none; opacity: 1; transform: none; }
+          .eq-equals     { animation: none; opacity: 1; }
+          .eq-boss       { animation: none; max-width: 380px; opacity: 1; margin-left: 0.625rem; }
+          .eq-credit     { animation: none; opacity: 1; transform: none; }
           .eq-powerful   { animation: none; opacity: 0; }
-          .eq-productive { animation: none; opacity: 1; transform: none; }
+          .eq-productive { animation: none; opacity: 1; }
           .eq-bar-fill   { animation: none; width: 100%; }
-          .eq-bar-label  { animation: none; opacity: 1; transform: none; }
         }
       `}</style>
     </div>
