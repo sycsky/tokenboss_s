@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { BrandPlate } from './TopNav';
 
-export type AppNavCurrent = 'dashboard' | 'history' | 'account';
+export type AppNavCurrent = 'console' | 'history' | 'account';
 
 /**
  * Shared top nav for authenticated app pages (Dashboard, UsageHistory,
@@ -30,9 +30,9 @@ export function AppNav({ current }: { current: AppNavCurrent }) {
       <BrandPlate />
 
       <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-5 sm:gap-7">
-        <Link to="/dashboard" className={navLink(current === 'dashboard')}>控制台</Link>
-        <Link to="/dashboard/history" className={navLink(current === 'history')}>用量</Link>
-        <Link to="/dashboard/account" className={navLink(current === 'account')}>账户</Link>
+        <Link to="/console" className={navLink(current === 'console')}>控制台</Link>
+        <Link to="/console/history" className={navLink(current === 'history')}>用量</Link>
+        <Link to="/console/account" className={navLink(current === 'account')}>账户</Link>
       </div>
 
       <div className="flex items-center gap-3">
@@ -50,7 +50,7 @@ export function AppNav({ current }: { current: AppNavCurrent }) {
           升级 ↗
         </Link>
         <Link
-          to="/dashboard/account"
+          to="/console/account"
           aria-label={user?.email ? `账户：${user.email}` : '账户'}
           className={
             'inline-flex items-center justify-center w-9 h-9 bg-lavender text-lavender-ink border-2 border-ink ' +

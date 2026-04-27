@@ -32,7 +32,7 @@ export default function Login() {
     setError(null);
     try {
       await login(email.trim().toLowerCase(), password);
-      nav('/dashboard');
+      nav('/console');
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === 'bad_credentials') {
         setError('邮箱或密码不正确');

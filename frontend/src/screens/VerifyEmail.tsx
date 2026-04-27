@@ -35,7 +35,7 @@ export default function VerifyEmail() {
       .then((res) => {
         setState({ kind: 'success', displayName: res.user.displayName });
         // Tiny delay so the success state is readable before navigation.
-        setTimeout(() => nav('/dashboard'), 1400);
+        setTimeout(() => nav('/console'), 1400);
       })
       .catch(() => {
         setState({ kind: 'invalid' });

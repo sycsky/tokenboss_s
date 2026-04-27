@@ -52,7 +52,7 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
         <div className="flex items-center gap-5 sm:gap-7">
           <a href="/#pricing" className={navLink(false)}>套餐</a>
           {isLoggedIn ? (
-            <Link to="/dashboard" className={navLink(false)}>控制台</Link>
+            <Link to="/console" className={navLink(false)}>控制台</Link>
           ) : (
             <Link to="/login" className={navLink(false)}>登录</Link>
           )}

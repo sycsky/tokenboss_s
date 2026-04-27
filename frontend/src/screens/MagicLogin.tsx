@@ -46,7 +46,7 @@ export default function MagicLogin() {
     setError(null);
     try {
       const result = await loginWithCode(email.trim().toLowerCase(), code);
-      nav(result.isNew ? '/onboard/welcome' : '/dashboard');
+      nav(result.isNew ? '/onboard/welcome' : '/console');
     } catch {
       setError('验证码错误或已过期，请重新获取');
     } finally {

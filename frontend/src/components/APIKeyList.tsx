@@ -22,7 +22,7 @@ export interface APIKeyListProps {
  * Renders the user's TokenBoss proxy keys as flat rows. Each key shows
  * a small "5m 前 · 142 次 · $0.034" footer when usage stats are present
  * (attributing real Agent activity to the specific key). The component
- * is read-only-ish: the create flow lives on /dashboard/keys (the
+ * is read-only-ish: the create flow lives on /console/keys (the
  * dedicated management page that handles label input + the one-shot
  * "copy now" banner). Revoke stays inline since it's a single confirm.
  */
@@ -89,7 +89,7 @@ export function APIKeyList({ keys, loadError, keyStats, onChanged }: APIKeyListP
         );
       })}
       <Link
-        to="/dashboard/keys"
+        to="/console/keys"
         className={
           'block text-center w-full mt-3 px-4 py-2 bg-white border-2 border-dashed border-ink rounded ' +
           'text-[12.5px] font-bold tracking-tight text-ink ' +

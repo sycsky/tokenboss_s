@@ -107,7 +107,7 @@ export default function Keys() {
 
       <main className="max-w-[820px] mx-auto px-5 sm:px-9 pt-6">
         <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/dashboard" className="hover:text-ink transition-colors">控制台</Link>
+          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
           <span className="mx-2 text-[#D9CEC2]">/</span>
           <span className="text-ink-2">API Keys</span>
         </div>

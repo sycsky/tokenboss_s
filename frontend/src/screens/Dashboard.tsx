@@ -158,7 +158,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-bg pb-12">
-      <AppNav current="dashboard" />
+      <AppNav current="console" />
 
       {user && !user.emailVerified && user.email && (
         <div className="max-w-[1200px] mx-auto px-5 sm:px-9 pt-4">
@@ -353,7 +353,7 @@ export default function Dashboard() {
           <section>
             <SectionLabel
               action={
-                <Link to="/dashboard/history" className="text-accent font-bold tracking-wider hover:text-accent-deep">
+                <Link to="/console/history" className="text-accent font-bold tracking-wider hover:text-accent-deep">
                   查看全部 →
                 </Link>
               }
@@ -395,7 +395,7 @@ function FirstTimeGuide() {
         <Step n="3" title="让 Agent 跑一次" hint="这里就会出现真实数据" />
       </ol>
       <Link
-        to="/dashboard/keys"
+        to="/console/keys"
         className={
           'block text-center px-4 py-2 mb-3 bg-yellow-stamp border-2 border-ink rounded ' +
           'text-[12.5px] font-bold tracking-tight text-yellow-stamp-ink ' +

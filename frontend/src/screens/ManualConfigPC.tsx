@@ -10,7 +10,7 @@ export default function ManualConfigPC() {
           <span className="font-bold">TokenBoss</span>
         </div>
         <div className="flex gap-6 text-[13px] text-ink-2">
-          <Link to="/dashboard">控制台</Link>
+          <Link to="/console">控制台</Link>
           <Link to="/pricing">套餐</Link>
         </div>
       </nav>
@@ -32,7 +32,7 @@ export default function ManualConfigPC() {
         <section>
           <h2 className="text-lg font-bold mb-3">备选：传统配置 4 步</h2>
           <ol className="list-decimal list-inside space-y-3 text-sm text-ink-2">
-            <li>在 <Link to="/dashboard" className="text-accent">控制台</Link> 创建一个 API key（仅显示一次，请立即复制）</li>
+            <li>在 <Link to="/console" className="text-accent">控制台</Link> 创建一个 API key（仅显示一次，请立即复制）</li>
             <li>设置 base URL: <code className="font-mono bg-surface px-2 py-0.5 rounded text-xs">https://api.tokenboss.com/v1</code></li>
             <li>设置 API key 环境变量: <code className="font-mono bg-surface px-2 py-0.5 rounded text-xs">TOKENBOSS_API_KEY=tb_...</code></li>
             <li>测试调用: <code className="font-mono bg-surface px-2 py-0.5 rounded text-xs">curl -H "Authorization: Bearer $TOKENBOSS_API_KEY" https://api.tokenboss.com/v1/models</code></li>

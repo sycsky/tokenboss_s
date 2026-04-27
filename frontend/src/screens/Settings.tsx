@@ -32,7 +32,7 @@ export default function Settings() {
       <main className="max-w-[820px] mx-auto px-5 sm:px-9 pt-6">
         {/* Breadcrumb */}
         <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/dashboard" className="hover:text-ink transition-colors">控制台</Link>
+          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
           <span className="mx-2 text-[#D9CEC2]">/</span>
           <span className="text-ink-2">账户</span>
         </div>
@@ -53,7 +53,7 @@ export default function Settings() {
               <span className="font-mono text-[13.5px] font-semibold text-ink break-all">
                 {user?.email}
                 <Link
-                  to="/dashboard/account"
+                  to="/console/account"
                   className="ml-2 font-sans text-accent text-[11.5px] font-semibold underline underline-offset-2"
                 >
                   需修改 → 联系客服

@@ -22,7 +22,7 @@ export default function Payment() {
           </div>
         </div>
 
-        <Link to="/dashboard" className="text-sm text-ink-2">← 返回控制台</Link>
+        <Link to="/console" className="text-sm text-ink-2">← 返回控制台</Link>
       </div>
     </div>
   );

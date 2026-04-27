@@ -27,7 +27,7 @@ export default function OnboardSuccess() {
         <Row label="模型池" value="ECO" hint="经济模型，注册即用" />
       </div>
 
-      <Link to="/dashboard" className={slockBtn('primary') + ' w-full text-center mb-3'}>
+      <Link to="/console" className={slockBtn('primary') + ' w-full text-center mb-3'}>
         看控制台 →
       </Link>
       <a

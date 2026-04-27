@@ -30,10 +30,10 @@ export default function App() {
       <Route path="/onboard/install" element={<RequireAuth><OnboardInstall /></RequireAuth>} />
       <Route path="/onboard/success" element={<RequireAuth><OnboardSuccess /></RequireAuth>} />
 
-      <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-      <Route path="/dashboard/history" element={<RequireAuth><UsageHistory /></RequireAuth>} />
-      <Route path="/dashboard/account" element={<RequireAuth><Settings /></RequireAuth>} />
-      <Route path="/dashboard/keys" element={<RequireAuth><Keys /></RequireAuth>} />
+      <Route path="/console" element={<RequireAuth><Dashboard /></RequireAuth>} />
+      <Route path="/console/history" element={<RequireAuth><UsageHistory /></RequireAuth>} />
+      <Route path="/console/account" element={<RequireAuth><Settings /></RequireAuth>} />
+      <Route path="/console/keys" element={<RequireAuth><Keys /></RequireAuth>} />
 
       <Route path="/pricing" element={<Plans />} />
       <Route path="/primitive" element={<Primitive />} />

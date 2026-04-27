@@ -186,7 +186,7 @@ export default function Landing() {
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
               {isLoggedIn ? (
-                <Link to="/dashboard" className={slockBtn('primary')}>
+                <Link to="/console" className={slockBtn('primary')}>
                   去控制台 →
                 </Link>
               ) : (
