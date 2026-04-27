@@ -13,7 +13,7 @@ vi.mock('../newapi.js', async (orig) => {
 });
 
 import { init, putUser, setUserPlan, getUser } from '../store.js';
-import { runDailyExpireAndReset } from '../dailyCron.js';
+import { runQuotaSweep } from '../dailyCron.js';
 import { newapi } from '../newapi.js';
 
 const updateUserMock = newapi.updateUser as unknown as ReturnType<typeof vi.fn>;
@@ -25,10 +25,10 @@ beforeEach(() => {
   updateUserMock.mockResolvedValue({ id: 1, username: 'x', quota: 0, group: 'default' });
 });
 
-const futureIso = (days = 7) =>
-  new Date(Date.now() + days * 86400_000).toISOString();
-const pastIso = (days = 1) =>
-  new Date(Date.now() - days * 86400_000).toISOString();
+const futureIso = (offsetMs: number) =>
+  new Date(Date.now() + offsetMs).toISOString();
+const pastIso = (offsetMs: number) =>
+  new Date(Date.now() - offsetMs).toISOString();
 
 function makeUser(over: Partial<{ userId: string; newapiUserId: number | null }> = {}) {
   putUser({
@@ -40,62 +40,84 @@ function makeUser(over: Partial<{ userId: string; newapiUserId: number | null }>
   });
 }
 
-describe('runDailyExpireAndReset', () => {
-  it('resets quota to dailyQuotaUsd × 500_000 for active paid users', async () => {
-    makeUser({ userId: 'u_paid', newapiUserId: 42 });
-    setUserPlan('u_paid', {
+describe('runQuotaSweep', () => {
+  it('resets only paid users whose quotaNextResetAt is due', async () => {
+    // User 1: due (nextResetAt was 1 minute ago)
+    makeUser({ userId: 'u_due', newapiUserId: 11 });
+    setUserPlan('u_due', {
       plan: 'plus',
-      subscriptionStartedAt: pastIso(2),
-      subscriptionExpiresAt: futureIso(28),
+      subscriptionStartedAt: pastIso(2 * 86400_000),
+      subscriptionExpiresAt: futureIso(28 * 86400_000),
       dailyQuotaUsd: 30,
+      quotaNextResetAt: pastIso(60_000),
     });
 
-    const result = await runDailyExpireAndReset();
+    // User 2: not due yet (nextResetAt is 12h in the future)
+    makeUser({ userId: 'u_pending', newapiUserId: 22 });
+    setUserPlan('u_pending', {
+      plan: 'plus',
+      subscriptionStartedAt: pastIso(12 * 3600_000),
+      subscriptionExpiresAt: futureIso(28 * 86400_000),
+      dailyQuotaUsd: 30,
+      quotaNextResetAt: futureIso(12 * 3600_000),
+    });
+
+    const result = await runQuotaSweep();
     expect(result.reset).toBe(1);
     expect(result.expired).toBe(0);
+    expect(updateUserMock).toHaveBeenCalledTimes(1);
     expect(updateUserMock).toHaveBeenCalledWith({
-      id: 42,
-      username: 'paid',
-      quota: 15_000_000, // $30 × 500_000
+      id: 11,
+      username: 'due',
+      quota: 15_000_000,
       group: 'plus',
     });
+
+    // After successful reset, nextResetAt should advance ~24h forward
+    const u = await getUser('u_due');
+    const newNext = new Date(u!.quotaNextResetAt!).getTime();
+    const expectedNext = Date.now() - 60_000 + 86_400_000;
+    // Allow ~5s slop for test execution time
+    expect(Math.abs(newNext - expectedNext)).toBeLessThan(5_000);
   });
 
-  it('zeroes quota and downgrades plan for expired paid users', async () => {
+  it('zeroes quota and downgrades expired paid users', async () => {
     makeUser({ userId: 'u_expired', newapiUserId: 7 });
     setUserPlan('u_expired', {
       plan: 'super',
-      subscriptionStartedAt: pastIso(40),
-      subscriptionExpiresAt: pastIso(2),
+      subscriptionStartedAt: pastIso(40 * 86400_000),
+      subscriptionExpiresAt: pastIso(2 * 86400_000),
       dailyQuotaUsd: 80,
+      quotaNextResetAt: pastIso(86400_000),
     });
 
-    const result = await runDailyExpireAndReset();
+    const result = await runQuotaSweep();
     expect(result.expired).toBe(1);
     expect(updateUserMock).toHaveBeenCalledWith({
       id: 7,
       username: 'expired',
       quota: 0,
-      group: 'default',
+      group: 'free',
     });
     const u = await getUser('u_expired');
     expect(u?.plan).toBe('free');
     expect(u?.subscriptionExpiresAt).toBeUndefined();
+    expect(u?.quotaNextResetAt).toBeUndefined();
     expect(u?.dailyQuotaUsd).toBeUndefined();
   });
 
-  it('skips users without a newapi link (graceful, no throw)', async () => {
+  it('skips users without a newapi link (graceful)', async () => {
     putUser({
       userId: 'u_unlinked',
       email: 'u@x.com',
       createdAt: new Date().toISOString(),
       plan: 'plus',
-      subscriptionExpiresAt: futureIso(20),
+      subscriptionExpiresAt: futureIso(20 * 86400_000),
       dailyQuotaUsd: 30,
-      // newapiUserId NOT set
+      quotaNextResetAt: pastIso(60_000),
     });
 
-    const result = await runDailyExpireAndReset();
+    const result = await runQuotaSweep();
     expect(result.reset).toBe(0);
     expect(updateUserMock).not.toHaveBeenCalled();
   });
@@ -104,31 +126,48 @@ describe('runDailyExpireAndReset', () => {
     makeUser({ userId: 'u_p1', newapiUserId: 1 });
     setUserPlan('u_p1', {
       plan: 'plus',
-      subscriptionExpiresAt: futureIso(10),
+      subscriptionExpiresAt: futureIso(10 * 86400_000),
       dailyQuotaUsd: 30,
+      quotaNextResetAt: pastIso(60_000),
     });
     makeUser({ userId: 'u_p2', newapiUserId: 2 });
     setUserPlan('u_p2', {
       plan: 'plus',
-      subscriptionExpiresAt: futureIso(10),
+      subscriptionExpiresAt: futureIso(10 * 86400_000),
       dailyQuotaUsd: 30,
+      quotaNextResetAt: pastIso(60_000),
     });
 
     updateUserMock
       .mockRejectedValueOnce(new Error('newapi 502'))
       .mockResolvedValueOnce({ id: 2, username: 'p2', quota: 0, group: 'plus' });
 
-    const result = await runDailyExpireAndReset();
+    const result = await runQuotaSweep();
     expect(result.reset).toBe(1);
     expect(result.failed).toBe(1);
   });
 
   it('does not touch free users', async () => {
     makeUser({ userId: 'u_free', newapiUserId: 99 });
-    // plan='free' is the default from makeUser
-    const result = await runDailyExpireAndReset();
+    const result = await runQuotaSweep();
     expect(result.reset).toBe(0);
     expect(result.expired).toBe(0);
+    expect(updateUserMock).not.toHaveBeenCalled();
+  });
+
+  it('does not reset paid users whose nextResetAt is null (newly migrated)', async () => {
+    putUser({
+      userId: 'u_legacy',
+      email: 'l@x.com',
+      createdAt: new Date().toISOString(),
+      plan: 'plus',
+      subscriptionExpiresAt: futureIso(20 * 86400_000),
+      dailyQuotaUsd: 30,
+      newapiUserId: 50,
+      // quotaNextResetAt intentionally undefined
+    });
+    const result = await runQuotaSweep();
+    expect(result.reset).toBe(0);
     expect(updateUserMock).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,14 @@
 /**
- * Daily quota maintenance.
+ * Per-user quota maintenance.
  *
- * Runs once a day (scheduler is in `local.ts`). For each paid subscriber:
- *   - active     → push their daily $ allowance back into newapi as `quota`
- *   - expired    → set newapi quota to 0 and downgrade their `users.plan`
- *                  back to `'free'` so the chat proxy treats them as free
+ * Each paid subscriber has a `quotaNextResetAt` timestamp that ticks
+ * forward by 24h from the moment they activated. Cron runs every N
+ * minutes (configurable via QUOTA_CRON_INTERVAL_MINUTES, default 60),
+ * sweeps users whose window is up, pushes a fresh daily quota into
+ * newapi, and bumps `quotaNextResetAt` by another 24h.
+ *
+ * Separately, expired subscribers (subscriptionExpiresAt <= now) get
+ * their quota zeroed and downgraded back to plan='free'.
  *
  * No bucket / usage_log writes — newapi is the bookkeeper now. Failures
  * on individual users are logged and skipped so a single bad row can't
@@ -12,8 +16,9 @@
  */
 
 import {
-  getActivePaidUsers,
+  advanceQuotaNextResetAt,
   getExpiredPaidUsers,
+  getUsersDueForReset,
   setUserPlan,
 } from "./store.js";
 import { newapi, usdToNewapiQuota, NewapiError } from "./newapi.js";
@@ -23,19 +28,19 @@ function newapiUsername(userId: string): string {
   return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
 }
 
-export interface DailyCronResult {
+export interface QuotaCronResult {
   reset: number;        // active subscribers whose quota we successfully reset
   expired: number;      // subscribers whose plan we just retired
   failed: number;       // newapi calls that threw
 }
 
-export async function runDailyExpireAndReset(): Promise<DailyCronResult> {
+export async function runQuotaSweep(): Promise<QuotaCronResult> {
   let reset = 0;
   let expired = 0;
   let failed = 0;
 
-  // ---------- Active paid: refresh daily quota ----------
-  for (const user of getActivePaidUsers()) {
+  // ---------- Active paid: refresh quota for users whose 24h is up ----------
+  for (const user of getUsersDueForReset()) {
     if (!isPlanId(user.plan)) continue;
     if (user.newapiUserId == null) continue;
     const cfg = PLANS[user.plan];
@@ -48,6 +53,7 @@ export async function runDailyExpireAndReset(): Promise<DailyCronResult> {
         quota: usdToNewapiQuota(dailyUsd),
         group: cfg.group,
       });
+      advanceQuotaNextResetAt(user.userId);
       reset++;
     } catch (err) {
       failed++;
@@ -67,6 +73,7 @@ export async function runDailyExpireAndReset(): Promise<DailyCronResult> {
         subscriptionStartedAt: null,
         subscriptionExpiresAt: null,
         dailyQuotaUsd: null,
+        quotaNextResetAt: null,
       });
       expired++;
       continue;
@@ -83,6 +90,7 @@ export async function runDailyExpireAndReset(): Promise<DailyCronResult> {
         subscriptionStartedAt: null,
         subscriptionExpiresAt: null,
         dailyQuotaUsd: null,
+        quotaNextResetAt: null,
       });
       expired++;
     } catch (err) {
@@ -96,3 +104,7 @@ export async function runDailyExpireAndReset(): Promise<DailyCronResult> {
 
   return { reset, expired, failed };
 }
+
+// Backward-compat alias — old name from the calendar-day cron era. New
+// code should call runQuotaSweep directly.
+export const runDailyExpireAndReset = runQuotaSweep;

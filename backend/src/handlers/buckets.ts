@@ -35,6 +35,8 @@ interface SyntheticBucket {
   expiresAt: string | null;
   modeLock: "auto_eco_only" | null;
   modelPool: "eco_only" | "all";
+  /** ISO of next 24h quota reset; null for free users (no daily reset). */
+  nextResetAt: string | null;
 }
 
 export async function listBucketsHandler(
@@ -82,6 +84,7 @@ export async function listBucketsHandler(
     dailyQuotaUsd: user.dailyQuotaUsd ?? null,
     subscriptionStartedAt: user.subscriptionStartedAt ?? null,
     subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
+    quotaNextResetAt: user.quotaNextResetAt ?? null,
     createdAt: user.createdAt,
     remainingUsd,
   });
@@ -96,6 +99,7 @@ function synthesize(
     dailyQuotaUsd: number | null;
     subscriptionStartedAt: string | null;
     subscriptionExpiresAt: string | null;
+    quotaNextResetAt: string | null;
     createdAt: string;
     remainingUsd: number;
   },
@@ -108,17 +112,17 @@ function synthesize(
       amountUsd: 10,
       dailyCapUsd: null,
       dailyRemainingUsd: null,
-      totalRemainingUsd: round2(ctx.remainingUsd),
+      totalRemainingUsd: ctx.remainingUsd,
       startedAt: ctx.subscriptionStartedAt ?? ctx.createdAt,
       expiresAt: null,
       modeLock: "auto_eco_only",
       modelPool: "eco_only",
+      nextResetAt: null,
     };
   }
 
   // Paid plans: dailyQuotaUsd is the daily cap; remaining is what newapi
-  // currently shows (cron sets quota = dailyQuotaUsd at midnight, so
-  // remaining ≈ today's leftover).
+  // currently shows. Each user has their own 24h reset window.
   const sku =
     plan === "plus" ? "plan_plus" :
     plan === "super" ? "plan_super" :
@@ -129,17 +133,14 @@ function synthesize(
     skuType: sku as SyntheticBucket["skuType"],
     amountUsd: ctx.dailyQuotaUsd ?? 0,
     dailyCapUsd: ctx.dailyQuotaUsd,
-    dailyRemainingUsd: round2(ctx.remainingUsd),
-    totalRemainingUsd: round2(ctx.remainingUsd),
+    dailyRemainingUsd: ctx.remainingUsd,
+    totalRemainingUsd: ctx.remainingUsd,
     startedAt: ctx.subscriptionStartedAt ?? ctx.createdAt,
     expiresAt: ctx.subscriptionExpiresAt,
     modeLock: null,
     modelPool: "all",
+    nextResetAt: ctx.quotaNextResetAt,
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 function jsonResponse(

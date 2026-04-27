@@ -149,16 +149,18 @@ async function applyPlanToUser(userId: string, planId: string): Promise<void> {
     return;
   }
   const cfg = PLANS[planId];
-  const startedAt = new Date().toISOString();
-  const expiresAt = new Date(
-    Date.now() + cfg.durationDays * 86_400_000,
-  ).toISOString();
+  const now = Date.now();
+  const startedAt = new Date(now).toISOString();
+  const expiresAt = new Date(now + cfg.durationDays * 86_400_000).toISOString();
+  // First quota reset fires 24h after activation, then every 24h thereafter.
+  const quotaNextResetAt = new Date(now + 86_400_000).toISOString();
 
   setUserPlan(userId, {
     plan: planId,
     subscriptionStartedAt: startedAt,
     subscriptionExpiresAt: expiresAt,
     dailyQuotaUsd: cfg.dailyQuotaUsd,
+    quotaNextResetAt,
   });
 
   const user = await getUser(userId);

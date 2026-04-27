@@ -59,7 +59,7 @@ import { usageHandler } from "./handlers/usageHandlers.js";
 import { listBucketsHandler } from "./handlers/buckets.js";
 import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
-import { runDailyExpireAndReset } from './lib/dailyCron.js';
+import { runQuotaSweep } from './lib/dailyCron.js';
 
 type LambdaHandler = (
   event: APIGatewayProxyEventV2,
@@ -461,24 +461,43 @@ if (process.env.NODE_ENV !== "production") {
   await seedLocalData();
 }
 
-function scheduleDailyCron() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setUTCHours(16, 0, 0, 0); // 0:00 Beijing = 16:00 UTC prev day; adjust as needed
-  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-  const delay = next.getTime() - now.getTime();
-  setTimeout(async () => {
+/**
+ * Per-user 24h quota cron. Each paid subscriber has their own
+ * `quotaNextResetAt` window; the sweep fires every N minutes
+ * (QUOTA_CRON_INTERVAL_MINUTES, default 60) and resets only those whose
+ * window is up. Expired subscriptions are downgraded in the same pass.
+ *
+ * The interval is a coarse polling grain — actual reset latency for any
+ * given user is at most one interval. Pick small enough that users
+ * don't notice the lag, large enough that newapi isn't hammered.
+ */
+function scheduleQuotaCron() {
+  const raw = process.env.QUOTA_CRON_INTERVAL_MINUTES;
+  const parsed = raw ? Number(raw) : NaN;
+  const intervalMin = Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+  const intervalMs = intervalMin * 60 * 1000;
+  console.log(`[cron] quota sweep every ${intervalMin}m`);
+
+  const tick = async () => {
     try {
-      const result = await runDailyExpireAndReset();
-      console.log(
-        `[cron] daily quota: reset=${result.reset} expired=${result.expired} failed=${result.failed}`,
-      );
-    } catch (e) { console.error('[cron] failed', e); }
-    scheduleDailyCron();
-  }, delay);
+      const result = await runQuotaSweep();
+      if (result.reset > 0 || result.expired > 0 || result.failed > 0) {
+        console.log(
+          `[cron] reset=${result.reset} expired=${result.expired} failed=${result.failed}`,
+        );
+      }
+    } catch (e) {
+      console.error('[cron] failed', e);
+    }
+  };
+
+  setInterval(tick, intervalMs);
+  // Fire once on boot so a freshly-restarted server doesn't make users
+  // wait up to an interval for the first sweep.
+  tick();
 }
 
-scheduleDailyCron();
+scheduleQuotaCron();
 
 server.listen(PORT, () => {
   console.log(`[local] TokenBoss backend listening on http://localhost:${PORT}`);

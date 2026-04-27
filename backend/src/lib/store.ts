@@ -44,8 +44,14 @@ export interface UserRecord {
   subscriptionStartedAt?: string;
   /** ISO timestamp the current subscription expires; null for free. */
   subscriptionExpiresAt?: string;
-  /** Daily $ allowance reset at 00:00; null for free (one-shot $10 grant). */
+  /** Daily $ allowance reset every 24h; null for free (one-shot $10 grant). */
   dailyQuotaUsd?: number;
+  /**
+   * ISO timestamp of the next per-user 24h quota reset. Cron iterates
+   * paid users with this <= now and bumps it +24h after pushing fresh
+   * quota into newapi. Null for free users (no reset cycle).
+   */
+  quotaNextResetAt?: string;
 }
 
 export type UserPlan = "free" | "plus" | "super" | "ultra";
@@ -120,7 +126,8 @@ export function init(): void {
       plan                   TEXT,
       subscriptionStartedAt  TEXT,
       subscriptionExpiresAt  TEXT,
-      dailyQuotaUsd          REAL
+      dailyQuotaUsd          REAL,
+      quotaNextResetAt       TEXT
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
@@ -150,6 +157,20 @@ export function init(): void {
     }
     if (!have.has("dailyQuotaUsd")) {
       db.exec(`ALTER TABLE users ADD COLUMN dailyQuotaUsd REAL`);
+    }
+    if (!have.has("quotaNextResetAt")) {
+      db.exec(`ALTER TABLE users ADD COLUMN quotaNextResetAt TEXT`);
+      // Bootstrap any pre-existing paid user with a +24h fresh window so
+      // they're not immediately reset on the next cron tick. Use ISO with
+      // Z so a JS roundtrip parses as UTC, not local time.
+      const future = new Date(Date.now() + 86_400_000).toISOString();
+      db.prepare(
+        `UPDATE users
+            SET quotaNextResetAt = ?
+          WHERE plan IS NOT NULL
+            AND plan != 'free'
+            AND quotaNextResetAt IS NULL`,
+      ).run(future);
     }
     // Default existing users to "free" so the new code paths have a value to read.
     db.exec(`UPDATE users SET plan = 'free' WHERE plan IS NULL`);
@@ -265,6 +286,7 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     subscriptionStartedAt: (row.subscriptionStartedAt as string) ?? undefined,
     subscriptionExpiresAt: (row.subscriptionExpiresAt as string) ?? undefined,
     dailyQuotaUsd: (row.dailyQuotaUsd as number) ?? undefined,
+    quotaNextResetAt: (row.quotaNextResetAt as string) ?? undefined,
   };
 }
 
@@ -299,10 +321,12 @@ export function putUser(rec: UserRecord): void {
   db.prepare(`
     INSERT OR REPLACE INTO users
       (userId, displayName, email, phone, passwordHash, createdAt, emailVerified,
-       newapiUserId, newapiPassword, plan, subscriptionStartedAt, subscriptionExpiresAt, dailyQuotaUsd)
+       newapiUserId, newapiPassword, plan, subscriptionStartedAt, subscriptionExpiresAt,
+       dailyQuotaUsd, quotaNextResetAt)
     VALUES
       (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified,
-       @newapiUserId, @newapiPassword, @plan, @subscriptionStartedAt, @subscriptionExpiresAt, @dailyQuotaUsd)
+       @newapiUserId, @newapiPassword, @plan, @subscriptionStartedAt, @subscriptionExpiresAt,
+       @dailyQuotaUsd, @quotaNextResetAt)
   `).run({
     userId: rec.userId,
     displayName: rec.displayName ?? null,
@@ -317,6 +341,7 @@ export function putUser(rec: UserRecord): void {
     subscriptionStartedAt: rec.subscriptionStartedAt ?? null,
     subscriptionExpiresAt: rec.subscriptionExpiresAt ?? null,
     dailyQuotaUsd: rec.dailyQuotaUsd ?? null,
+    quotaNextResetAt: rec.quotaNextResetAt ?? null,
   });
 }
 
@@ -340,7 +365,10 @@ export async function putEmailIndex(
 
 // ---------- Public API — Subscription / Plan ----------
 
-/** Patch the plan-related columns on a user row. */
+/** Patch the plan-related columns on a user row. All 4 fields are
+ *  overwritten — pass explicit nulls to clear (e.g., on downgrade to
+ *  free). To bump quotaNextResetAt without touching the rest, use
+ *  `advanceQuotaNextResetAt`. */
 export function setUserPlan(
   userId: string,
   patch: {
@@ -348,6 +376,7 @@ export function setUserPlan(
     subscriptionStartedAt?: string | null;
     subscriptionExpiresAt?: string | null;
     dailyQuotaUsd?: number | null;
+    quotaNextResetAt?: string | null;
   },
 ): void {
   db.prepare(`
@@ -355,7 +384,8 @@ export function setUserPlan(
        SET plan                  = @plan,
            subscriptionStartedAt = @subscriptionStartedAt,
            subscriptionExpiresAt = @subscriptionExpiresAt,
-           dailyQuotaUsd         = @dailyQuotaUsd
+           dailyQuotaUsd         = @dailyQuotaUsd,
+           quotaNextResetAt      = @quotaNextResetAt
      WHERE userId = @userId
   `).run({
     userId,
@@ -363,16 +393,23 @@ export function setUserPlan(
     subscriptionStartedAt: patch.subscriptionStartedAt ?? null,
     subscriptionExpiresAt: patch.subscriptionExpiresAt ?? null,
     dailyQuotaUsd: patch.dailyQuotaUsd ?? null,
+    quotaNextResetAt: patch.quotaNextResetAt ?? null,
   });
 }
 
-/** Active paid subscribers (plan ∈ {plus, super, ultra} AND not yet expired). */
-export function getActivePaidUsers(): UserRecord[] {
+/**
+ * Paid users whose 24h reset window is up and need a fresh quota push to
+ * newapi. Filters out expired subscriptions (cron's expire-loop handles
+ * those separately).
+ */
+export function getUsersDueForReset(): UserRecord[] {
   const rows = db
     .prepare(`
       SELECT * FROM users
        WHERE plan IS NOT NULL
          AND plan != 'free'
+         AND quotaNextResetAt IS NOT NULL
+         AND datetime(quotaNextResetAt) <= datetime('now')
          AND (subscriptionExpiresAt IS NULL
               OR datetime(subscriptionExpiresAt) > datetime('now'))
     `)
@@ -392,6 +429,26 @@ export function getExpiredPaidUsers(): UserRecord[] {
     `)
     .all() as Record<string, unknown>[];
   return rows.map(rowToUser);
+}
+
+/** Bump a user's quotaNextResetAt forward by 24 hours from its current
+ *  value. Cron calls this after successfully pushing fresh quota to
+ *  newapi. No-op when the column is null. */
+export function advanceQuotaNextResetAt(userId: string): void {
+  const row = db
+    .prepare(`SELECT quotaNextResetAt FROM users WHERE userId = ?`)
+    .get(userId) as { quotaNextResetAt: string | null } | undefined;
+  if (!row?.quotaNextResetAt) return;
+  // Compute in JS to keep the value as a UTC ISO string with millisecond
+  // precision; SQLite's `datetime(..., '+1 day')` strips the timezone
+  // marker which causes the next read to be parsed as local time.
+  const next = new Date(
+    new Date(row.quotaNextResetAt).getTime() + 86_400_000,
+  ).toISOString();
+  db.prepare(`UPDATE users SET quotaNextResetAt = ? WHERE userId = ?`).run(
+    next,
+    userId,
+  );
 }
 
 // ---------- Public API — API Key Index ----------
