@@ -9,12 +9,15 @@ export type PaymentChannel = "epusdt" | "xunhupay";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 
-export type PlanId = "basic" | "standard" | "pro";
+// PlanId is the source of truth in lib/plans.ts; re-export here so the
+// payment-domain types live in one place.
+export type { PlanId } from "../plans.js";
+import type { PlanId as _PlanId } from "../plans.js";
 
 export interface OrderRecord {
   orderId: string;
   userId: string;
-  planId: PlanId;
+  planId: _PlanId;
   channel: PaymentChannel;
   amountCNY: number;
   /** USDT amount when channel=epusdt; same as amountCNY for fiat channels. */
@@ -35,7 +38,7 @@ export interface OrderRecord {
 export interface CreateOrderInput {
   orderId: string;
   amountCNY: number;
-  planId: PlanId;
+  planId: _PlanId;
   notifyUrl: string;
   redirectUrl?: string;
 }

@@ -52,7 +52,8 @@ export type UserPlan = "free" | "plus" | "super" | "ultra";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 export type PaymentChannel = "epusdt" | "xunhupay";
-export type PlanId = "basic" | "standard" | "pro";
+export type { PlanId } from "./plans.js";
+import type { PlanId } from "./plans.js";
 
 export interface OrderRecord {
   orderId: string;
@@ -181,24 +182,6 @@ export function init(): void {
   `);
 
   db.exec(`
-    CREATE TABLE IF NOT EXISTS credit_bucket (
-      id                  TEXT PRIMARY KEY,
-      userId              TEXT NOT NULL,
-      skuType             TEXT NOT NULL CHECK (skuType IN ('trial','topup','plan_plus','plan_super','plan_ultra')),
-      amountUsd           REAL NOT NULL,
-      dailyCapUsd         REAL,
-      dailyRemainingUsd   REAL,
-      totalRemainingUsd   REAL,
-      startedAt           TEXT NOT NULL,
-      expiresAt           TEXT,
-      modeLock            TEXT NOT NULL CHECK (modeLock IN ('none','auto_only','auto_eco_only')),
-      modelPool           TEXT NOT NULL CHECK (modelPool IN ('all','codex_only','eco_only')),
-      createdAt           TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_bucket_user ON credit_bucket(userId, skuType);
-  `);
-
-  db.exec(`
     CREATE TABLE IF NOT EXISTS verification_codes (
       email          TEXT NOT NULL,
       code           TEXT NOT NULL,
@@ -217,30 +200,16 @@ export function init(): void {
     // Column already exists — ignore.
   }
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS usage_log (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId      TEXT NOT NULL,
-      bucketId    TEXT,
-      eventType   TEXT NOT NULL CHECK (eventType IN ('consume','reset','expire','topup','refund')),
-      amountUsd   REAL NOT NULL,
-      model       TEXT,
-      source      TEXT,
-      keyHint     TEXT,
-      tokensIn    INTEGER,
-      tokensOut   INTEGER,
-      createdAt   TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(userId, createdAt DESC);
-  `);
-
-  // Idempotent migration: add keyHint to pre-existing DBs (last 8 chars
-  // of the bearer token used for the request, so the dashboard can
-  // attribute each call to one of the user's API keys).
-  try {
-    db.exec(`ALTER TABLE usage_log ADD COLUMN keyHint TEXT`);
-  } catch {
-    // Column already exists — ignore.
+  // Drop legacy bucket / usage tables behind an env flag so prod admins
+  // opt in explicitly. Locally / in tests, set MIGRATE_DROP_LEGACY=1 (or
+  // when SQLITE_PATH=':memory:', this is auto-enabled since it's a fresh
+  // DB anyway).
+  const dropLegacy =
+    process.env.MIGRATE_DROP_LEGACY === "1" ||
+    process.env.SQLITE_PATH === ":memory:";
+  if (dropLegacy) {
+    db.exec(`DROP TABLE IF EXISTS credit_bucket`);
+    db.exec(`DROP TABLE IF EXISTS usage_log`);
   }
 
   db.exec(`
@@ -261,6 +230,17 @@ export function init(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_orders_user
       ON orders(userId, createdAt DESC);
+  `);
+
+  // Rename legacy plan ids → new tier names. Idempotent — once data is
+  // migrated the CASE expression is a no-op for fresh rows.
+  db.exec(`
+    UPDATE orders SET planId = CASE planId
+      WHEN 'basic'    THEN 'plus'
+      WHEN 'standard' THEN 'super'
+      WHEN 'pro'      THEN 'ultra'
+      ELSE planId
+    END
   `);
 }
 
@@ -458,117 +438,6 @@ export function deleteApiKeyIndex(userId: string, newapiTokenId: number): void {
   ).run(userId, newapiTokenId);
 }
 
-// ---------- Bucket types ----------
-
-export type BucketSku =
-  | "trial"
-  | "topup"
-  | "plan_plus"
-  | "plan_super"
-  | "plan_ultra";
-export type ModeLock = "none" | "auto_only" | "auto_eco_only";
-export type ModelPool = "all" | "codex_only" | "eco_only";
-
-export interface Bucket {
-  id: string;
-  userId: string;
-  skuType: BucketSku;
-  amountUsd: number;
-  dailyCapUsd: number | null;
-  dailyRemainingUsd: number | null;
-  totalRemainingUsd: number | null;
-  startedAt: string;
-  expiresAt: string | null;
-  modeLock: ModeLock;
-  modelPool: ModelPool;
-  createdAt: string;
-}
-
-// ---------- Public API — Buckets ----------
-
-export function createBucket(b: Omit<Bucket, "id" | "createdAt">): Bucket {
-  const id = randomBytes(16).toString("hex");
-  const createdAt = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO credit_bucket (id, userId, skuType, amountUsd, dailyCapUsd, dailyRemainingUsd,
-      totalRemainingUsd, startedAt, expiresAt, modeLock, modelPool, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    b.userId,
-    b.skuType,
-    b.amountUsd,
-    b.dailyCapUsd,
-    b.dailyRemainingUsd,
-    b.totalRemainingUsd,
-    b.startedAt,
-    b.expiresAt,
-    b.modeLock,
-    b.modelPool,
-    createdAt
-  );
-  return { id, createdAt, ...b };
-}
-
-export function getActiveBucketsForUser(userId: string): Bucket[] {
-  return db
-    .prepare(
-      `
-    SELECT * FROM credit_bucket
-    WHERE userId = ?
-      AND (expiresAt IS NULL OR datetime(expiresAt) > datetime('now'))
-      AND (
-        (skuType IN ('plan_plus','plan_super','plan_ultra') AND COALESCE(dailyRemainingUsd, 0) > 0)
-        OR (skuType IN ('trial','topup') AND COALESCE(totalRemainingUsd, 0) > 0)
-      )
-    ORDER BY
-      CASE WHEN skuType = 'topup' THEN 1 ELSE 0 END,
-      expiresAt ASC,
-      createdAt ASC
-  `
-    )
-    .all(userId) as Bucket[];
-}
-
-export function getActiveSubscriptionBuckets(): Bucket[] {
-  return db
-    .prepare(
-      `
-    SELECT * FROM credit_bucket
-    WHERE skuType != 'topup'
-      AND (expiresAt IS NULL OR datetime(expiresAt) > datetime('now'))
-  `
-    )
-    .all() as Bucket[];
-}
-
-export function consumeBucket(bucketId: string, amountUsd: number): void {
-  db.prepare(`
-    UPDATE credit_bucket
-    SET dailyRemainingUsd = COALESCE(dailyRemainingUsd, 0) - ?,
-        totalRemainingUsd = CASE WHEN totalRemainingUsd IS NOT NULL THEN totalRemainingUsd - ? ELSE NULL END
-    WHERE id = ?
-  `).run(amountUsd, amountUsd, bucketId);
-}
-
-export function resetBucketDaily(bucketId: string, dailyCapUsd: number): void {
-  db.prepare(`UPDATE credit_bucket SET dailyRemainingUsd = ? WHERE id = ?`).run(
-    dailyCapUsd,
-    bucketId
-  );
-}
-
-export function expireBucketDaily(bucketId: string): number {
-  const row = db
-    .prepare(`SELECT dailyRemainingUsd FROM credit_bucket WHERE id = ?`)
-    .get(bucketId) as { dailyRemainingUsd: number | null } | undefined;
-  const remaining = row?.dailyRemainingUsd ?? 0;
-  db.prepare(
-    `UPDATE credit_bucket SET dailyRemainingUsd = 0 WHERE id = ?`
-  ).run(bucketId);
-  return remaining;
-}
-
 // ---------- Public API — Verification Codes ----------
 
 export function saveVerificationCode(email: string, code: string, ttlSeconds: number): void {
@@ -678,116 +547,6 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
     WHERE userId = ? AND createdAt > ?
   `).get(userId, since) as { n: number };
   return row.n;
-}
-
-// ---------- Public API — Usage Log ----------
-
-export type EventType = 'consume' | 'reset' | 'expire' | 'topup' | 'refund';
-
-export interface UsageRecord {
-  id: number;
-  userId: string;
-  bucketId: string | null;
-  eventType: EventType;
-  amountUsd: number;
-  model: string | null;
-  source: string | null;
-  keyHint: string | null;
-  tokensIn: number | null;
-  tokensOut: number | null;
-  createdAt: string;
-}
-
-export function logUsage(
-  r: Omit<UsageRecord, 'id' | 'createdAt' | 'keyHint'> & { keyHint?: string | null },
-): UsageRecord {
-  const createdAt = new Date().toISOString();
-  const keyHint = r.keyHint ?? null;
-  const result = db.prepare(`
-    INSERT INTO usage_log (userId, bucketId, eventType, amountUsd, model, source, keyHint, tokensIn, tokensOut, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(r.userId, r.bucketId, r.eventType, r.amountUsd, r.model, r.source, keyHint, r.tokensIn, r.tokensOut, createdAt);
-  return { id: Number(result.lastInsertRowid), createdAt, keyHint, ...r };
-}
-
-export interface HourlyUsage {
-  hour: string;   // "HH:00"
-  consumed: number;
-}
-
-export function getHourlyUsage24h(userId: string): HourlyUsage[] {
-  const now = new Date();
-  const buckets: HourlyUsage[] = [];
-  for (let i = 23; i >= 0; i--) {
-    const hourStart = new Date(now.getTime() - i * 3600e3);
-    hourStart.setMinutes(0, 0, 0);
-    const hourEnd = new Date(hourStart.getTime() + 3600e3);
-    const row = db.prepare(`
-      SELECT COALESCE(SUM(amountUsd), 0) AS total
-      FROM usage_log
-      WHERE userId = ?
-        AND eventType = 'consume'
-        AND createdAt >= ? AND createdAt < ?
-    `).get(userId, hourStart.toISOString(), hourEnd.toISOString()) as { total: number };
-    buckets.push({
-      hour: `${hourStart.getUTCHours().toString().padStart(2, '0')}:00`,
-      consumed: row.total ?? 0,
-    });
-  }
-  return buckets;
-}
-
-export interface UsageAggregate {
-  /** The grouping key (source string or keyHint). null when the field was unset on those records. */
-  groupKey: string | null;
-  callCount: number;
-  totalConsumedUsd: number;
-  lastUsedAt: string;
-}
-
-/**
- * Aggregate consume-events for a user grouped by a field. Used by the
- * dashboard's AGENTS panel ("which Agents have used my account") and
- * keys panel ("which keys have been used and how much"). Always
- * filtered to consume events; reset/expire/topup/refund are bookkeeping
- * and would skew the totals.
- */
-export function aggregateUsageForUser(
-  userId: string,
-  groupBy: 'source' | 'keyHint',
-  opts: { from?: string; to?: string; limit?: number } = {},
-): UsageAggregate[] {
-  const limit = opts.limit ?? 50;
-  let where = `userId = ? AND eventType = 'consume'`;
-  const params: unknown[] = [userId];
-  if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
-  if (opts.to)   { where += ` AND createdAt <= ?`; params.push(opts.to); }
-  return db.prepare(`
-    SELECT ${groupBy} AS groupKey,
-           COUNT(*) AS callCount,
-           COALESCE(SUM(amountUsd), 0) AS totalConsumedUsd,
-           MAX(createdAt) AS lastUsedAt
-    FROM usage_log
-    WHERE ${where}
-    GROUP BY ${groupBy}
-    ORDER BY lastUsedAt DESC
-    LIMIT ?
-  `).all(...params, limit) as UsageAggregate[];
-}
-
-export function getUsageForUser(userId: string, opts: { limit?: number; offset?: number; eventTypes?: EventType[]; from?: string; to?: string } = {}): UsageRecord[] {
-  const limit = opts.limit ?? 50;
-  const offset = opts.offset ?? 0;
-  let where = `userId = ?`;
-  const params: unknown[] = [userId];
-  if (opts.eventTypes?.length) {
-    where += ` AND eventType IN (${opts.eventTypes.map(() => '?').join(',')})`;
-    params.push(...opts.eventTypes);
-  }
-  if (opts.from) { where += ` AND createdAt >= ?`; params.push(opts.from); }
-  if (opts.to) { where += ` AND createdAt <= ?`; params.push(opts.to); }
-  return db.prepare(`SELECT * FROM usage_log WHERE ${where} ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?`)
-    .all(...params, limit, offset) as UsageRecord[];
 }
 
 // ---------- Public API — Orders ----------

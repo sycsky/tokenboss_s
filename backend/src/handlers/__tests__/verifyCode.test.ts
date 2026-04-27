@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { sendCodeHandler, verifyCodeHandler } from '../authHandlers.js';
-import { init, getActiveBucketsForUser, getUserIdByEmail } from '../../lib/store.js';
+import { init, getUser, getUserIdByEmail } from '../../lib/store.js';
 import * as emailService from '../../lib/emailService.js';
 
 beforeEach(() => {
@@ -19,7 +19,7 @@ async function getCodeForEmail(email: string): Promise<string> {
 }
 
 describe('POST /v1/auth/verify-code', () => {
-  it('first-time email creates user + grants trial bucket', async () => {
+  it('first-time email creates a free-tier user', async () => {
     const code = await getCodeForEmail('new@example.com');
 
     const res = await verifyCodeHandler({ body: JSON.stringify({ email: 'new@example.com', code }) } as any) as APIGatewayProxyStructuredResultV2;
@@ -31,17 +31,15 @@ describe('POST /v1/auth/verify-code', () => {
 
     const userId = getUserIdByEmail('new@example.com');
     expect(userId).toBeTruthy();
-    const buckets = getActiveBucketsForUser(userId!);
-    expect(buckets.find(b => b.skuType === 'trial')).toBeTruthy();
-    expect(buckets.find(b => b.skuType === 'trial')!.totalRemainingUsd).toBe(10);
+    const u = await getUser(userId!);
+    expect(u?.plan).toBe('free');
   });
 
-  it('returning user gets token without new trial bucket', async () => {
+  it('returning user gets token without flipping plan back', async () => {
     // First signup
     const code1 = await getCodeForEmail('returning@example.com');
     await verifyCodeHandler({ body: JSON.stringify({ email: 'returning@example.com', code: code1 }) } as any);
     const userId = getUserIdByEmail('returning@example.com')!;
-    const trialCountAfterFirst = getActiveBucketsForUser(userId).filter(b => b.skuType === 'trial').length;
 
     // Second login
     const code2 = await getCodeForEmail('returning@example.com');
@@ -49,8 +47,9 @@ describe('POST /v1/auth/verify-code', () => {
     const body = JSON.parse(res.body!);
     expect(body.isNew).toBe(false);
 
-    const trialCountAfterSecond = getActiveBucketsForUser(userId).filter(b => b.skuType === 'trial').length;
-    expect(trialCountAfterSecond).toBe(trialCountAfterFirst);
+    // plan should still be whatever the user has — never overwritten by login.
+    const u = await getUser(userId);
+    expect(u?.plan).toBeTruthy();
   });
 
   it('rejects wrong code', async () => {

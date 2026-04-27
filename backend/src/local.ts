@@ -467,10 +467,12 @@ function scheduleDailyCron() {
   next.setUTCHours(16, 0, 0, 0); // 0:00 Beijing = 16:00 UTC prev day; adjust as needed
   if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
   const delay = next.getTime() - now.getTime();
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
-      const result = runDailyExpireAndReset();
-      console.log(`[cron] daily expire+reset: ${result.expired} expired, ${result.reset} reset`);
+      const result = await runDailyExpireAndReset();
+      console.log(
+        `[cron] daily quota: reset=${result.reset} expired=${result.expired} failed=${result.failed}`,
+      );
     } catch (e) { console.error('[cron] failed', e); }
     scheduleDailyCron();
   }, delay);

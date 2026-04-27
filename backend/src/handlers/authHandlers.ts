@@ -27,9 +27,9 @@ import type {
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
 import { sendVerificationEmail, sendVerifyLinkEmail } from "../lib/emailService.js";
-import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
+import { isNewapiConfigured, newapi, NewapiError, usdToNewapiQuota } from "../lib/newapi.js";
+import { FREE_TIER } from "../lib/plans.js";
 import {
-  createBucket,
   createEmailVerifyToken,
   consumeEmailVerifyToken,
   consumeVerificationCode,
@@ -45,13 +45,15 @@ import {
 } from "../lib/store.js";
 
 /**
- * Signup gift, expressed in newapi's internal quota units (500,000 ≈ $1).
- * Default 2,500,000 = $5. Override via env `NEWAPI_SIGNUP_QUOTA`.
+ * Signup gift in newapi quota units (500,000 ≈ $1). Defaults to the
+ * free-tier $10 grant from `lib/plans.ts`. Override via env
+ * `NEWAPI_SIGNUP_QUOTA` (raw newapi units) when ops needs to bump it.
  */
 function getSignupQuota(): number {
   const raw = process.env.NEWAPI_SIGNUP_QUOTA;
   const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2_500_000;
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  return usdToNewapiQuota(FREE_TIER.initialQuotaUsd);
 }
 
 // ---------- helpers ----------
@@ -145,24 +147,9 @@ async function issueVerificationLink(
 }
 
 /**
- * Grant the standard signup trial bucket: $10 / 24 h, ECO-only model pool.
- * Mirrors the bucket created by the OTP path so register/OTP paths agree.
+ * (formerly grantTrialBucket — bucket model is gone; the equivalent is
+ * `users.plan = 'free'` plus the $10 newapi quota seeded at provisioning.)
  */
-function grantTrialBucket(userId: string): void {
-  const now = new Date();
-  createBucket({
-    userId,
-    skuType: "trial",
-    amountUsd: 10,
-    dailyCapUsd: null,
-    dailyRemainingUsd: null,
-    totalRemainingUsd: 10,
-    startedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + 24 * 3600e3).toISOString(),
-    modeLock: "auto_eco_only",
-    modelPool: "eco_only",
-  });
-}
 
 // ---------- POST /v1/auth/register ----------
 
@@ -212,6 +199,7 @@ export const registerHandler = async (
     displayName,
     passwordHash,
     createdAt: now,
+    plan: "free",
   };
 
   // When newapi is configured, provision the matching account up front.
@@ -249,7 +237,6 @@ export const registerHandler = async (
 
   putUser(user);
   await putEmailIndex(email, userId);
-  grantTrialBucket(userId);
 
   // Send the verification link. If delivery fails (Resend down, no DNS,
   // dev console disabled), keep the account intact and return 201 — the
@@ -507,22 +494,9 @@ export async function verifyCodeHandler(
       emailVerified: true,
       newapiUserId,
       newapiPassword,
+      plan: "free",
     });
     isNew = true;
-
-    // Grant trial bucket: $10 / 24h / forced ECO
-    createBucket({
-      userId,
-      skuType: "trial",
-      amountUsd: 10,
-      dailyCapUsd: null,
-      dailyRemainingUsd: null,
-      totalRemainingUsd: 10,
-      startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 24 * 3600e3).toISOString(),
-      modeLock: "auto_eco_only",
-      modelPool: "eco_only",
-    });
   }
 
   const token = signSession(userId);

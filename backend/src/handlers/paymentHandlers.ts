@@ -30,13 +30,13 @@ import {
   listOrdersByUser,
   type OrderRecord,
 } from "../lib/store.js";
+import { PLANS, isPlanId } from "../lib/plans.js";
 
-// Pricing table — keep in sync with frontend Payment.tsx PLAN_SUMMARY.
-const PLAN_PRICE: Record<PlanId, number> = {
-  basic: 39,
-  standard: 129,
-  pro: 429,
-};
+// Plan price (CNY) is derived from PLANS — keep that file as the single
+// source of truth. Frontend Payment.tsx should mirror PLANS values.
+const PLAN_PRICE: Record<PlanId, number> = Object.fromEntries(
+  Object.entries(PLANS).map(([id, cfg]) => [id, cfg.priceCNY]),
+) as Record<PlanId, number>;
 
 function jsonResponse(
   statusCode: number,
@@ -79,10 +79,6 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
   } catch {
     return null;
   }
-}
-
-function isPlanId(v: unknown): v is PlanId {
-  return v === "basic" || v === "standard" || v === "pro";
 }
 
 function isChannel(v: unknown): v is PaymentChannel {

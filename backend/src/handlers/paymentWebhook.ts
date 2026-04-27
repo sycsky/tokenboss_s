@@ -20,9 +20,17 @@ import type {
 import { epusdtFromEnv } from "../lib/payment/epusdt.js";
 import {
   getOrder,
+  getUser,
   markOrderPaidIfPending,
   markOrderStatus,
+  setUserPlan,
 } from "../lib/store.js";
+import { PLANS, isPlanId } from "../lib/plans.js";
+import { newapi, usdToNewapiQuota, NewapiError } from "../lib/newapi.js";
+
+function newapiUsername(userId: string): string {
+  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
+}
 
 function textResponse(
   statusCode: number,
@@ -117,11 +125,65 @@ export const epusdtWebhookHandler = async (
         planId: order.planId,
         amountActual: verified.amountActual,
       });
-      // TODO(credit): grant the plan's quota to the user here. The
-      // settlement is idempotent so this block runs at most once per
-      // order — safe to extend without re-introducing double-credit risk.
+      await applyPlanToUser(order.userId, order.planId);
     }
   }
 
   return textResponse(200, "ok");
 };
+
+/**
+ * Activate a paid plan for the user:
+ *   1. Push the daily $ allowance into newapi as `quota` (units).
+ *   2. Move the newapi user into the plan's group.
+ *   3. Update users table with plan + start/expiry + dailyQuotaUsd.
+ *
+ * Idempotent at the caller level (markOrderPaidIfPending guards against
+ * duplicate webhook deliveries). Failures here are logged but NOT thrown,
+ * so a transient newapi outage doesn't block the webhook ack — the next
+ * dailyCron run will pick the user up by their `users.plan` row anyway.
+ */
+async function applyPlanToUser(userId: string, planId: string): Promise<void> {
+  if (!isPlanId(planId)) {
+    console.error(`[webhook/epusdt] unknown planId on settled order: ${planId}`);
+    return;
+  }
+  const cfg = PLANS[planId];
+  const startedAt = new Date().toISOString();
+  const expiresAt = new Date(
+    Date.now() + cfg.durationDays * 86_400_000,
+  ).toISOString();
+
+  setUserPlan(userId, {
+    plan: planId,
+    subscriptionStartedAt: startedAt,
+    subscriptionExpiresAt: expiresAt,
+    dailyQuotaUsd: cfg.dailyQuotaUsd,
+  });
+
+  const user = await getUser(userId);
+  if (!user || user.newapiUserId == null) {
+    console.warn(
+      `[webhook/epusdt] user ${userId} has no newapi link — skipping quota push`,
+    );
+    return;
+  }
+
+  try {
+    await newapi.updateUser({
+      id: user.newapiUserId,
+      // newapi PUT requires username — omitting it has bricked rows in the past.
+      username: newapiUsername(userId),
+      quota: usdToNewapiQuota(cfg.dailyQuotaUsd),
+      group: cfg.group,
+    });
+    console.info(
+      `[webhook/epusdt] applied ${planId} to user=${userId}: quota=$${cfg.dailyQuotaUsd}/day group=${cfg.group}`,
+    );
+  } catch (err) {
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.error(
+      `[webhook/epusdt] newapi.updateUser failed for ${userId}: ${msg}`,
+    );
+  }
+}

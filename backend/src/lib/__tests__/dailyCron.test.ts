@@ -1,72 +1,134 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { init, createBucket, getActiveBucketsForUser, getUsageForUser } from '../store.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Mock newapi BEFORE importing dailyCron so its top-level
+// `import { newapi }` picks up the test double.
+vi.mock('../newapi.js', async (orig) => {
+  const real = await orig<typeof import('../newapi.js')>();
+  return {
+    ...real,
+    newapi: {
+      updateUser: vi.fn(),
+    },
+  };
+});
+
+import { init, putUser, setUserPlan, getUser } from '../store.js';
 import { runDailyExpireAndReset } from '../dailyCron.js';
+import { newapi } from '../newapi.js';
+
+const updateUserMock = newapi.updateUser as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   process.env.SQLITE_PATH = ':memory:';
   init();
+  updateUserMock.mockReset();
+  updateUserMock.mockResolvedValue({ id: 1, username: 'x', quota: 0, group: 'default' });
 });
 
+const futureIso = (days = 7) =>
+  new Date(Date.now() + days * 86400_000).toISOString();
+const pastIso = (days = 1) =>
+  new Date(Date.now() - days * 86400_000).toISOString();
+
+function makeUser(over: Partial<{ userId: string; newapiUserId: number | null }> = {}) {
+  putUser({
+    userId: over.userId ?? 'u_a',
+    email: `${over.userId ?? 'u_a'}@x.com`,
+    createdAt: new Date().toISOString(),
+    plan: 'free',
+    newapiUserId: over.newapiUserId ?? 100,
+  });
+}
+
 describe('runDailyExpireAndReset', () => {
-  it('expires (−剩余) then resets (+cap) for plan_plus with leftover', () => {
-    createBucket({
-      userId: 'u_1', skuType: 'plan_plus', amountUsd: 840, dailyCapUsd: 30,
-      dailyRemainingUsd: 4.57, totalRemainingUsd: null,
-      startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 28*86400e3).toISOString(),
-      modeLock: 'auto_only', modelPool: 'codex_only',
+  it('resets quota to dailyQuotaUsd × 500_000 for active paid users', async () => {
+    makeUser({ userId: 'u_paid', newapiUserId: 42 });
+    setUserPlan('u_paid', {
+      plan: 'plus',
+      subscriptionStartedAt: pastIso(2),
+      subscriptionExpiresAt: futureIso(28),
+      dailyQuotaUsd: 30,
     });
-    runDailyExpireAndReset();
 
-    const buckets = getActiveBucketsForUser('u_1');
-    expect(buckets[0].dailyRemainingUsd).toBe(30);
-
-    const events = getUsageForUser('u_1', { limit: 10 });
-    const eventTypes = events.map(e => e.eventType);
-    expect(eventTypes).toContain('expire');
-    expect(eventTypes).toContain('reset');
-    const expire = events.find(e => e.eventType === 'expire')!;
-    expect(expire.amountUsd).toBeCloseTo(-4.57);
-    const reset = events.find(e => e.eventType === 'reset')!;
-    expect(reset.amountUsd).toBe(30);
+    const result = await runDailyExpireAndReset();
+    expect(result.reset).toBe(1);
+    expect(result.expired).toBe(0);
+    expect(updateUserMock).toHaveBeenCalledWith({
+      id: 42,
+      username: 'paid',
+      quota: 15_000_000, // $30 × 500_000
+      group: 'plus',
+    });
   });
 
-  it('skips expire when remaining = 0 (yesterday used full cap)', () => {
-    createBucket({
-      userId: 'u_2', skuType: 'plan_plus', amountUsd: 840, dailyCapUsd: 30,
-      dailyRemainingUsd: 0, totalRemainingUsd: null,
-      startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 28*86400e3).toISOString(),
-      modeLock: 'auto_only', modelPool: 'codex_only',
+  it('zeroes quota and downgrades plan for expired paid users', async () => {
+    makeUser({ userId: 'u_expired', newapiUserId: 7 });
+    setUserPlan('u_expired', {
+      plan: 'super',
+      subscriptionStartedAt: pastIso(40),
+      subscriptionExpiresAt: pastIso(2),
+      dailyQuotaUsd: 80,
     });
-    runDailyExpireAndReset();
-    const events = getUsageForUser('u_2', { limit: 10 });
-    expect(events.filter(e => e.eventType === 'expire')).toHaveLength(0);
-    expect(events.filter(e => e.eventType === 'reset')).toHaveLength(1);
+
+    const result = await runDailyExpireAndReset();
+    expect(result.expired).toBe(1);
+    expect(updateUserMock).toHaveBeenCalledWith({
+      id: 7,
+      username: 'expired',
+      quota: 0,
+      group: 'default',
+    });
+    const u = await getUser('u_expired');
+    expect(u?.plan).toBe('free');
+    expect(u?.subscriptionExpiresAt).toBeUndefined();
+    expect(u?.dailyQuotaUsd).toBeUndefined();
   });
 
-  it('does not touch topup buckets', () => {
-    createBucket({
-      userId: 'u_3', skuType: 'topup', amountUsd: 100, dailyCapUsd: null,
-      dailyRemainingUsd: null, totalRemainingUsd: 50,
-      startedAt: new Date().toISOString(), expiresAt: null,
-      modeLock: 'none', modelPool: 'all',
+  it('skips users without a newapi link (graceful, no throw)', async () => {
+    putUser({
+      userId: 'u_unlinked',
+      email: 'u@x.com',
+      createdAt: new Date().toISOString(),
+      plan: 'plus',
+      subscriptionExpiresAt: futureIso(20),
+      dailyQuotaUsd: 30,
+      // newapiUserId NOT set
     });
-    runDailyExpireAndReset();
-    const events = getUsageForUser('u_3', { limit: 10 });
-    expect(events).toHaveLength(0);
+
+    const result = await runDailyExpireAndReset();
+    expect(result.reset).toBe(0);
+    expect(updateUserMock).not.toHaveBeenCalled();
   });
 
-  it('does not touch expired subscriptions', () => {
-    createBucket({
-      userId: 'u_4', skuType: 'plan_plus', amountUsd: 840, dailyCapUsd: 30,
-      dailyRemainingUsd: 5, totalRemainingUsd: null,
-      startedAt: new Date(Date.now() - 30*86400e3).toISOString(),
-      expiresAt: new Date(Date.now() - 1).toISOString(),
-      modeLock: 'auto_only', modelPool: 'codex_only',
+  it('counts failures separately, lets batch continue', async () => {
+    makeUser({ userId: 'u_p1', newapiUserId: 1 });
+    setUserPlan('u_p1', {
+      plan: 'plus',
+      subscriptionExpiresAt: futureIso(10),
+      dailyQuotaUsd: 30,
     });
-    runDailyExpireAndReset();
-    const events = getUsageForUser('u_4', { limit: 10 });
-    expect(events).toHaveLength(0);
+    makeUser({ userId: 'u_p2', newapiUserId: 2 });
+    setUserPlan('u_p2', {
+      plan: 'plus',
+      subscriptionExpiresAt: futureIso(10),
+      dailyQuotaUsd: 30,
+    });
+
+    updateUserMock
+      .mockRejectedValueOnce(new Error('newapi 502'))
+      .mockResolvedValueOnce({ id: 2, username: 'p2', quota: 0, group: 'plus' });
+
+    const result = await runDailyExpireAndReset();
+    expect(result.reset).toBe(1);
+    expect(result.failed).toBe(1);
+  });
+
+  it('does not touch free users', async () => {
+    makeUser({ userId: 'u_free', newapiUserId: 99 });
+    // plan='free' is the default from makeUser
+    const result = await runDailyExpireAndReset();
+    expect(result.reset).toBe(0);
+    expect(result.expired).toBe(0);
+    expect(updateUserMock).not.toHaveBeenCalled();
   });
 });
