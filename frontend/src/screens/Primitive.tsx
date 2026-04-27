@@ -47,18 +47,18 @@ export default function Primitive() {
         </p>
 
         {/* The morphing equation — loops between two states.
-            State A: Agent = Powerful.  (capability)
-            State B: Agent + TokenBoss = Productive.  (value)
-            Motion is the argument — capability ≠ value, TokenBoss
-            closes the gap. Opt-out for prefers-reduced-motion in CSS. */}
+            State A: Agent = Powerful.            → bar fills only to 及格 (60%)
+            State B: Agent + Primitive = Productive. → bar shoots to 100%, "Powered by TokenBoss" surfaces
+            Motion is the argument — capability gets you to passing,
+            Primitives push it past. Opt-out for prefers-reduced-motion. */}
         <div className="bg-surface-warm border-2 border-ink rounded-md shadow-[5px_5px_0_0_#1C1917] p-6 md:p-9 mb-10 md:mb-12">
           <div className="eq-row flex items-center gap-2.5 md:gap-4 flex-wrap text-[26px] md:text-[40px] font-extrabold tracking-tight leading-none">
             <Chip>Agent</Chip>
 
-            {/* "+ TokenBoss" — collapses to zero width in State A */}
+            {/* "+ Primitive" — collapses to zero width in State A */}
             <span className="eq-boss inline-flex items-center gap-2.5 md:gap-4 overflow-hidden whitespace-nowrap">
               <Op>+</Op>
-              <ChipFeatured>TokenBoss</ChipFeatured>
+              <ChipFeatured>Primitive</ChipFeatured>
             </span>
 
             <Op>=</Op>
@@ -75,14 +75,29 @@ export default function Primitive() {
               </span>
             </span>
           </div>
+
+          {/* Energy bar — track + 及格 tick + fill + "Powered by TokenBoss" stamp */}
+          <div className="mt-7 md:mt-8">
+            <div className="relative h-3 bg-bg border-2 border-ink rounded-sm overflow-hidden">
+              {/* Passing line at 60% */}
+              <div className="absolute inset-y-0 left-[60%] w-[2px] bg-ink/35" aria-hidden="true" />
+              {/* Fill */}
+              <div className="eq-bar-fill absolute inset-y-0 left-0 bg-accent border-r-2 border-ink" />
+            </div>
+
+            {/* Labels — 及格 tick (always) + Powered by TokenBoss (State B only) */}
+            <div className="relative mt-2 h-4">
+              <span className="absolute left-[60%] -translate-x-1/2 font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-ink-3">
+                及格
+              </span>
+              <span className="eq-bar-label absolute right-0 font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-accent">
+                Powered by TokenBoss
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* What "TokenBoss" actually means — anchors the chip in real capabilities. */}
-        <div className="font-mono text-[11.5px] text-ink-3 leading-relaxed mb-20 md:mb-24">
-          <span className="text-ink-4 mr-2">v1</span>钱包 · 路由 · 共享额度
-          <span className="mx-3 text-ink-4">+</span>
-          <span className="text-ink-4 mr-2">v2</span>原子化能力（Primitives）
-        </div>
+        <div className="mb-20 md:mb-24" />
 
         {/* Industries roadmap — light Slock-pixel grid */}
         <section>
@@ -128,11 +143,12 @@ export default function Primitive() {
       </main>
 
       {/* Equation morph keyframes — pure CSS, 7s loop.
-          0–14%   Powerful (hold)
-          14–28%  morph: + TokenBoss slides in, answer Powerful → Productive
-          28–71%  Productive (hold — the message)
-          71–86%  morph back: + TokenBoss slides out, answer reverts
-          86–100% Powerful (hold)
+          0–14%   State A · Agent = Powerful · bar holds at 及格 (60%)
+          14–28%  morph: + Primitive slides in, answer flips, bar shoots to 100%
+          28–71%  State B · Agent + Primitive = Productive · bar at 100%
+                  · "Powered by TokenBoss" label fades in
+          71–86%  morph back: + Primitive slides out, answer reverts, bar drops
+          86–100% State A · holds at 及格
           Honors prefers-reduced-motion: pin to State B static. */}
       <style>{`
         .eq-boss {
@@ -159,10 +175,36 @@ export default function Primitive() {
           28%, 71%  { opacity: 1; transform: translateY(0);   }
           82%, 100% { opacity: 0; transform: translateY(4px); }
         }
+
+        /* Energy bar — pinned to 60% in State A, shoots to 100% in State B. */
+        .eq-bar-fill {
+          width: 60%;
+          animation: eq-bar-fill 7s ease-in-out infinite;
+        }
+        @keyframes eq-bar-fill {
+          0%, 14%   { width: 60%;  }
+          28%, 71%  { width: 100%; }
+          86%, 100% { width: 60%;  }
+        }
+
+        /* "Powered by TokenBoss" — only surfaces in State B, fades in from the right. */
+        .eq-bar-label {
+          opacity: 0;
+          transform: translateX(6px);
+          animation: eq-bar-label 7s ease-in-out infinite;
+        }
+        @keyframes eq-bar-label {
+          0%, 18%   { opacity: 0; transform: translateX(6px); }
+          28%, 71%  { opacity: 1; transform: translateX(0);   }
+          82%, 100% { opacity: 0; transform: translateX(6px); }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .eq-boss       { animation: none; max-width: 360px; opacity: 1; transform: none; margin-left: 0.625rem; }
           .eq-powerful   { animation: none; opacity: 0; }
           .eq-productive { animation: none; opacity: 1; transform: none; }
+          .eq-bar-fill   { animation: none; width: 100%; }
+          .eq-bar-label  { animation: none; opacity: 1; transform: none; }
         }
       `}</style>
     </div>
