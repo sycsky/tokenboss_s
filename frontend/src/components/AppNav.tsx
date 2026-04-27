@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { BrandPlate } from './TopNav';
 
@@ -21,23 +21,30 @@ export type AppNavCurrent = 'console' | 'history' | 'account';
  * visual highlight.
  */
 export function AppNav({ current: _current }: { current?: AppNavCurrent } = {}) {
+  // Hide the "升级" pill when the user is already on /pricing — promoting
+  // the page you're currently viewing reads as broken chrome.
+  const { pathname } = useLocation();
+  const onPricing = pathname.startsWith('/pricing');
+
   return (
     <nav className="px-5 sm:px-9 py-5 flex items-center justify-between max-w-[1340px] mx-auto gap-3">
       <BrandPlate />
       <div className="flex items-center gap-3">
-        <Link
-          to="/pricing"
-          className={
-            'hidden sm:inline-flex items-center px-2.5 py-1 bg-yellow-stamp border-2 border-ink rounded ' +
-            'font-mono text-[10.5px] font-bold tracking-[0.12em] uppercase text-yellow-stamp-ink ' +
-            'shadow-[2px_2px_0_0_#1C1917] ' +
-            'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-            'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-            'transition-all'
-          }
-        >
-          升级 ↗
-        </Link>
+        {!onPricing && (
+          <Link
+            to="/pricing"
+            className={
+              'hidden sm:inline-flex items-center px-2.5 py-1 bg-yellow-stamp border-2 border-ink rounded ' +
+              'font-mono text-[10.5px] font-bold tracking-[0.12em] uppercase text-yellow-stamp-ink ' +
+              'shadow-[2px_2px_0_0_#1C1917] ' +
+              'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+              'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+              'transition-all'
+            }
+          >
+            升级 ↗
+          </Link>
+        )}
         <AvatarMenu />
       </div>
     </nav>

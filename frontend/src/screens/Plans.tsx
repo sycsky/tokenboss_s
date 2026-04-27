@@ -5,6 +5,7 @@ import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
 import { TopNav } from '../components/TopNav';
+import { AppNav } from '../components/AppNav';
 import { CurrencySwitcher } from '../components/CurrencySwitcher';
 
 export default function Plans() {
@@ -29,7 +30,12 @@ export default function Plans() {
 
   return (
     <div className="min-h-screen bg-bg">
-      <TopNav />
+      {/* Logged-in users keep the product chrome (AppNav with avatar) so
+          jumping here from /console doesn't drop them out of the
+          authenticated shell. Anonymous visitors still get the marketing
+          TopNav (Wallet ↔ Primitives toggle, login link) — this page is
+          a fence between marketing and product. */}
+      {isLoggedIn ? <AppNav /> : <TopNav />}
 
       <main className="max-w-[1080px] mx-auto px-6 md:px-14 py-12 md:py-20">
         {/* Hero — Slock-pixel eyebrow + bold one-line h1 + currency switcher right-aligned */}
