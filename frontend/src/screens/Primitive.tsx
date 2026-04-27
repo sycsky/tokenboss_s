@@ -46,38 +46,42 @@ export default function Primitive() {
           </span>
         </p>
 
-        {/* The contrast equations — stacked, top muted, bottom amplified */}
-        <div className="space-y-5 mb-20 md:mb-24">
-          {/* Top · 今天 */}
-          <div className="bg-surface border-2 border-ink rounded-md p-5 md:p-6 opacity-70">
-            <div className="font-mono text-[10px] font-bold tracking-[0.18em] uppercase text-ink-3 mb-3">
-              今天 · TODAY
-            </div>
-            <div className="flex items-center gap-2.5 md:gap-4 flex-wrap text-[22px] md:text-[30px] font-bold tracking-tight">
-              <Chip>Agent</Chip>
-              <Op>+</Op>
-              <Chip>LLM</Chip>
-              <Op>=</Op>
-              <span className="font-sans text-ink-2 italic">Powerful.</span>
-            </div>
-          </div>
+        {/* The morphing equation — loops between two states.
+            State A: Agent = Powerful.  (capability)
+            State B: Agent + TokenBoss = Productive.  (value)
+            Motion is the argument — capability ≠ value, TokenBoss
+            closes the gap. Opt-out for prefers-reduced-motion in CSS. */}
+        <div className="bg-surface-warm border-2 border-ink rounded-md shadow-[5px_5px_0_0_#1C1917] p-6 md:p-9 mb-10 md:mb-12">
+          <div className="eq-row flex items-center gap-2.5 md:gap-4 flex-wrap text-[26px] md:text-[40px] font-extrabold tracking-tight leading-none">
+            <Chip>Agent</Chip>
 
-          {/* Bottom · 接入 TokenBoss — full Slock-pixel + hard offset */}
-          <div className="bg-surface-warm border-2 border-ink rounded-md shadow-[5px_5px_0_0_#1C1917] p-5 md:p-7">
-            <div className="font-mono text-[10px] font-bold tracking-[0.18em] uppercase text-accent mb-3">
-              接入 TokenBoss · WITH US
-            </div>
-            <div className="flex items-center gap-2.5 md:gap-4 flex-wrap text-[26px] md:text-[40px] font-extrabold tracking-tight leading-none">
-              <Chip>Agent</Chip>
+            {/* "+ TokenBoss" — collapses to zero width in State A */}
+            <span className="eq-boss inline-flex items-center gap-2.5 md:gap-4 overflow-hidden whitespace-nowrap">
               <Op>+</Op>
               <ChipFeatured>TokenBoss</ChipFeatured>
-              <Op>=</Op>
-              <span className="font-sans text-accent">Productive.</span>
-            </div>
-            <div className="mt-4 font-mono text-[11px] text-ink-3 leading-relaxed">
-              钱包 · 路由 · 共享额度（v1）<span className="text-ink-4 mx-1.5">+</span> 原子化能力（v2）
-            </div>
+            </span>
+
+            <Op>=</Op>
+
+            {/* Answer slot — two states stacked, opacity swaps in sync with the chip morph */}
+            <span className="eq-answer relative inline-block leading-none">
+              {/* State B sets the slot width (it's the longer string). */}
+              <span className="invisible" aria-hidden="true">Productive.</span>
+              <span className="eq-powerful absolute inset-0 font-sans text-ink-2 italic">
+                Powerful.
+              </span>
+              <span className="eq-productive absolute inset-0 font-sans text-accent">
+                Productive.
+              </span>
+            </span>
           </div>
+        </div>
+
+        {/* What "TokenBoss" actually means — anchors the chip in real capabilities. */}
+        <div className="font-mono text-[11.5px] text-ink-3 leading-relaxed mb-20 md:mb-24">
+          <span className="text-ink-4 mr-2">v1</span>钱包 · 路由 · 共享额度
+          <span className="mx-3 text-ink-4">+</span>
+          <span className="text-ink-4 mr-2">v2</span>原子化能力（Primitives）
         </div>
 
         {/* Industries roadmap — light Slock-pixel grid */}
@@ -122,6 +126,45 @@ export default function Primitive() {
           </div>
         </div>
       </main>
+
+      {/* Equation morph keyframes — pure CSS, 7s loop.
+          0–14%   Powerful (hold)
+          14–28%  morph: + TokenBoss slides in, answer Powerful → Productive
+          28–71%  Productive (hold — the message)
+          71–86%  morph back: + TokenBoss slides out, answer reverts
+          86–100% Powerful (hold)
+          Honors prefers-reduced-motion: pin to State B static. */}
+      <style>{`
+        .eq-boss {
+          max-width: 0;
+          opacity: 0;
+          transform: translateX(-8px);
+          margin-left: 0;
+          animation: eq-boss 7s ease-in-out infinite;
+        }
+        @keyframes eq-boss {
+          0%, 14%   { max-width: 0;     opacity: 0; transform: translateX(-8px); margin-left: 0;        }
+          28%, 71%  { max-width: 360px; opacity: 1; transform: translateX(0);    margin-left: 0.625rem; }
+          86%, 100% { max-width: 0;     opacity: 0; transform: translateX(-8px); margin-left: 0;        }
+        }
+        .eq-powerful   { animation: eq-powerful   7s ease-in-out infinite; }
+        .eq-productive { animation: eq-productive 7s ease-in-out infinite; opacity: 0; }
+        @keyframes eq-powerful {
+          0%, 14%   { opacity: 1; transform: translateY(0);   }
+          22%, 78%  { opacity: 0; transform: translateY(-4px); }
+          86%, 100% { opacity: 1; transform: translateY(0);   }
+        }
+        @keyframes eq-productive {
+          0%, 18%   { opacity: 0; transform: translateY(4px); }
+          28%, 71%  { opacity: 1; transform: translateY(0);   }
+          82%, 100% { opacity: 0; transform: translateY(4px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .eq-boss       { animation: none; max-width: 360px; opacity: 1; transform: none; margin-left: 0.625rem; }
+          .eq-powerful   { animation: none; opacity: 0; }
+          .eq-productive { animation: none; opacity: 1; transform: none; }
+        }
+      `}</style>
     </div>
   );
 }
