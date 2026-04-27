@@ -1,9 +1,16 @@
 /**
  * Auth handlers for the web dashboard.
  *
- * POST /v1/auth/send-code  — send a 6-digit verification code to an email
+ * POST /v1/auth/register    — create user (email + password), seed trial, return JWT
+ * POST /v1/auth/login       — verify email/password, return JWT
+ * POST /v1/auth/send-code   — send a 6-digit verification code (passwordless / recovery)
  * POST /v1/auth/verify-code — verify the code, return JWT (creating account if new)
- * GET  /v1/me              — return current user profile (session-authed)
+ * GET  /v1/me               — return current user profile (session-authed)
+ *
+ * Email-code routes stay live alongside password auth so they can back the
+ * "forgot password" recovery flow (and CLI integrations that don't carry a
+ * password). Email verification on register is deferred to v1.1 once Resend
+ * is wired — see B2 in docs/superpowers/specs/2026-04-25-credits-economy-design.md.
  *
  * JWT and proxy keys are deliberately separate:
  *   - The JWT authenticates a browser session to these dashboard routes.
@@ -11,20 +18,22 @@
  * Losing one does not compromise the other.
  */
 
-import { randomBytes, randomInt } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
-import { signSession } from "../lib/authTokens.js";
+import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
 import { sendVerificationEmail } from "../lib/emailService.js";
-import { isNewapiConfigured, newapi } from "../lib/newapi.js";
+import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
 import {
   createBucket,
   consumeVerificationCode,
+  getUser,
   getUserIdByEmail,
+  putEmailIndex,
   putUser,
   recentCodeCount,
   saveVerificationCode,
@@ -113,6 +122,151 @@ async function buildUserProfile(
     createdAt: u.createdAt,
   };
 }
+
+/**
+ * Grant the standard signup trial bucket: $10 / 24 h, ECO-only model pool.
+ * Mirrors the bucket created by the OTP path so register/OTP paths agree.
+ */
+function grantTrialBucket(userId: string): void {
+  const now = new Date();
+  createBucket({
+    userId,
+    skuType: "trial",
+    amountUsd: 10,
+    dailyCapUsd: null,
+    dailyRemainingUsd: null,
+    totalRemainingUsd: 10,
+    startedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + 24 * 3600e3).toISOString(),
+    modeLock: "auto_eco_only",
+    modelPool: "eco_only",
+  });
+}
+
+// ---------- POST /v1/auth/register ----------
+
+export const registerHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const body = parseJsonBody(event);
+  if (!body) return jsonError(400, "invalid_request_error", "Body must be valid JSON.");
+
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  const displayName = typeof body.displayName === "string" ? body.displayName.trim() : undefined;
+
+  if (!EMAIL_RE.test(email)) {
+    return jsonError(400, "invalid_request_error", "Invalid email address.");
+  }
+  if (password.length < 6) {
+    return jsonError(
+      400,
+      "invalid_request_error",
+      "Password must be at least 6 characters.",
+    );
+  }
+
+  const existing = getUserIdByEmail(email);
+  if (existing) {
+    return jsonError(
+      409,
+      "conflict",
+      "An account with this email already exists.",
+      "email_taken",
+    );
+  }
+
+  let passwordHash: string;
+  try {
+    passwordHash = await hashPassword(password);
+  } catch (err) {
+    return jsonError(400, "invalid_request_error", (err as Error).message);
+  }
+
+  const userId = `u_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  const now = new Date().toISOString();
+  const user: UserRecord = {
+    userId,
+    email,
+    displayName,
+    passwordHash,
+    createdAt: now,
+  };
+
+  // When newapi is configured, provision the matching account up front.
+  // In local dev (mock upstream) this block is skipped and the trial bucket
+  // alone backs the new user. Fail-closed if newapi is configured but
+  // returns an error — better a 502 than a TokenBoss user with no upstream.
+  if (isNewapiConfigured()) {
+    const newapiUsername = userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
+    const newapiPassword = randomBytes(12).toString("base64url");
+    try {
+      const provisioned = await newapi.provisionUser({
+        username: newapiUsername,
+        password: newapiPassword,
+        display_name: displayName ?? email,
+        email,
+        quota: getSignupQuota(),
+      });
+      user.newapiUserId = provisioned.newapiUserId;
+      user.newapiPassword = newapiPassword;
+    } catch (err) {
+      const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+      console.error(`[register] newapi provisioning failed for ${userId}:`, msg);
+      return jsonError(
+        502,
+        "upstream_error",
+        "Could not provision account on metering service. Please try again.",
+        "newapi_provision_failed",
+      );
+    }
+  }
+
+  putUser(user);
+  await putEmailIndex(email, userId);
+  grantTrialBucket(userId);
+
+  const token = signSession(userId);
+  return jsonResponse(201, {
+    token,
+    user: await buildUserProfile(user),
+    isNew: true,
+  });
+};
+
+// ---------- POST /v1/auth/login ----------
+
+export const loginHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const body = parseJsonBody(event);
+  if (!body) return jsonError(400, "invalid_request_error", "Body must be valid JSON.");
+
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  if (!email || !password) {
+    return jsonError(400, "invalid_request_error", "Email and password are required.");
+  }
+
+  const userId = getUserIdByEmail(email);
+  if (!userId) {
+    return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
+  }
+  const user = await getUser(userId);
+  if (!user || !user.passwordHash) {
+    return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
+  }
+  const ok = await verifyPassword(password, user.passwordHash);
+  if (!ok) {
+    return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
+  }
+
+  const token = signSession(user.userId);
+  return jsonResponse(200, {
+    token,
+    user: await buildUserProfile(user),
+  });
+};
 
 // ---------- GET /v1/me ----------
 

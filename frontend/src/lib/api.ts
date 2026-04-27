@@ -229,7 +229,23 @@ export interface MeResponse {
 // ---------- public API ----------
 
 export const api = {
-  // auth — code-based flow
+  // auth — password flow (primary)
+  register(input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/register", {
+      method: "POST",
+      body: input,
+      token: null,
+    });
+  },
+  login(email: string, password: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/login", {
+      method: "POST",
+      body: { email, password },
+      token: null,
+    });
+  },
+
+  // auth — email-code flow (passwordless / "forgot password" recovery)
   sendCode(email: string): Promise<{ ok: true }> {
     return request<{ ok: true }>("/v1/auth/send-code", {
       method: "POST",

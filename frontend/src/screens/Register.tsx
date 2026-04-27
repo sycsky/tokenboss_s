@@ -1,112 +1,139 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { slockBtn } from '../lib/slockBtn';
+import {
+  AuthShell,
+  ComingSoonBadge,
+  GitHubIcon,
+  GoogleIcon,
+  authInputCls,
+  authLabelCls,
+  authOAuthBtnCls,
+} from '../components/AuthShell';
 
+/**
+ * Email + password registration. New accounts go through onboarding;
+ * email verification is deferred to v1.1 (see docs/superpowers/specs).
+ */
 export default function Register() {
   const nav = useNavigate();
-  const { sendCode, loginWithCode } = useAuth();
+  const { register } = useAuth();
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [step, setStep] = useState<'email' | 'code' | 'success'>('email');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSendCode(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true); setError(null);
-    try {
-      await sendCode(email.trim().toLowerCase());
-      setStep('code');
-    } catch (err: unknown) {
-      setError((err as Error).message || '发送验证码失败');
-    } finally {
-      setLoading(false);
+    if (password.length < 6) {
+      setError('密码至少需要 6 位');
+      return;
     }
-  }
-
-  async function handleVerify(e: React.FormEvent) {
-    e.preventDefault();
-    if (code.length !== 6) return;
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
-      const result = await loginWithCode(email.trim().toLowerCase(), code);
-      if (result.isNew) {
-        setStep('success');
-        setTimeout(() => nav('/onboard/welcome'), 2500);
+      await register({
+        email: email.trim().toLowerCase(),
+        password,
+        displayName: displayName.trim() || undefined,
+      });
+      nav('/onboard/welcome');
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.code === 'email_taken') {
+        setError('这个邮箱已注册，请直接登录');
       } else {
-        nav('/dashboard');
+        setError((err as Error).message || '注册失败，请稍后重试');
       }
-    } catch {
-      setError('验证码错误或已过期');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-6">
-      <div className="w-full max-w-md">
-        {step !== 'success' && (
-          <>
-            <h1 className="text-3xl font-bold mb-2 tracking-tight">免费注册</h1>
-            <p className="text-ink-2 text-sm mb-2">注册即送</p>
-            <div className="bg-accent-soft border border-accent rounded-lg p-4 mb-8">
-              <div className="font-mono text-3xl font-bold text-accent-ink">$10</div>
-              <div className="text-sm text-accent-ink mt-1">24 小时免费试用</div>
-            </div>
-          </>
-        )}
+    <AuthShell caption={<span>注册即送 $10 试用额度 · 24 小时有效</span>}>
+      <h1 className="text-[24px] font-bold text-ink tracking-tight mb-1.5">
+        创建账户
+      </h1>
+      <p className="text-[13.5px] text-[#6B5E52] mb-7 leading-relaxed">
+        已有账户？<Link to="/login" className="text-accent font-semibold underline underline-offset-4 decoration-2">登录</Link>
+      </p>
 
-        {step === 'email' && (
-          <form onSubmit={handleSendCode} className="space-y-4">
-            <input
-              type="email" required autoFocus
-              placeholder="email@example.com"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="w-full px-4 py-3 bg-surface border border-border rounded-lg text-base focus:outline-none focus:border-accent"
-            />
-            <button type="submit" disabled={loading || !email}
-              className="w-full py-3 bg-accent text-white font-semibold rounded-lg disabled:opacity-50">
-              {loading ? '发送中…' : '免费开始 · 送 $10 体验'}
-            </button>
-            {error && <p className="text-red-ink text-sm">{error}</p>}
-          </form>
-        )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="reg-name" className={authLabelCls}>名字</label>
+          <input
+            id="reg-name"
+            type="text"
+            placeholder="可填昵称，方便控制台称呼你"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            className={authInputCls}
+            maxLength={40}
+          />
+        </div>
 
-        {step === 'code' && (
-          <form onSubmit={handleVerify} className="space-y-4">
-            <p className="text-sm text-ink-2">验证码已发送至 <span className="font-mono">{email}</span></p>
-            <input
-              type="text" inputMode="numeric" autoFocus maxLength={6} pattern="\d{6}"
-              placeholder="输入 6 位验证码"
-              value={code}
-              onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
-              className="w-full px-4 py-3 bg-surface border border-border rounded-lg text-2xl font-mono tracking-[0.4em] text-center focus:outline-none focus:border-accent"
-            />
-            <button type="submit" disabled={loading || code.length !== 6}
-              className="w-full py-3 bg-accent text-white font-semibold rounded-lg disabled:opacity-50">
-              {loading ? '验证中…' : '完成注册'}
-            </button>
-            {error && <p className="text-red-ink text-sm">{error}</p>}
-          </form>
-        )}
+        <div>
+          <label htmlFor="reg-email" className={authLabelCls}>邮箱</label>
+          <input
+            id="reg-email"
+            type="email"
+            required
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={authInputCls}
+          />
+        </div>
 
-        {step === 'success' && (
-          <div className="text-center">
-            <div className="text-5xl mb-4">🎉</div>
-            <h2 className="text-2xl font-bold mb-2">注册成功</h2>
-            <p className="text-ink-2">$10 / 24h 试用已激活</p>
-            <p className="text-ink-3 text-sm mt-4">正在跳转到接入引导…</p>
-          </div>
-        )}
+        <div>
+          <label htmlFor="reg-password" className={authLabelCls}>密码</label>
+          <input
+            id="reg-password"
+            type="password"
+            required
+            autoComplete="new-password"
+            placeholder="至少 6 位"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={authInputCls}
+            minLength={6}
+          />
+        </div>
 
-        {step !== 'success' && (
-          <p className="text-center text-sm text-ink-3 mt-8">
-            已有账户？<a href="/login" className="text-accent">登录</a>
-          </p>
+        <button
+          type="submit"
+          disabled={loading || !email || password.length < 6}
+          className={slockBtn('primary') + ' w-full mt-2'}
+        >
+          {loading ? '创建中…' : '创建账户 · 立刻送 $10'}
+        </button>
+
+        {error && (
+          <p className="text-[13px] text-red-ink font-medium">{error}</p>
         )}
+      </form>
+
+      <div className="flex items-center gap-3 my-6">
+        <span className="flex-1 h-px bg-[#D9CEC2]" />
+        <span className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#A89A8D]">或</span>
+        <span className="flex-1 h-px bg-[#D9CEC2]" />
       </div>
-    </div>
+
+      <div className="space-y-2.5">
+        <button type="button" disabled className={authOAuthBtnCls} aria-disabled="true">
+          <GoogleIcon />
+          <span>Sign up with Google</span>
+          <ComingSoonBadge />
+        </button>
+        <button type="button" disabled className={authOAuthBtnCls} aria-disabled="true">
+          <GitHubIcon />
+          <span>Sign up with GitHub</span>
+          <ComingSoonBadge />
+        </button>
+      </div>
+    </AuthShell>
   );
 }

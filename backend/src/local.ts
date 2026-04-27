@@ -31,7 +31,9 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 
 import { handler as helloHandler } from "./handlers/hello.js";
 import {
+  loginHandler,
   meHandler,
+  registerHandler,
   sendCodeHandler,
   verifyCodeHandler,
 } from "./handlers/authHandlers.js";
@@ -68,6 +70,8 @@ interface Route {
 
 const routes: Route[] = [
   { method: "GET", path: "/hello", handler: helloHandler as LambdaHandler },
+  { method: "POST", path: "/v1/auth/register", handler: registerHandler },
+  { method: "POST", path: "/v1/auth/login", handler: loginHandler },
   { method: "POST", path: "/v1/auth/send-code", handler: sendCodeHandler },
   { method: "POST", path: "/v1/auth/verify-code", handler: verifyCodeHandler },
   { method: "GET", path: "/v1/me", handler: meHandler },

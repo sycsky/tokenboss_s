@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import Landing from './screens/Landing';
 import Login from './screens/Login';
+import MagicLogin from './screens/MagicLogin';
 import Register from './screens/Register';
 import OnboardWelcome from './screens/OnboardWelcome';
 import OnboardInstall from './screens/OnboardInstall';
@@ -19,6 +20,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/login/magic" element={<MagicLogin />} />
       <Route path="/register" element={<Register />} />
 
       <Route path="/onboard/welcome" element={<RequireAuth><OnboardWelcome /></RequireAuth>} />

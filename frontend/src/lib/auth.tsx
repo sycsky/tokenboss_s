@@ -33,10 +33,14 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  /** Send a one-time code to the given email address. */
+  /** Create a new account with email + password. Returns the AuthResponse with isNew=true. */
+  register: (input: { email: string; password: string; displayName?: string }) => Promise<import("./api.js").AuthResponse>;
+  /** Log in with email + password. */
+  login: (email: string, password: string) => Promise<import("./api.js").AuthResponse>;
+  /** Send a one-time code to the given email address (used by recovery / magic-link flow). */
   sendCode: (email: string) => Promise<void>;
   /**
-   * Exchange an email + OTP code for a session.
+   * Exchange an email + OTP code for a session. Used by the recovery flow.
    * Returns the full AuthResponse (includes `isNew` flag for new accounts).
    */
   loginWithCode: (email: string, code: string) => Promise<import("./api.js").AuthResponse>;
@@ -83,6 +87,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const register = useCallback(
+    async (input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> => {
+      const res = await api.register(input);
+      setStoredSession(res.token);
+      setState({ user: res.user, token: res.token });
+      return res;
+    },
+    [],
+  );
+
+  const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
+    const res = await api.login(email, password);
+    setStoredSession(res.token);
+    setState({ user: res.user, token: res.token });
+    return res;
+  }, []);
+
   const sendCode = useCallback(async (email: string) => {
     await api.sendCode(email);
   }, []);
@@ -116,12 +137,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user: state.user,
       token: state.token,
+      register,
+      login,
       sendCode,
       loginWithCode,
       logout,
       refresh,
     }),
-    [state, sendCode, loginWithCode, logout, refresh],
+    [state, register, login, sendCode, loginWithCode, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

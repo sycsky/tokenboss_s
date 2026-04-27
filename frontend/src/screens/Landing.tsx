@@ -5,6 +5,7 @@ import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
 import { TopNav, BrandPlate } from '../components/TopNav';
 import { useAuth } from '../lib/auth';
+import { slockBtn } from '../lib/slockBtn';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import hermesIcon from '../assets/agents/hermes.png';
 
@@ -56,22 +57,6 @@ function FeatureCard({
   );
 }
 
-/**
- * Slock-pixel button helper. Filled fill + 2px hard ink border + 3px hard
- * offset shadow. Hover "depresses" — translates 1px to bottom-right and
- * shrinks the shadow.
- */
-function slockBtn(variant: 'primary' | 'secondary' | 'dark' = 'primary') {
-  const base =
-    'inline-block border-2 border-ink rounded-md font-bold tracking-tight px-5 py-2.5 md:px-6 md:py-3 text-[14px] md:text-[15px] shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] transition-all whitespace-nowrap';
-  const fill =
-    variant === 'primary'
-      ? 'bg-accent text-white'
-      : variant === 'dark'
-        ? 'bg-ink text-white'
-        : 'bg-bg text-ink';
-  return `${base} ${fill}`;
-}
 
 interface FooterLink {
   text: string;
