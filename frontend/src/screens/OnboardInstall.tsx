@@ -25,19 +25,18 @@ export default function OnboardInstall() {
   return (
     <OnboardShell
       step="02"
-      cnLabel="复制咒语"
-      enLabel="Paste the spell"
-      title="复制下面这行"
-      subtitle="在你的 Agent 终端里粘贴 → Agent 自动拉取 skill.md 并接入。"
+      cnLabel="发咒语"
+      enLabel="Send to Agent"
+      title="把下面这行发给你的 Agent"
+      subtitle="Agent 会自己读完 skill.md，30 秒接好。"
       width="lg"
     >
       <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mb-4" />
 
       <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-9">
-        兼容 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
-        <span className="text-ink font-semibold">Hermes</span> ·{' '}
-        <span className="text-ink font-semibold">Claude Code</span> ·{' '}
-        <span className="text-ink font-semibold">Codex</span>
+        已支持 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
+        <span className="text-ink font-semibold">Hermes Agent</span> ·{' '}
+        <span className="text-ink font-semibold">Claude Code</span>
       </p>
 
       {waiting ? (
@@ -47,7 +46,7 @@ export default function OnboardInstall() {
             <span className="relative block w-3 h-3 bg-accent border-2 border-ink rounded-full" />
           </span>
           <div className="flex-1 min-w-0">
-            <div className="text-[14px] font-bold text-ink">等待 Agent 拉取 skill.md…</div>
+            <div className="text-[14px] font-bold text-ink">等 Agent 回话…</div>
             <div className="text-[12px] text-[#6B5E52] mt-0.5">检测到首次调用即自动跳转</div>
           </div>
         </div>
@@ -56,9 +55,21 @@ export default function OnboardInstall() {
           onClick={() => nav('/onboard/success')}
           className={slockBtn('primary') + ' w-full'}
         >
-          我已经粘贴好了 →
+          我已经发给它了 →
         </button>
       )}
+
+      {/* Always-visible back-out so a user who picked the wrong path
+          on /welcome isn't stuck — restores the previous step. */}
+      <div className="mt-6 text-center">
+        <button
+          type="button"
+          onClick={() => nav('/onboard/welcome')}
+          className="font-mono text-[11.5px] text-[#A89A8D] hover:text-ink underline underline-offset-4 decoration-2 transition-colors"
+        >
+          ← 我点错了，重选入口
+        </button>
+      </div>
     </OnboardShell>
   );
 }
