@@ -68,16 +68,25 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
 /**
  * Tilted logo plate · Slock-pixel signature: filled accent fill, 2px hard
  * border, 2px hard offset shadow, slight rotation. Hovers to upright.
+ *
+ * Destination is configurable via `to`: marketing surfaces (TopNav) point
+ * the logo at `/` (Landing); product surfaces (AppNav) override it to
+ * `/console` so a logged-in user clicking the brand goes "home" inside
+ * the product instead of getting bounced back to the marketing page.
  */
 export function BrandPlate({
   dark = false,
   noLink = false,
+  to = '/',
 }: {
   dark?: boolean;
-  /** Render without the `<Link to="/">` wrapper. Use on onboarding /
-   * funnel screens where bouncing back to Landing would orphan the
-   * user mid-flow. */
+  /** Render without the `<Link>` wrapper. Use on onboarding / funnel
+   * screens where bouncing back to Landing would orphan the user
+   * mid-flow. */
   noLink?: boolean;
+  /** Destination route. Defaults to `/` (Landing). AppNav sets
+   * `/console` so the logo doubles as a back-to-home affordance. */
+  to?: string;
 }) {
   const border = dark ? 'border-white' : 'border-ink';
   const shadow = dark
@@ -94,7 +103,7 @@ export function BrandPlate({
     return <span className="flex-shrink-0 inline-block">{plate}</span>;
   }
   return (
-    <Link to="/" className="flex-shrink-0 inline-block">
+    <Link to={to} className="flex-shrink-0 inline-block">
       {plate}
     </Link>
   );

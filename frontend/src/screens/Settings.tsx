@@ -30,13 +30,6 @@ export default function Settings() {
       <AppNav current="account" />
 
       <main className="max-w-[820px] mx-auto px-5 sm:px-9 pt-6">
-        {/* Breadcrumb */}
-        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">账户</span>
-        </div>
-
         <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] mb-2 font-bold">
           ACCOUNT · 账户
         </div>

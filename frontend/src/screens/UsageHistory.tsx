@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api, type UsageDetailResponse } from '../lib/api';
 import { AppNav, SectionLabel } from '../components/AppNav';
 import { BalancePill } from '../components/BalancePill';
@@ -48,13 +47,6 @@ export default function UsageHistory() {
       <AppNav current="history" />
 
       <main className="max-w-[1340px] mx-auto px-5 sm:px-9 pt-6">
-        {/* Breadcrumb */}
-        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">使用历史</span>
-        </div>
-
         {/* Hero row — h1 left, BalancePill right */}
         <div className="flex items-end justify-between mb-9 flex-wrap gap-4">
           <div>
