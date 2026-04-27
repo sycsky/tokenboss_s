@@ -202,7 +202,7 @@ export function RevealKeyModal({
   return (
     <ModalShell open={open} onClose={onClose} tag="CREATED" title="API Key 已创建">
       <div className="font-mono text-[12px] text-[#6B5E52] mb-3 leading-relaxed">
-        关闭后将无法再看到完整 key · 现在保存到密码管理器、`.env`，或贴给你的 Agent。
+        现在复制贴给 Agent · 之后在列表里点 复制 也能再拿。
       </div>
 
       <div className="bg-bg border-2 border-ink rounded-md p-3 mb-4">

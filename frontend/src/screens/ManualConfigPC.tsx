@@ -82,7 +82,7 @@ export default function ManualConfigPC() {
               body={
                 <span>
                   到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 右栏 API KEY 区，点「+ 创建 API Key」。
-                  完整 key 只在创建后的弹窗里显示一次，<span className="font-semibold text-ink">立即复制保存</span>。
+                  弹窗里点 <span className="font-semibold text-ink">复制 API Key</span>，或之后回列表点 复制 也能再拿。
                 </span>
               }
             />
