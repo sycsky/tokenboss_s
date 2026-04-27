@@ -45,7 +45,7 @@ export default function UsageHistory() {
 
   return (
     <div className="min-h-screen bg-bg pb-12">
-      <AppNav current="dashboard" />
+      <AppNav current="history" />
 
       <main className="max-w-[1340px] mx-auto px-5 sm:px-9 pt-6">
         {/* Breadcrumb */}

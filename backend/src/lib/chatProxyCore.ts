@@ -196,6 +196,21 @@ export interface GateResult {
   mode: ChatMode;
   modelTier: ModelTier;
   estimatedCost: number;
+  keyHint?: string;
+}
+
+/**
+ * Last 8 chars of the bearer token (after stripping "Bearer "), used as
+ * a stable key hint for usage attribution. Returns null if missing /
+ * malformed. The token's first/middle bytes are highly entropic so the
+ * tail is unique enough across one user's keys.
+ */
+export function extractKeyHint(authHeader: string | undefined): string | null {
+  if (!authHeader) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+  const token = m ? m[1].trim() : authHeader.trim();
+  if (token.length < 4) return null;
+  return token.slice(-8);
 }
 
 export function gateRequest(
@@ -224,6 +239,7 @@ export function gateRequest(
   const mode: ChatMode = rawModelId === "auto" ? "auto" : "manual";
   const modelTier = inferTierFromModelId(rawModelId);
   const estimatedCost = estimateCost(rawModelId, messages);
+  const keyHint = extractKeyHint(headers.authorization ?? headers.Authorization);
 
   const result = consumeForRequest({
     userId,
@@ -232,13 +248,17 @@ export function gateRequest(
     modelTier,
     costUsd: estimatedCost,
     source: headers["x-source"] ?? undefined,
+    keyHint: keyHint ?? undefined,
   });
 
   if (!result.ok) {
     return { ok: false, errorBody: buildInChatErrorBody(result.error!, rawModelId) };
   }
 
-  return { ok: true, gate: { userId, mode, modelTier, estimatedCost } };
+  return {
+    ok: true,
+    gate: { userId, mode, modelTier, estimatedCost, keyHint: keyHint ?? undefined },
+  };
 }
 
 const IN_CHAT_MESSAGES: Record<string, string> = {
@@ -294,6 +314,7 @@ function reconcileActualCost(
       modelTier: gate.modelTier,
       costUsd: delta,
       source: source ?? undefined,
+      keyHint: gate.keyHint,
       tokensIn: actualTokensIn,
       tokensOut: actualTokensOut,
     });

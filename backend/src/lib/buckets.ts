@@ -10,6 +10,9 @@ export interface BucketRequest {
   modelTier: ModelTier;
   costUsd: number;
   source?: string;
+  /** Last 8 chars of the bearer token used. Lets the dashboard attribute
+   * each call to one of the user's API keys. */
+  keyHint?: string;
   tokensIn?: number;
   tokensOut?: number;
 }
@@ -88,6 +91,7 @@ export function consumeForRequest(req: BucketRequest): ConsumeResult {
         amountUsd: take,
         model: req.modelId,
         source: req.source ?? null,
+        keyHint: req.keyHint ?? null,
         tokensIn: req.tokensIn ?? null,
         tokensOut: req.tokensOut ?? null,
       });

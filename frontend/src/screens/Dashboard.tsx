@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { api, type BucketRecord, type UsageDetailResponse } from '../lib/api';
-import { APIKeyList } from '../components/APIKeyList';
+import { api, type BucketRecord, type ProxyKeySummary, type UsageDetailResponse, type UsageRecord } from '../lib/api';
+import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { UsageRow } from '../components/UsageRow';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 import { AppNav, SectionLabel } from '../components/AppNav';
@@ -10,18 +10,123 @@ import { slockBtn } from '../lib/slockBtn';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
+interface AgentStat {
+  source: string;          // raw source identifier ("openclaw" / "hermes" / etc.)
+  label: string;           // pretty display name
+  initials: string;        // 2-letter avatar block
+  callCount: number;
+  totalSpent: number;
+  lastUsedAt: string;      // ISO
+  topModel: string | null;
+}
+
+const AGENT_REGISTRY: Record<string, { label: string; initials: string; color: string }> = {
+  openclaw:    { label: 'OpenClaw',     initials: 'OC', color: 'bg-accent text-white' },
+  hermes:      { label: 'Hermes',       initials: 'HR', color: 'bg-lavender text-lavender-ink' },
+  'claude-code': { label: 'Claude Code', initials: 'CC', color: 'bg-cyan-stamp text-cyan-stamp-ink' },
+  codex:       { label: 'Codex CLI',    initials: 'CX', color: 'bg-lime-stamp text-lime-stamp-ink' },
+};
+
+function describeAgent(source: string): { label: string; initials: string; color: string } {
+  const k = source.toLowerCase().trim();
+  if (AGENT_REGISTRY[k]) return AGENT_REGISTRY[k];
+  return {
+    label: source,
+    initials: source.slice(0, 2).toUpperCase(),
+    color: 'bg-bg-alt text-ink',
+  };
+}
+
+function deriveAgents(records: UsageRecord[]): AgentStat[] {
+  const map = new Map<string, AgentStat & { modelCounts: Map<string, number> }>();
+  for (const r of records) {
+    if (r.eventType !== 'consume' || !r.source) continue;
+    const key = r.source;
+    const existing = map.get(key);
+    const meta = describeAgent(key);
+    if (!existing) {
+      const modelCounts = new Map<string, number>();
+      if (r.model) modelCounts.set(r.model, 1);
+      map.set(key, {
+        source: key,
+        label: meta.label,
+        initials: meta.initials,
+        callCount: 1,
+        totalSpent: r.amountUsd ?? 0,
+        lastUsedAt: r.createdAt,
+        topModel: r.model,
+        modelCounts,
+      });
+    } else {
+      existing.callCount++;
+      existing.totalSpent += r.amountUsd ?? 0;
+      if (r.createdAt > existing.lastUsedAt) existing.lastUsedAt = r.createdAt;
+      if (r.model) existing.modelCounts.set(r.model, (existing.modelCounts.get(r.model) ?? 0) + 1);
+      let top: string | null = null;
+      let topN = 0;
+      for (const [m, n] of existing.modelCounts) {
+        if (n > topN) { top = m; topN = n; }
+      }
+      existing.topModel = top;
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => (a.lastUsedAt > b.lastUsedAt ? -1 : 1))
+    .map(({ modelCounts: _, ...rest }) => rest);
+}
+
+function deriveKeyStats(records: UsageRecord[]): Map<string, KeyStats> {
+  const m = new Map<string, KeyStats>();
+  for (const r of records) {
+    if (r.eventType !== 'consume' || !r.keyHint) continue;
+    const tail = r.keyHint.slice(-4);
+    const cur = m.get(tail) ?? { callCount: 0, totalSpent: 0, lastUsedAt: r.createdAt };
+    cur.callCount++;
+    cur.totalSpent += r.amountUsd ?? 0;
+    if (r.createdAt > cur.lastUsedAt) cur.lastUsedAt = r.createdAt;
+    m.set(tail, cur);
+  }
+  return m;
+}
+
+function timeAgo(iso: string): string {
+  const diffSec = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (diffSec < 60) return `${diffSec} 秒前`;
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} 分钟前`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} 小时前`;
+  return `${Math.floor(diffSec / 86400)} 天前`;
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [buckets, setBuckets] = useState<BucketRecord[]>([]);
   const [usage, setUsage] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
+  const [keys, setKeys] = useState<ProxyKeySummary[]>([]);
+  const [keysError, setKeysError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  async function reloadKeys() {
+    try {
+      const r = await api.listKeys();
+      setKeys(r.keys);
+      setKeysError(null);
+    } catch (e) {
+      setKeysError((e as Error).message);
+    }
+  }
 
   useEffect(() => {
     Promise.all([
       api.getBuckets().then((r) => setBuckets(r.buckets || [])),
-      api.getUsage({ limit: 4 }).then((r) => setUsage(r)),
+      api.getUsage({ limit: 200 }).then((r) => setUsage(r)),
+      reloadKeys(),
     ]).finally(() => setLoading(false));
   }, []);
+
+  const agents = useMemo(() => deriveAgents(usage.records ?? []), [usage.records]);
+  const keyStats = useMemo(() => deriveKeyStats(usage.records ?? []), [usage.records]);
+  const noActivity = (usage.totals?.calls ?? 0) === 0;
+  const noKeys = keys.length === 0;
 
   const balanceUsd = buckets.reduce((sum, b) => {
     if (b.skuType === 'topup' || b.skuType === 'trial') return sum + (b.totalRemainingUsd ?? 0);
@@ -186,37 +291,62 @@ export default function Dashboard() {
               <span className="font-mono text-[10px] text-[#A89A8D] tracking-wider">v1.0</span>
             </div>
 
-            {/* AGENTS sub-section */}
-            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
-              AGENTS
-            </div>
-            <div className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2 mb-2.5">
-              <div className="w-5 h-5 bg-accent border-2 border-ink rounded text-white font-mono text-[8.5px] font-bold flex items-center justify-center">OC</div>
-              <span className="text-[12.5px] font-semibold text-ink flex-1">OpenClaw</span>
-              <span className="font-mono text-[9.5px] font-bold tracking-wider uppercase text-lime-stamp-ink bg-lime-stamp border-2 border-ink px-1.5 py-px rounded">
-                运行中
-              </span>
-            </div>
-            <a
-              className={
-                'block text-center px-4 py-2 bg-accent-soft border-2 border-dashed border-ink rounded ' +
-                'text-[12.5px] font-bold tracking-tight text-accent-ink cursor-pointer ' +
-                'shadow-[3px_3px_0_0_#1C1917] ' +
-                'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-                'transition-all'
-              }
-            >
-              + 接入新 Agent
-            </a>
+            {/* First-time guide — only when user has no keys AND no usage */}
+            {noKeys && noActivity ? (
+              <FirstTimeGuide />
+            ) : (
+              <>
+                {/* AGENTS sub-section */}
+                <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
+                  AGENTS
+                </div>
+                {agents.length === 0 ? (
+                  <div className="bg-bg border-2 border-dashed border-ink/30 rounded p-3 mb-2.5 text-center font-mono text-[11px] text-[#A89A8D]">
+                    还没有 Agent 调用过 · 接入后会自动出现
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 mb-2.5">
+                    {agents.map((a) => {
+                      const meta = describeAgent(a.source);
+                      return (
+                        <div key={a.source} className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2.5">
+                          <div className={`w-7 h-7 ${meta.color} border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center flex-shrink-0`}>
+                            {a.initials}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[12.5px] font-bold text-ink truncate">{a.label}</div>
+                            <div className="font-mono text-[10px] text-[#A89A8D] truncate">
+                              {timeAgo(a.lastUsedAt)} · {a.callCount} 次 · ${a.totalSpent.toFixed(3)}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <a
+                  href="/install/manual"
+                  className={
+                    'block text-center px-4 py-2 bg-accent-soft border-2 border-dashed border-ink rounded ' +
+                    'text-[12.5px] font-bold tracking-tight text-accent-ink cursor-pointer ' +
+                    'shadow-[3px_3px_0_0_#1C1917] ' +
+                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+                    'transition-all'
+                  }
+                >
+                  + 接入新 Agent
+                </a>
 
-            {/* divider */}
-            <div className="my-4 border-t-2 border-ink/10" />
+                {/* divider */}
+                <div className="my-4 border-t-2 border-ink/10" />
 
-            {/* API KEY sub-section */}
-            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
-              API KEY
-            </div>
-            <APIKeyList />
+                {/* API KEY sub-section */}
+                <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
+                  API KEY
+                </div>
+                <APIKeyList keys={keys} loadError={keysError} keyStats={keyStats} onChanged={reloadKeys} />
+              </>
+            )}
           </section>
 
           {/* Recent usage */}
@@ -250,6 +380,54 @@ export default function Dashboard() {
         </aside>
       </main>
     </div>
+  );
+}
+
+function FirstTimeGuide() {
+  return (
+    <div>
+      <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
+        现在开始
+      </div>
+      <ol className="space-y-2 mb-3">
+        <Step n="1" title="新建一把 API Key" hint="下面 + 创建新 Key" />
+        <Step n="2" title="粘到你的 Agent" hint="OpenClaw / Hermes / Codex 都支持" />
+        <Step n="3" title="让 Agent 跑一次" hint="这里就会出现真实数据" />
+      </ol>
+      <Link
+        to="/install/manual"
+        className={
+          'block text-center px-4 py-2 mb-3 bg-yellow-stamp border-2 border-ink rounded ' +
+          'text-[12.5px] font-bold tracking-tight text-yellow-stamp-ink ' +
+          'shadow-[3px_3px_0_0_#1C1917] ' +
+          'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+          'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+          'transition-all'
+        }
+      >
+        看接入文档 →
+      </Link>
+      <div className="border-t-2 border-ink/10 pt-3">
+        <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
+          API KEY
+        </div>
+        <APIKeyList keys={[]} loadError={null} keyStats={new Map()} onChanged={() => location.reload()} />
+      </div>
+    </div>
+  );
+}
+
+function Step({ n, title, hint }: { n: string; title: string; hint: string }) {
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className="w-5 h-5 flex-shrink-0 bg-ink text-bg border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center mt-0.5">
+        {n}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-[12.5px] font-semibold text-ink leading-snug">{title}</div>
+        <div className="font-mono text-[10px] text-[#A89A8D] mt-px">{hint}</div>
+      </div>
+    </li>
   );
 }
 

@@ -208,6 +208,10 @@ export interface UsageRecord {
   amountUsd: number;
   model: string | null;
   source: string | null;
+  /** Last 8 chars of the bearer token used. Match against the same suffix
+   * of `ProxyKeySummary.key` (which already shows ...-last4) to attribute
+   * each call to one of the user's API keys. */
+  keyHint: string | null;
   tokensIn: number | null;
   tokensOut: number | null;
   createdAt: string;

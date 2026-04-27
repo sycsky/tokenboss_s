@@ -164,12 +164,22 @@ export function init(): void {
       amountUsd   REAL NOT NULL,
       model       TEXT,
       source      TEXT,
+      keyHint     TEXT,
       tokensIn    INTEGER,
       tokensOut   INTEGER,
       createdAt   TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(userId, createdAt DESC);
   `);
+
+  // Idempotent migration: add keyHint to pre-existing DBs (last 8 chars
+  // of the bearer token used for the request, so the dashboard can
+  // attribute each call to one of the user's API keys).
+  try {
+    db.exec(`ALTER TABLE usage_log ADD COLUMN keyHint TEXT`);
+  } catch {
+    // Column already exists — ignore.
+  }
 }
 
 // Initialise on module load (production default path).
@@ -472,18 +482,22 @@ export interface UsageRecord {
   amountUsd: number;
   model: string | null;
   source: string | null;
+  keyHint: string | null;
   tokensIn: number | null;
   tokensOut: number | null;
   createdAt: string;
 }
 
-export function logUsage(r: Omit<UsageRecord, 'id' | 'createdAt'>): UsageRecord {
+export function logUsage(
+  r: Omit<UsageRecord, 'id' | 'createdAt' | 'keyHint'> & { keyHint?: string | null },
+): UsageRecord {
   const createdAt = new Date().toISOString();
+  const keyHint = r.keyHint ?? null;
   const result = db.prepare(`
-    INSERT INTO usage_log (userId, bucketId, eventType, amountUsd, model, source, tokensIn, tokensOut, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(r.userId, r.bucketId, r.eventType, r.amountUsd, r.model, r.source, r.tokensIn, r.tokensOut, createdAt);
-  return { id: Number(result.lastInsertRowid), createdAt, ...r };
+    INSERT INTO usage_log (userId, bucketId, eventType, amountUsd, model, source, keyHint, tokensIn, tokensOut, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(r.userId, r.bucketId, r.eventType, r.amountUsd, r.model, r.source, keyHint, r.tokensIn, r.tokensOut, createdAt);
+  return { id: Number(result.lastInsertRowid), createdAt, keyHint, ...r };
 }
 
 export interface HourlyUsage {

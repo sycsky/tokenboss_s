@@ -16,7 +16,7 @@ export function runDailyExpireAndReset(): { expired: number; reset: number } {
         bucketId: b.id,
         eventType: 'expire',
         amountUsd: -leftover,
-        model: null, source: null, tokensIn: null, tokensOut: null,
+        model: null, source: null, keyHint: null, tokensIn: null, tokensOut: null,
       });
       expiredCount++;
     }
@@ -27,7 +27,7 @@ export function runDailyExpireAndReset(): { expired: number; reset: number } {
       bucketId: b.id,
       eventType: 'reset',
       amountUsd: b.dailyCapUsd,
-      model: null, source: null, tokensIn: null, tokensOut: null,
+      model: null, source: null, keyHint: null, tokensIn: null, tokensOut: null,
     });
     resetCount++;
   }
