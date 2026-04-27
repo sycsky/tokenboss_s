@@ -16,6 +16,18 @@ export interface TerminalBlockProps {
   /** Async-load placeholder shown in place of `extra` while the key is
    * being fetched. Keeps the layout stable on /onboard/install. */
   loading?: boolean;
+  /** Lazy-reveal hook. When provided, the visible `extra` line shows
+   * whatever the parent passes (typically a masked key), but COPY first
+   * runs this resolver to swap in the unmasked plaintext before writing
+   * to the clipboard. Result is cached in component state so subsequent
+   * COPY clicks skip the network. The visible `extra` also updates to
+   * the resolved value once it arrives, so the user sees the plaintext
+   * appear after their first copy.
+   *
+   * Used on /console (recurring page) to avoid eager-revealing on every
+   * mount — newapi has rate-limits and the user usually doesn't need
+   * the plaintext until they actually click copy. */
+  extraResolver?: () => Promise<string>;
 }
 
 /**
@@ -31,11 +43,40 @@ export function TerminalBlock({
   className = '',
   prompt,
   loading = false,
+  extraResolver,
 }: TerminalBlockProps) {
   const [copied, setCopied] = useState(false);
-  const copyText = extra ? `${cmd}\n${extra}` : cmd;
+  const [resolving, setResolving] = useState(false);
+  const [resolvedExtra, setResolvedExtra] = useState<string | null>(null);
+  const [resolveError, setResolveError] = useState(false);
+
+  // What the user actually sees as the second line — masked input until
+  // the resolver returns plaintext, then the plaintext sticks.
+  const visibleExtra = resolvedExtra ?? extra;
+  const copyExtra = resolvedExtra ?? extra;
+  const copyText = copyExtra ? `${cmd}\n${copyExtra}` : cmd;
 
   async function handleCopy() {
+    if (extraResolver && resolvedExtra === null) {
+      setResolving(true);
+      setResolveError(false);
+      try {
+        const resolved = await extraResolver();
+        setResolvedExtra(resolved);
+        await navigator.clipboard.writeText(`${cmd}\n${resolved}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        // Fall back to writing whatever we already had — the masked key
+        // is still useful for users who only need to recognize/find their
+        // key, and the error state surfaces a small visual cue.
+        setResolveError(true);
+        await navigator.clipboard.writeText(copyText);
+      } finally {
+        setResolving(false);
+      }
+      return;
+    }
     await navigator.clipboard.writeText(copyText);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -45,7 +86,7 @@ export function TerminalBlock({
   const fontSize = size === 'lg' ? 'text-[11.5px] sm:text-[14px]' : 'text-[10.5px] sm:text-[12.5px]';
 
   // Multi-line layout: COPY at bottom-right corner, lines wrap freely.
-  const isMulti = extra !== undefined || loading;
+  const isMulti = visibleExtra !== undefined || loading;
 
   const copyBtn = (
     <button
@@ -61,7 +102,7 @@ export function TerminalBlock({
         'transition-all flex-shrink-0'
       }
     >
-      {copied ? '已复制' : 'COPY'}
+      {resolving ? '…' : copied ? '已复制' : resolveError ? '重试' : 'COPY'}
     </button>
   );
 
@@ -80,8 +121,8 @@ export function TerminalBlock({
           正在为你生成 default key…
         </div>
       ) : (
-        extra && (
-          <div className={`mt-1.5 ${lineWrap} text-[#FFF8F0]`}>{extra}</div>
+        visibleExtra && (
+          <div className={`mt-1.5 ${lineWrap} text-[#FFF8F0]`}>{visibleExtra}</div>
         )
       )}
       <div className="mt-2.5 flex justify-end">{copyBtn}</div>

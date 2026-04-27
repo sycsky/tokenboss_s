@@ -212,13 +212,13 @@ export const revealKeyHandler = async (
       username: newapiUsername(auth.userId),
       password: auth.user.newapiPassword as string,
     });
-    // Ownership check — reveal must not leak keys across users even though
-    // the login session is scoped to the caller (defense in depth against a
-    // mis-routed path param).
-    const tokens = await newapi.listUserTokens(session);
-    if (!tokens.some((t) => t.id === tokenId)) {
-      return jsonError(404, "not_found", "Key does not exist.");
-    }
+    // No second listUserTokens ownership check: the session cookie above
+    // is scoped to this user, and newapi's reveal endpoint enforces that
+    // the token belongs to the authenticated session — it returns
+    // 403/404 for tokens owned by another user. The previous extra list
+    // call was defense-in-depth that doubled our newapi roundtrips on
+    // every reveal; on a rate-limited upstream this was the dominant
+    // source of 429s during /console mounts.
     const key = await newapi.revealToken(session, tokenId);
     return jsonResponse(200, { keyId: tokenId, key });
   } catch (err) {

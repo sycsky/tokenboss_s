@@ -97,12 +97,6 @@ export default function Dashboard() {
   const [keysError, setKeysError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Plaintext default-key value for the inline spell (right aside).
-  // Refreshed whenever `keys` changes; revealed via /v1/keys/{id}/reveal
-  // so the user can re-copy the full spell on a new machine without
-  // hunting for a separate dialog.
-  const [defaultKeyPlain, setDefaultKeyPlain] = useState<string | null>(null);
-
   async function reloadKeys() {
     try {
       const r = await api.listKeys();
@@ -112,27 +106,6 @@ export default function Dashboard() {
       setKeysError((e as Error).message);
     }
   }
-
-  useEffect(() => {
-    if (keys.length === 0) {
-      setDefaultKeyPlain(null);
-      return;
-    }
-    const target = keys.find((k) => k.label === 'default') ?? keys[0];
-    let cancelled = false;
-    api
-      .revealKey(target.keyId)
-      .then((r) => {
-        if (!cancelled) setDefaultKeyPlain(r.key);
-      })
-      .catch(() => {
-        // Silent — the masked key list below still gives the user a way
-        // to find / copy their key from the management view.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [keys]);
 
   useEffect(() => {
     Promise.all([
@@ -197,6 +170,21 @@ export default function Dashboard() {
   // card below. Only render the bucket-list section when there's
   // something the hero can't already say.
   const showBucketList = buckets.some((b) => b.skuType !== 'trial') || buckets.length > 1;
+
+  // Default-key target for the inline spell. We pass a lazy resolver to
+  // TerminalBlock instead of pre-revealing on mount — newapi rate-limits
+  // and most /console visits don't actually need the plaintext key.
+  // The masked key from listKeys is shown until the user clicks COPY,
+  // at which point the resolver runs and the plaintext both lands in
+  // the clipboard and replaces the visible masked value.
+  const defaultKey = keys.find((k) => k.label === 'default') ?? keys[0];
+  const maskedExtra = defaultKey ? `TOKENBOSS_API_KEY=${defaultKey.key}` : undefined;
+  const extraResolver = defaultKey
+    ? async () => {
+        const { key } = await api.revealKey(defaultKey.keyId);
+        return `TOKENBOSS_API_KEY=${key}`;
+      }
+    : undefined;
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
   // routes through here in v1 since there's no self-checkout yet.
@@ -451,8 +439,9 @@ export default function Dashboard() {
                 bundle from one COPY. */}
             <TerminalBlock
               cmd="set up tokenboss.com/skill.md"
-              extra={defaultKeyPlain ? `TOKENBOSS_API_KEY=${defaultKeyPlain}` : undefined}
-              loading={keys.length > 0 && !defaultKeyPlain}
+              extra={maskedExtra}
+              extraResolver={extraResolver}
+              loading={keys.length === 0 && !keysError}
               prompt={
                 <>
                   <span aria-hidden="true" className="mr-1.5">↓</span>
