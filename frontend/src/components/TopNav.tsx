@@ -69,18 +69,33 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
  * Tilted logo plate · Slock-pixel signature: filled accent fill, 2px hard
  * border, 2px hard offset shadow, slight rotation. Hovers to upright.
  */
-export function BrandPlate({ dark = false }: { dark?: boolean }) {
+export function BrandPlate({
+  dark = false,
+  noLink = false,
+}: {
+  dark?: boolean;
+  /** Render without the `<Link to="/">` wrapper. Use on onboarding /
+   * funnel screens where bouncing back to Landing would orphan the
+   * user mid-flow. */
+  noLink?: boolean;
+}) {
   const border = dark ? 'border-white' : 'border-ink';
   const shadow = dark
     ? 'shadow-[2px_2px_0_0_#FFFFFF]'
     : 'shadow-[2px_2px_0_0_#1C1917]';
+  const plate = (
+    <div
+      className={`inline-block bg-accent text-white font-extrabold text-[14px] tracking-tight px-3 py-1.5 rounded-[5px] border-2 ${border} ${shadow} -rotate-[2.5deg] hover:rotate-0 transition-transform`}
+    >
+      TokenBoss
+    </div>
+  );
+  if (noLink) {
+    return <span className="flex-shrink-0 inline-block">{plate}</span>;
+  }
   return (
     <Link to="/" className="flex-shrink-0 inline-block">
-      <div
-        className={`inline-block bg-accent text-white font-extrabold text-[14px] tracking-tight px-3 py-1.5 rounded-[5px] border-2 ${border} ${shadow} -rotate-[2.5deg] hover:rotate-0 transition-transform`}
-      >
-        TokenBoss
-      </div>
+      {plate}
     </Link>
   );
 }

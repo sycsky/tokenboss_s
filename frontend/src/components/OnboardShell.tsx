@@ -32,7 +32,9 @@ export function OnboardShell({
   return (
     <div className="min-h-screen bg-bg flex flex-col items-center px-5 pt-12 pb-10">
       <div className="mb-7">
-        <BrandPlate />
+        {/* No link wrapper — clicking back to Landing would orphan the
+            user mid-onboarding with no easy way to return. */}
+        <BrandPlate noLink />
       </div>
       <div className={`w-full ${max}`}>
         <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] mb-3 flex items-center gap-2.5">
