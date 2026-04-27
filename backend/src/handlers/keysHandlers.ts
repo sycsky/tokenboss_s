@@ -18,9 +18,15 @@ import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyResultV2,
 } from "aws-lambda";
+import { createHash } from "node:crypto";
 
 import { isAuthFailure, verifySessionHeader, type AuthContext } from "../lib/auth.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
+import { putApiKeyIndex, deleteApiKeyIndex } from "../lib/store.js";
+
+function sha256Hex(input: string): string {
+  return createHash("sha256").update(input).digest("hex");
+}
 
 function jsonResponse(
   statusCode: number,
@@ -176,6 +182,24 @@ export const createKeyHandler = async (
       name: label,
       unlimited_quota: true,
     });
+    // Index the raw key's hash so chatProxyCore can resolve sk-xxx → userId
+    // without storing the plaintext or hitting newapi on every request.
+    try {
+      putApiKeyIndex({
+        userId: auth.userId,
+        newapiTokenId: tokenId,
+        keyHash: sha256Hex(apiKey),
+      });
+    } catch (indexErr) {
+      // Don't block key creation if the index write fails — the user gets
+      // the key, but direct sk-xxx callers may not get free-tier rewriting
+      // until backfill picks it up. Log loudly so we notice.
+      console.error("[keys] api_key_index write failed", {
+        userId: auth.userId,
+        tokenId,
+        err: (indexErr as Error).message,
+      });
+    }
     // Return the FULL key exactly once — the list view masks it from then on.
     return jsonResponse(201, {
       keyId: tokenId,
@@ -260,6 +284,7 @@ export const deleteKeyHandler = async (
       return jsonError(404, "not_found", "Key does not exist.");
     }
     await newapi.deleteToken(tokenId);
+    deleteApiKeyIndex(auth.userId, tokenId);
     return jsonResponse(200, { ok: true, keyId: tokenId });
   } catch (err) {
     return handleNewapiError(err);

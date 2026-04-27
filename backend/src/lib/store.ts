@@ -38,7 +38,17 @@ export interface UserRecord {
    * `/v1/keys`. Never shown to the client.
    */
   newapiPassword?: string;
+  /** Subscription tier; 'free' for trial users, plan name for paid. */
+  plan?: UserPlan;
+  /** ISO timestamp the current subscription started; null for free. */
+  subscriptionStartedAt?: string;
+  /** ISO timestamp the current subscription expires; null for free. */
+  subscriptionExpiresAt?: string;
+  /** Daily $ allowance reset at 00:00; null for free (one-shot $10 grant). */
+  dailyQuotaUsd?: number;
 }
+
+export type UserPlan = "free" | "plus" | "super" | "ultra";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 export type PaymentChannel = "epusdt" | "xunhupay";
@@ -97,15 +107,19 @@ export function init(): void {
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
-      userId         TEXT PRIMARY KEY,
-      displayName    TEXT,
-      email          TEXT,
-      phone          TEXT,
-      passwordHash   TEXT,
-      createdAt      TEXT NOT NULL,
-      emailVerified  INTEGER NOT NULL DEFAULT 0,
-      newapiUserId   INTEGER,
-      newapiPassword TEXT
+      userId                 TEXT PRIMARY KEY,
+      displayName            TEXT,
+      email                  TEXT,
+      phone                  TEXT,
+      passwordHash           TEXT,
+      createdAt              TEXT NOT NULL,
+      emailVerified          INTEGER NOT NULL DEFAULT 0,
+      newapiUserId           INTEGER,
+      newapiPassword         TEXT,
+      plan                   TEXT,
+      subscriptionStartedAt  TEXT,
+      subscriptionExpiresAt  TEXT,
+      dailyQuotaUsd          REAL
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
@@ -124,7 +138,35 @@ export function init(): void {
     if (!have.has("emailVerified")) {
       db.exec(`ALTER TABLE users ADD COLUMN emailVerified INTEGER NOT NULL DEFAULT 0`);
     }
+    if (!have.has("plan")) {
+      db.exec(`ALTER TABLE users ADD COLUMN plan TEXT`);
+    }
+    if (!have.has("subscriptionStartedAt")) {
+      db.exec(`ALTER TABLE users ADD COLUMN subscriptionStartedAt TEXT`);
+    }
+    if (!have.has("subscriptionExpiresAt")) {
+      db.exec(`ALTER TABLE users ADD COLUMN subscriptionExpiresAt TEXT`);
+    }
+    if (!have.has("dailyQuotaUsd")) {
+      db.exec(`ALTER TABLE users ADD COLUMN dailyQuotaUsd REAL`);
+    }
+    // Default existing users to "free" so the new code paths have a value to read.
+    db.exec(`UPDATE users SET plan = 'free' WHERE plan IS NULL`);
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_key_index (
+      userId        TEXT NOT NULL,
+      newapiTokenId INTEGER NOT NULL,
+      keyHash       TEXT NOT NULL,
+      createdAt     TEXT NOT NULL,
+      PRIMARY KEY (userId, newapiTokenId)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_api_key_index_hash
+      ON api_key_index(keyHash);
+    CREATE INDEX IF NOT EXISTS idx_api_key_index_user
+      ON api_key_index(userId);
+  `);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS email_verify_tokens (
@@ -239,6 +281,10 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     emailVerified: ((row.emailVerified as number) ?? 0) === 1,
     newapiUserId: (row.newapiUserId as number) ?? undefined,
     newapiPassword: (row.newapiPassword as string) ?? undefined,
+    plan: (row.plan as UserPlan) ?? undefined,
+    subscriptionStartedAt: (row.subscriptionStartedAt as string) ?? undefined,
+    subscriptionExpiresAt: (row.subscriptionExpiresAt as string) ?? undefined,
+    dailyQuotaUsd: (row.dailyQuotaUsd as number) ?? undefined,
   };
 }
 
@@ -272,9 +318,11 @@ export async function getUser(userId: string): Promise<UserRecord | null> {
 export function putUser(rec: UserRecord): void {
   db.prepare(`
     INSERT OR REPLACE INTO users
-      (userId, displayName, email, phone, passwordHash, createdAt, emailVerified, newapiUserId, newapiPassword)
+      (userId, displayName, email, phone, passwordHash, createdAt, emailVerified,
+       newapiUserId, newapiPassword, plan, subscriptionStartedAt, subscriptionExpiresAt, dailyQuotaUsd)
     VALUES
-      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified, @newapiUserId, @newapiPassword)
+      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified,
+       @newapiUserId, @newapiPassword, @plan, @subscriptionStartedAt, @subscriptionExpiresAt, @dailyQuotaUsd)
   `).run({
     userId: rec.userId,
     displayName: rec.displayName ?? null,
@@ -285,6 +333,10 @@ export function putUser(rec: UserRecord): void {
     emailVerified: rec.emailVerified ? 1 : 0,
     newapiUserId: rec.newapiUserId ?? null,
     newapiPassword: rec.newapiPassword ?? null,
+    plan: rec.plan ?? null,
+    subscriptionStartedAt: rec.subscriptionStartedAt ?? null,
+    subscriptionExpiresAt: rec.subscriptionExpiresAt ?? null,
+    dailyQuotaUsd: rec.dailyQuotaUsd ?? null,
   });
 }
 
@@ -304,6 +356,106 @@ export async function putEmailIndex(
   // Email uniqueness is enforced by the UNIQUE index on users.email.
   // This function is kept for API compatibility but is now a no-op —
   // the email is written as part of putUser().
+}
+
+// ---------- Public API — Subscription / Plan ----------
+
+/** Patch the plan-related columns on a user row. */
+export function setUserPlan(
+  userId: string,
+  patch: {
+    plan: UserPlan;
+    subscriptionStartedAt?: string | null;
+    subscriptionExpiresAt?: string | null;
+    dailyQuotaUsd?: number | null;
+  },
+): void {
+  db.prepare(`
+    UPDATE users
+       SET plan                  = @plan,
+           subscriptionStartedAt = @subscriptionStartedAt,
+           subscriptionExpiresAt = @subscriptionExpiresAt,
+           dailyQuotaUsd         = @dailyQuotaUsd
+     WHERE userId = @userId
+  `).run({
+    userId,
+    plan: patch.plan,
+    subscriptionStartedAt: patch.subscriptionStartedAt ?? null,
+    subscriptionExpiresAt: patch.subscriptionExpiresAt ?? null,
+    dailyQuotaUsd: patch.dailyQuotaUsd ?? null,
+  });
+}
+
+/** Active paid subscribers (plan ∈ {plus, super, ultra} AND not yet expired). */
+export function getActivePaidUsers(): UserRecord[] {
+  const rows = db
+    .prepare(`
+      SELECT * FROM users
+       WHERE plan IS NOT NULL
+         AND plan != 'free'
+         AND (subscriptionExpiresAt IS NULL
+              OR datetime(subscriptionExpiresAt) > datetime('now'))
+    `)
+    .all() as Record<string, unknown>[];
+  return rows.map(rowToUser);
+}
+
+/** Paid users whose subscription has expired and need to be downgraded. */
+export function getExpiredPaidUsers(): UserRecord[] {
+  const rows = db
+    .prepare(`
+      SELECT * FROM users
+       WHERE plan IS NOT NULL
+         AND plan != 'free'
+         AND subscriptionExpiresAt IS NOT NULL
+         AND datetime(subscriptionExpiresAt) <= datetime('now')
+    `)
+    .all() as Record<string, unknown>[];
+  return rows.map(rowToUser);
+}
+
+// ---------- Public API — API Key Index ----------
+
+/**
+ * Map a newapi-issued `sk-xxx` key to its owning user. The raw key is
+ * NEVER stored — we keep `sha256(rawKey)` so chatProxyCore can reverse-
+ * lookup `userId` on incoming requests without hitting newapi.
+ */
+export function putApiKeyIndex(args: {
+  userId: string;
+  newapiTokenId: number;
+  keyHash: string;
+}): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO api_key_index
+      (userId, newapiTokenId, keyHash, createdAt)
+    VALUES
+      (@userId, @newapiTokenId, @keyHash, @createdAt)
+  `).run({
+    userId: args.userId,
+    newapiTokenId: args.newapiTokenId,
+    keyHash: args.keyHash,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Look up the userId that owns the given raw-key hash. Returns null when
+ * unknown — chatProxyCore should treat this as "anonymous direct caller"
+ * and pass-through without rewriting models.
+ */
+export function getUserIdByKeyHash(keyHash: string): string | null {
+  const row = db
+    .prepare(`SELECT userId FROM api_key_index WHERE keyHash = ?`)
+    .get(keyHash) as { userId: string } | undefined;
+  return row?.userId ?? null;
+}
+
+/** Drop the index row for a deleted token. Tolerant of missing rows. */
+export function deleteApiKeyIndex(userId: string, newapiTokenId: number): void {
+  db.prepare(
+    `DELETE FROM api_key_index WHERE userId = ? AND newapiTokenId = ?`,
+  ).run(userId, newapiTokenId);
 }
 
 // ---------- Bucket types ----------
