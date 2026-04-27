@@ -35,9 +35,7 @@ export default function Primitive() {
         </div>
 
         {/* Hero */}
-        <h1 className="font-sans text-[56px] md:text-[88px] lg:text-[112px] font-extrabold leading-[0.92] tracking-tight mb-6">
-          原语
-          <br />
+        <h1 className="font-sans text-[80px] md:text-[120px] lg:text-[140px] font-extrabold leading-[0.92] tracking-tight mb-6">
           <span className="bg-gradient-to-r from-[#34D399] via-[#5EEAD4] to-[#34D399] bg-clip-text text-transparent">
             Primitives.
           </span>

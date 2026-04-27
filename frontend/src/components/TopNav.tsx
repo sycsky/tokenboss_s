@@ -36,13 +36,12 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
     <nav className="relative px-5 sm:px-9 py-5 flex items-center justify-between max-w-[1200px] mx-auto gap-3">
       <BrandPlate dark={dark} />
 
-      {/* Center: 原语 — always visible */}
-      <Link
-        to="/primitive"
-        className={`absolute left-1/2 -translate-x-1/2 ${navLink(onPrimitive)}`}
-      >
-        原语
-      </Link>
+      {/* Center: Wallet ↔ Primitives toggle. Both always visible — clicking
+          either switches between the two product surfaces. */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-5 sm:gap-7">
+        <Link to="/" className={navLink(current === 'home')}>Wallet</Link>
+        <Link to="/primitive" className={navLink(onPrimitive)}>Primitives</Link>
+      </div>
 
       {/* Right: 套餐 + 登录/控制台 — hidden on /primitive (independent page) */}
       {!onPrimitive ? (

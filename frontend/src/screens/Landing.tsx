@@ -195,8 +195,8 @@ export default function Landing() {
             <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
             <p className="text-[13.5px] sm:text-[14px] text-ink-2 max-w-[520px] mt-4 leading-relaxed">
-              一行命令装上 → Agent 立刻用得起 Claude · GPT · Codex。<br className="hidden sm:block" />
-              <span className="text-ink-3">你专心创造，钱我来管。</span>
+              一行装好 → Agent 立刻用得起顶级模型。<br className="hidden sm:block" />
+              <span className="text-ink-3">不用挑模型，不用各处找额度，剩下交给我们。</span>
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
@@ -362,15 +362,15 @@ export default function Landing() {
             <div className="col-span-2 md:col-span-1">
               <BrandPlate dark />
               <p className="text-white/45 text-[13px] leading-relaxed max-w-xs mt-4">
-                你专心创造，钱我来管。
+                你专心创造，剩下交给我们。
               </p>
             </div>
 
             <FooterCol
               label="PRODUCT"
               links={[
-                { text: '钱包', to: '/' },
-                { text: '原语', to: '/primitive' },
+                { text: 'Wallet', to: '/' },
+                { text: 'Primitives', to: '/primitive' },
               ]}
             />
             <FooterCol
