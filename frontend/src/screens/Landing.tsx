@@ -3,13 +3,13 @@ import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
-import { TopNav } from '../components/TopNav';
+import { TopNav, BrandPlate } from '../components/TopNav';
 import { useAuth } from '../lib/auth';
 import openClawIcon from '../assets/agents/openclaw.svg';
-import openAiIcon from '../assets/agents/openai.svg';
 import hermesIcon from '../assets/agents/hermes.png';
-import anthropicIcon from '../assets/agents/anthropic.svg';
 
+// Compat row: only true Agent products (not coding CLIs). Codex / Claude
+// Code are dev-environments, not agents — keeping the row honest.
 const AGENTS: AgentMark[] = [
   {
     id: 'oc',
@@ -18,22 +18,10 @@ const AGENTS: AgentMark[] = [
     icon: <img src={openClawIcon} alt="" className="w-full h-full" style={{ imageRendering: 'pixelated' }} />,
   },
   {
-    id: 'cx',
-    name: 'Codex',
-    className: 'bg-ink p-1.5',
-    icon: <img src={openAiIcon} alt="" className="w-full h-full" />,
-  },
-  {
     id: 'hm',
     name: 'Hermes Agent',
     className: 'bg-white p-0',
     icon: <img src={hermesIcon} alt="" className="w-full h-full object-cover rounded-lg" />,
-  },
-  {
-    id: 'cc',
-    name: 'Claude Code',
-    className: 'bg-transparent p-0',
-    icon: <img src={anthropicIcon} alt="" className="w-full h-full rounded-lg" />,
   },
 ];
 
@@ -124,12 +112,15 @@ function FooterCol({ label, links }: { label: string; links: FooterLink[] }) {
 function HeroTerminalDemo() {
   return (
     <div className="font-mono text-[13px] leading-relaxed bg-[#1C1917] rounded-2xl border border-[#3A332D] shadow-[0_30px_60px_-30px_rgba(60,40,20,0.45),0_8px_24px_-10px_rgba(60,40,20,0.25)] overflow-hidden select-none">
-      {/* chrome */}
+      {/* chrome — alternates between HERMES AGENT and OPENCLAW every 6s */}
       <div className="px-4 py-2.5 bg-[#0F0D0B] border-b border-[#3A332D] flex items-center gap-1.5">
         <span className="w-2.5 h-2.5 rounded-full bg-[#FB7185]"></span>
         <span className="w-2.5 h-2.5 rounded-full bg-[#FBBF24]"></span>
         <span className="w-2.5 h-2.5 rounded-full bg-[#34D399]"></span>
-        <span className="ml-3 font-mono text-[10px] text-[#A89A8D] tracking-[0.16em] uppercase">claude-code · agent</span>
+        <span className="ml-3 font-mono text-[10px] text-[#A89A8D] tracking-[0.16em] uppercase relative inline-block min-w-[160px]">
+          <span className="td-header td-header-hermes">hermes agent</span>
+          <span className="td-header td-header-openclaw absolute left-0 top-0">openclaw</span>
+        </span>
       </div>
 
       {/* body */}
@@ -190,7 +181,7 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="max-w-[1200px] mx-auto px-6 md:px-14 pt-12 md:pt-20 pb-10 md:pb-12">
-        <CompatRow label="适配你喜欢的 Agent" agents={AGENTS} className="mb-7" />
+        <CompatRow label="你已经在用的 Agent · 开箱接管" agents={AGENTS} className="mb-7" />
 
         {/* 2-col on lg+, single col stacked on mobile */}
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] gap-x-12 gap-y-10 items-start">
@@ -203,9 +194,9 @@ export default function Landing() {
 
             <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
-            <p className="font-mono text-[11px] sm:text-xs text-ink-3 max-w-[520px] mt-3 leading-relaxed">
-              在 <span className="text-ink-2 font-semibold">OpenClaw / Codex / Hermes / Claude Code</span> 终端粘贴一行 ·
-              ¥ 人民币付款 · $ 美金额度计费
+            <p className="text-[13.5px] sm:text-[14px] text-ink-2 max-w-[520px] mt-4 leading-relaxed">
+              一行命令装上 → Agent 立刻用得起 Claude · GPT · Codex。<br className="hidden sm:block" />
+              <span className="text-ink-3">你专心创造，钱我来管。</span>
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
@@ -237,7 +228,7 @@ export default function Landing() {
       <section className="bg-accent text-white border-y-2 border-ink">
         <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-16 md:py-20 text-center">
           <h2 className="font-sans text-[26px] md:text-[40px] lg:text-[44px] font-extrabold leading-[1.15] tracking-tight">
-            "一份钱包<span className="opacity-50">·</span>所有 Agent<span className="opacity-50">·</span>所有顶级模型。"
+            你专心创造<span className="opacity-55">,</span> 模型的事我们想好了。
           </h2>
         </div>
       </section>
@@ -252,21 +243,21 @@ export default function Landing() {
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
           <FeatureCard
-            tag="01 · 双币计费"
-            title="¥ 付款，$ 算账"
-            body="国内人民币付款，按上游官方美金价透明计费 — 不溢价、不截断、不绑卡。"
+            tag="01"
+            title="开局立刻用得起好模型"
+            body="$10 免费额度直接到账。Claude Opus / GPT-5 / Codex 顶级模型随便调，不用懂 API key。"
             accentBg="bg-[#FFF4E6]"
           />
           <FeatureCard
-            tag="02 · 一钱包多 Agent"
-            title="装一次，处处通"
-            body="OpenClaw / Codex / Hermes / Claude Code 共用一份额度。换 Agent 不用换钱包。"
+            tag="02"
+            title="换 Agent 不用换钱包"
+            body="今天 Hermes 写文案，明天 OpenClaw 跑研究 — 用同一份额度。换工具不重新开通。"
             accentBg="bg-[#F0EBE3]"
           />
           <FeatureCard
-            tag="03 · 一行装"
-            title="skill.md 零配置"
-            body="在你的 Agent 终端粘贴 set up tokenboss.com/skill.md ─ 24 h 试用直接到账。"
+            tag="03"
+            title="Agent 自己接好"
+            body="在终端粘贴一行 → Agent 自己读 skill.md、自己接好 → 你专心创造，钱我来管。"
             accentBg="bg-[#EAF1ED]"
           />
         </div>
@@ -366,48 +357,31 @@ export default function Landing() {
       {/* Footer · dark Slock-style */}
       <footer className="bg-ink text-white/60">
         <div className="max-w-[1200px] mx-auto px-6 md:px-14 py-14 md:py-16">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-10 mb-10">
-            {/* Brand col */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 md:gap-12 mb-10">
+            {/* Brand col — uses the same tilted plate as the top nav */}
             <div className="col-span-2 md:col-span-1">
-              <div className="flex items-center gap-2.5 mb-3">
-                <div className="w-7 h-7 bg-accent rounded-md flex items-center justify-center text-white font-mono text-[10px] font-bold">TB</div>
-                <span className="text-white font-bold text-[15px]">TokenBoss</span>
-              </div>
-              <p className="text-white/40 text-[12.5px] leading-relaxed max-w-xs">
-                你的 Agent 钱包 ─ 一份额度，所有 Agent 通用。
+              <BrandPlate dark />
+              <p className="text-white/45 text-[13px] leading-relaxed max-w-xs mt-4">
+                你专心创造，钱我来管。
               </p>
             </div>
 
             <FooterCol
               label="PRODUCT"
               links={[
-                { text: '套餐', href: '/#pricing' },
+                { text: '钱包', to: '/' },
                 { text: '原语', to: '/primitive' },
-                { text: '完整定价', to: '/pricing' },
               ]}
             />
             <FooterCol
               label="DEVELOPERS"
               links={[
-                { text: 'skill.md', href: 'https://tokenboss.com/skill.md' },
                 { text: '快速接入', to: '/install/manual' },
               ]}
             />
-            <FooterCol
-              label="ACCOUNT"
-              links={
-                isLoggedIn
-                  ? [{ text: '控制台', to: '/dashboard' }]
-                  : [
-                      { text: '登录', to: '/login' },
-                      { text: '免费开始', to: '/register' },
-                    ]
-              }
-            />
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-white/10 font-mono text-[10.5px] text-white/35">
-            <span>© 2026 TokenBoss · All rights reserved.</span>
-            <span>Made with care for AI agents.</span>
+          <div className="pt-6 border-t border-white/10 font-mono text-[10.5px] text-white/35">
+            © 2026 TokenBoss · All rights reserved.
           </div>
         </div>
       </footer>
@@ -463,6 +437,16 @@ export default function Landing() {
         .td-cursor-blink { animation: td-cursor-blink 1s steps(2, end) infinite; }
         @media (prefers-reduced-motion: reduce) {
           .td-typing, .td-cursor, .td-line, .td-cursor-blink { animation: none !important; opacity: 1 !important; width: 100% !important; }
+        }
+        /* Terminal header swap — 12s loop, hermes 0-6s, openclaw 6-12s. */
+        @keyframes td-header-hermes   { 0%, 49.99% { opacity: 1; } 50%, 100% { opacity: 0; } }
+        @keyframes td-header-openclaw { 0%, 49.99% { opacity: 0; } 50%, 100% { opacity: 1; } }
+        .td-header           { animation-duration: 12s; animation-iteration-count: infinite; animation-timing-function: steps(1, end); }
+        .td-header-hermes    { animation-name: td-header-hermes; }
+        .td-header-openclaw  { animation-name: td-header-openclaw; opacity: 0; }
+        @media (prefers-reduced-motion: reduce) {
+          .td-header { animation: none !important; }
+          .td-header-openclaw { opacity: 0 !important; }
         }
       `}</style>
     </div>

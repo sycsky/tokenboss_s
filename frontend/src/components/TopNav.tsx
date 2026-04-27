@@ -29,22 +29,35 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
   const navLink = (active: boolean) =>
     `text-[13px] font-medium transition-colors ${active ? linkActive : linkInactive}`;
 
+  // On /primitive (an independent page) we hide the home-related side links.
+  const onPrimitive = current === 'primitive';
+
   return (
-    <nav className="px-5 sm:px-9 py-5 flex items-center justify-between max-w-[1200px] mx-auto gap-3 sm:gap-5">
+    <nav className="relative px-5 sm:px-9 py-5 flex items-center justify-between max-w-[1200px] mx-auto gap-3">
       <BrandPlate dark={dark} />
 
-      <div className="flex items-center gap-4 sm:gap-6">
-        <a href="/#pricing" className={navLink(false)}>套餐</a>
-        <Link to="/primitive" className={navLink(current === 'primitive')}>原语</Link>
-        {isLoggedIn ? (
-          <Link to="/dashboard" className={navLink(false)}>控制台</Link>
-        ) : (
-          <>
+      {/* Center: 原语 — always visible */}
+      <Link
+        to="/primitive"
+        className={`absolute left-1/2 -translate-x-1/2 ${navLink(onPrimitive)}`}
+      >
+        原语
+      </Link>
+
+      {/* Right: 套餐 + 登录/控制台 — hidden on /primitive (independent page) */}
+      {!onPrimitive ? (
+        <div className="flex items-center gap-5 sm:gap-7">
+          <a href="/#pricing" className={navLink(false)}>套餐</a>
+          {isLoggedIn ? (
+            <Link to="/dashboard" className={navLink(false)}>控制台</Link>
+          ) : (
             <Link to="/login" className={navLink(false)}>登录</Link>
-            <Link to="/register" className={navLink(false)}>注册</Link>
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      ) : (
+        // Spacer keeps logo on the left when right side is empty.
+        <div className="w-px" />
+      )}
     </nav>
   );
 }
