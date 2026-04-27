@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, type ProxyKeySummary } from '../lib/api';
 
+/**
+ * Slock-pixel list of the user's TokenBoss proxy keys (`tb_live_...`). Each
+ * key sits in its own bordered card; the "+ 创建新 Key" affordance is a
+ * dashed-border slot at the bottom that depresses on hover/active so it
+ * feels like the rest of the system.
+ */
 export function APIKeyList() {
   const [keys, setKeys] = useState<ProxyKeySummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,49 +45,60 @@ export function APIKeyList() {
     if (!confirm('吊销后该 key 立即失效，且无法恢复。确认吗？')) return;
     try {
       await api.deleteKey(keyId);
-      setKeys(keys.filter(k => k.keyId !== keyId));
+      setKeys(keys.filter((k) => k.keyId !== keyId));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : `吊销失败: ${(e as Error).message}`);
     }
   }
 
-  if (loading) return <div className="text-ink-3 text-sm">加载中…</div>;
-  if (error) return <div className="text-sm text-red-500">{error}</div>;
+  if (loading) return <div className="text-[#A89A8D] text-sm">加载中…</div>;
+  if (error) return <div className="text-[13px] text-red-ink font-medium">{error}</div>;
 
   return (
-    <div className="space-y-2">
-      {keys.map(k => (
-        <div key={k.keyId} className="bg-surface border border-border rounded-lg p-3">
+    <div className="space-y-2.5">
+      {keys.map((k) => (
+        <div
+          key={k.keyId}
+          className="bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] p-3"
+        >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[12.5px] font-bold flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${k.disabled ? 'bg-red-400' : 'bg-green-400'}`} />
+            <span className="text-[12.5px] font-bold text-ink flex items-center gap-1.5">
+              <span
+                className={`w-2 h-2 border-2 border-ink rounded-full ${k.disabled ? 'bg-red-ink' : 'bg-[#16A34A]'}`}
+              />
               {k.label || 'default'}
             </span>
-            {!k.disabled && (
+            {!k.disabled ? (
               <button
                 onClick={() => handleRevoke(k.keyId)}
-                className="font-mono text-[10px] px-1.5 py-0.5 border border-border rounded text-ink-2 hover:text-red-500 hover:border-red-400"
+                className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-ink rounded text-ink hover:bg-red-soft hover:text-red-ink transition-colors"
               >
                 吊销
               </button>
-            )}
-            {k.disabled && (
-              <span className="font-mono text-[10px] px-1.5 py-0.5 border border-border rounded text-ink-3">
+            ) : (
+              <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
                 已吊销
               </span>
             )}
           </div>
-          <div className="font-mono text-[11px] text-ink-2 bg-surface-2 px-2 py-1.5 rounded border border-border truncate">
+          <div className="font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate">
             {k.key}
           </div>
-          <div className="font-mono text-[10px] text-ink-3 mt-1.5">
+          <div className="font-mono text-[10px] text-[#A89A8D] mt-1.5">
             创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')}
           </div>
         </div>
       ))}
       <button
         onClick={handleCreate}
-        className="w-full p-2.5 bg-surface border border-dashed border-border-2 rounded-lg text-[12px] font-semibold text-ink-2"
+        className={
+          'w-full px-4 py-2.5 bg-white border-2 border-dashed border-ink rounded-md ' +
+          'text-[12.5px] font-bold tracking-tight text-ink ' +
+          'shadow-[3px_3px_0_0_#1C1917] ' +
+          'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+          'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+          'transition-all'
+        }
       >
         + 创建新 Key
       </button>
