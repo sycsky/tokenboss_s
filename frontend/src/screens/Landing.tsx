@@ -187,7 +187,7 @@ export default function Landing() {
             <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
             <p className="text-[13.5px] sm:text-[14px] text-ink-2 max-w-[520px] mt-4 leading-relaxed">
-              一行装好 → 顶级模型立刻可用 · 多 Agent 共用一份额度 · ¥ 付，按 $ 算。
+              一行装好 → 顶级模型立刻可用 · 多 Agent 共用一份额度。
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
