@@ -59,16 +59,17 @@ always use semantic class names.
 | `bg-accent-soft` | `#FEE9DC` | Tag pills, leverage chips. |
 | `bg-accent-light` | `#FFF4EE` | Soft tinted card bg (Feature Card 01). |
 
-### Dark theme (used by `/primitive`)
+### Dark surfaces (used inside otherwise light pages)
 
 | Token | Hex | Use |
 |---|---|---|
-| `bg-ink` | `#1C1917` | Primary dark surface (Primitive page, footer). |
-| `bg-[#0A0807]` | `#0A0807` | Even-darker surface (terminal demo bg). |
-| `bg-[#1C1917]` | (same as ink) | Terminal panel inner bg. |
-| `bg-white/5..10` | white at low alpha | Glass-style chips on dark. |
-| Emerald `#34D399` | (Tailwind) | Primitive page accent — neon dot, PRIMITIVES chip, gradient text. Use **only** on /primitive. Never on Wallet pages. |
-| Cyan `#5EEAD4` | (Tailwind) | Gradient pair with emerald (PRODUCTIVE., Primitives.). |
+| `bg-ink` | `#1C1917` | Footer, ink-fill table headers, terminal-style chips, ink-stamp Page buttons. |
+| `bg-[#0A0807]` | `#0A0807` | Hero terminal demo inner bg (the only sub-surface that goes deeper than ink). |
+| `bg-white/5..10` | white at low alpha | Glass-style chips inside dark sub-surfaces (e.g. terminal demo header). |
+
+Dark theme as a *whole-page mode* is retired (see § 10). Emerald
+`#34D399` and Cyan `#5EEAD4` are deprecated brand tokens — do not use
+in new work.
 
 ---
 
@@ -325,24 +326,30 @@ Always `transition-all` (default duration 150ms).
 
 ---
 
-## 10 · Dark variant (`/primitive`)
+## 10 · Theme unification
 
-The Primitives page is the **only** dark page in v1. Its visual
-language differs from the rest of the site by design — it signals
-"this is the future / coming soon" zone.
+As of 2026-04-27 the entire site runs on the **same light Slock-pixel
+theme**. The earlier dark variant on `/primitive` (emerald + cyan
+gradient over `#0A0807`) was retired — it had been signaling "this is
+the future / coming soon" via theme inversion, but with v1 shipping
+the v2 roadmap as concrete copy ("钱包·路由·共享额度（v1）+ 原子化
+能力（v2）"), the inversion stopped earning its complexity. One brand,
+one chrome, one set of tokens across every page.
 
-| Aspect | Light (Wallet) | Dark (Primitive) |
-|---|---|---|
-| Bg | `bg-bg` `#F7F3EE` | `bg-[#0A0807]` |
-| Text | `text-ink` | `text-white` |
-| Accent | `bg-accent` (terracotta) | Emerald `#34D399` + cyan `#5EEAD4` gradient |
-| Background pattern | None | Dotted radial grid `opacity-[0.18]` |
-| Brand mark border | ink | white |
-| Nav active pill | ink/bg | white/ink |
-| Status indicator | — | pulsing emerald dot |
+The `<TopNav theme="dark" />` prop still exists as an escape hatch but
+no shipping page uses it.
 
-Don't introduce emerald/cyan on Wallet pages, and don't introduce
-terracotta-as-accent (vs as-CTA-fill) on Primitives pages.
+For "novel / coming-soon" weight, lean on:
+- The status palette stamp pills (`lime-stamp` for active/positive,
+  `yellow-stamp` for v1.0/attention)
+- The pulsing dot animation on a `lime-stamp` indicator
+- Bold contrast like the two-equation comparison on `/primitive`
+  (the muted "today" card vs. the hard-offset "with us" card)
+
+Don't reintroduce emerald/cyan as primary brand color anywhere — they
+predate the status palette and are deprecated. Use accent + ink for
+brand, status palette for stamps, lime-stamp for "Productive" /
+"Verified" / "Active" outcome words.
 
 ---
 
