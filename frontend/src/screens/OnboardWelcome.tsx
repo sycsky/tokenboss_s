@@ -12,24 +12,27 @@ export default function OnboardWelcome() {
   return (
     <OnboardShell
       step="01"
-      cnLabel="接入方式"
-      enLabel="Pick your path"
-      title="怎么接入？"
-      subtitle="告诉我们你的使用场景，给你最合适的引导。"
+      cnLabel="接入"
+      enLabel="Get connected"
+      title="你是 Agent，还是人类？"
+      subtitle="一分钟接好。挑一个最顺手的入口。"
     >
       <div className="space-y-4">
         <ChoiceCard
           variant="recommended"
           tag="推荐 · RECOMMENDED"
-          title="我是 Agent 用户"
-          desc="在 OpenClaw / Hermes / Claude Code 终端粘贴一行咒语，30 秒搞定。"
+          title="我是 Agent"
+          en="I'M AN AGENT"
+          desc="把 tokenboss.com/skill.md 发给我，我会自己读完，30 秒接好。"
+          footnote="已支持 OpenClaw · Hermes Agent · Claude Code"
           onClick={() => nav('/onboard/install')}
         />
         <ChoiceCard
           variant="alt"
           tag="手动 · ADVANCED"
-          title="我自己配置"
-          desc="看详细步骤，手动配 API key + base_url。"
+          title="我是人类"
+          en="I'M A HUMAN"
+          desc="3 步装好：拿 API key、配 base_url、跑一次测试。"
           onClick={() => nav('/install/manual')}
         />
       </div>
@@ -41,15 +44,19 @@ interface ChoiceCardProps {
   variant: 'recommended' | 'alt';
   tag: string;
   title: string;
+  en: string;
   desc: string;
+  footnote?: string;
   onClick: () => void;
 }
 
-function ChoiceCard({ variant, tag, title, desc, onClick }: ChoiceCardProps) {
+function ChoiceCard({ variant, tag, title, en, desc, footnote, onClick }: ChoiceCardProps) {
   const isReco = variant === 'recommended';
   const fill = isReco ? 'bg-accent text-white' : 'bg-white text-ink';
   const tagColor = isReco ? 'text-white/70' : 'text-[#A89A8D]';
+  const enColor = isReco ? 'text-white/55' : 'text-[#A89A8D]';
   const descColor = isReco ? 'text-white/85' : 'text-[#6B5E52]';
+  const footColor = isReco ? 'text-white/65' : 'text-[#A89A8D]';
 
   return (
     <button
@@ -66,9 +73,15 @@ function ChoiceCard({ variant, tag, title, desc, onClick }: ChoiceCardProps) {
         {tag}
       </div>
       <div className="flex items-baseline justify-between gap-3">
-        <div className="flex-1">
-          <div className="text-[22px] font-bold tracking-tight mb-1">{title}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap mb-1">
+            <span className="text-[22px] font-bold tracking-tight">{title}</span>
+            <span className={`font-mono text-[10px] font-bold tracking-[0.18em] ${enColor}`}>{en}</span>
+          </div>
           <div className={`text-[13.5px] leading-relaxed ${descColor}`}>{desc}</div>
+          {footnote && (
+            <div className={`font-mono text-[11px] tracking-tight mt-2 ${footColor}`}>{footnote}</div>
+          )}
         </div>
         <span aria-hidden="true" className="text-[24px] font-bold leading-none flex-shrink-0">→</span>
       </div>
