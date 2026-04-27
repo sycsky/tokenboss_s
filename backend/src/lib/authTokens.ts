@@ -36,8 +36,8 @@ const SCRYPT_SALT_BYTES = 16;
 
 /** Return a serialized scrypt hash: `scrypt$<saltHex>$<hashHex>`. */
 export async function hashPassword(plain: string): Promise<string> {
-  if (!plain || plain.length < 6) {
-    throw new Error("Password must be at least 6 characters.");
+  if (!plain || plain.length < 8) {
+    throw new Error("Password must be at least 8 characters.");
   }
   const salt = randomBytes(SCRYPT_SALT_BYTES);
   const derived = await scrypt(plain, salt, SCRYPT_KEYLEN);

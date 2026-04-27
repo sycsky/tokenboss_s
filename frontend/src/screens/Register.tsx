@@ -21,7 +21,6 @@ import {
 export default function Register() {
   const nav = useNavigate();
   const { register, resendVerification } = useAuth();
-  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,19 +30,15 @@ export default function Register() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 6) {
-      setError('密码至少需要 6 位');
+    if (password.length < 8) {
+      setError('密码至少需要 8 位');
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      await register({
-        email: normalizedEmail,
-        password,
-        displayName: displayName.trim() || undefined,
-      });
+      await register({ email: normalizedEmail, password });
       setRegisteredEmail(normalizedEmail);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === 'email_taken') {
@@ -114,7 +109,7 @@ export default function Register() {
   }
 
   return (
-    <AuthShell caption={<span>注册即送 $10 试用额度 · 24 小时有效</span>}>
+    <AuthShell>
       <h1 className="text-[24px] font-bold text-ink tracking-tight mb-1.5">
         创建账户
       </h1>
@@ -124,24 +119,12 @@ export default function Register() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="reg-name" className={authLabelCls}>名字</label>
-          <input
-            id="reg-name"
-            type="text"
-            placeholder="可填昵称，方便控制台称呼你"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className={authInputCls}
-            maxLength={40}
-          />
-        </div>
-
-        <div>
           <label htmlFor="reg-email" className={authLabelCls}>邮箱</label>
           <input
             id="reg-email"
             type="email"
             required
+            autoFocus
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -156,20 +139,20 @@ export default function Register() {
             type="password"
             required
             autoComplete="new-password"
-            placeholder="至少 6 位"
+            placeholder="至少 8 位"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className={authInputCls}
-            minLength={6}
+            minLength={8}
           />
         </div>
 
         <button
           type="submit"
-          disabled={loading || !email || password.length < 6}
+          disabled={loading || !email || password.length < 8}
           className={slockBtn('primary') + ' w-full mt-2'}
         >
-          {loading ? '创建中…' : '创建账户 · 立刻送 $10'}
+          {loading ? '创建中…' : '创建账户'}
         </button>
 
         {error && (

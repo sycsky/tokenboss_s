@@ -80,7 +80,7 @@ export default function Login() {
             type="password"
             required
             autoComplete="current-password"
-            placeholder="至少 6 位"
+            placeholder="至少 8 位"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className={authInputCls}

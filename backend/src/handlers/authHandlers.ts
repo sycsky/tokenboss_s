@@ -179,11 +179,11 @@ export const registerHandler = async (
   if (!EMAIL_RE.test(email)) {
     return jsonError(400, "invalid_request_error", "Invalid email address.");
   }
-  if (password.length < 6) {
+  if (password.length < 8) {
     return jsonError(
       400,
       "invalid_request_error",
-      "Password must be at least 6 characters.",
+      "Password must be at least 8 characters.",
     );
   }
 
@@ -222,10 +222,14 @@ export const registerHandler = async (
     const newapiUsername = userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
     const newapiPassword = randomBytes(12).toString("base64url");
     try {
+      // newapi enforces a max length on display_name, so fall back to
+      // the newapi username (≤ 20 chars) when the user didn't supply
+      // their own. Using the full email here breaks for any address
+      // longer than newapi's DisplayName cap.
       const provisioned = await newapi.provisionUser({
         username: newapiUsername,
         password: newapiPassword,
-        display_name: displayName ?? email,
+        display_name: displayName ?? newapiUsername,
         email,
         quota: getSignupQuota(),
       });
