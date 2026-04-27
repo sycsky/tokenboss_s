@@ -1,33 +1,14 @@
 /**
- * TokenBoss Fork Mode
+ * TokenBoss Mode
  *
- * This module enables ClawRouter to route requests through a TokenBoss
- * backend instead of BlockRun. Activated when both TOKENBOSS_API_URL and
- * TOKENBOSS_API_KEY environment variables are set.
- *
- * In TokenBoss mode:
- *   - Upstream requests target TOKENBOSS_API_URL (e.g. https://api.tokenboss.co)
- *   - Each request gets `Authorization: Bearer <TOKENBOSS_API_KEY>` injected
- *   - The x402 payment flow and wallet generation are bypassed entirely
- *   - All routing, compression, caching, and slash-command logic still runs
- *
- * This is a minimal intervention — the x402 code path is left intact so
- * ClawRouter still works in its original BlockRun mode when these env vars
- * are not set. Full x402 removal is tracked as a follow-up cleanup.
+ * This module configures ClawRouter to route requests through the TokenBoss
+ * backend. TokenBoss mode is always active — x402 payment and wallet logic
+ * have been removed. All upstream requests target TOKENBOSS_API_URL and use
+ * the bearer token from TOKENBOSS_API_KEY.
  */
 
 const API_URL_ENV = "TOKENBOSS_API_URL";
 const API_KEY_ENV = "TOKENBOSS_API_KEY";
-
-/**
- * Dummy EVM private key used as a placeholder for the wallet resolver in
- * TokenBoss mode. `privateKeyToAccount()` accepts this value (it's a valid
- * secp256k1 scalar), so downstream code that still reads `account.address`
- * keeps working. The key is NEVER used to sign anything in TokenBoss mode
- * because the x402 code path is not taken.
- */
-export const TOKENBOSS_DUMMY_WALLET_KEY =
-  "0x0000000000000000000000000000000000000000000000000000000000000001";
 
 /**
  * Returns the TokenBoss upstream base URL, or undefined if not set.
@@ -49,31 +30,31 @@ export function getTokenBossApiKey(): string | undefined {
 }
 
 /**
- * True when both TOKENBOSS_API_URL and TOKENBOSS_API_KEY are set.
- * Single source of truth for "are we in TokenBoss mode."
+ * Returns the TokenBoss configuration object with upstream URL and API key.
+ * Used to validate that required env vars are set at startup.
  */
-export function isTokenBossMode(): boolean {
-  return Boolean(getTokenBossUpstream() && getTokenBossApiKey());
+export function getTokenBossConfig(): { upstream: string; apiKey: string } | undefined {
+  const upstream = getTokenBossUpstream();
+  const apiKey = getTokenBossApiKey();
+  if (!upstream || !apiKey) return undefined;
+  return { upstream, apiKey };
 }
 
-/** Fetch signature matching the one used by payment-preauth.ts. */
+/** Fetch signature matching upstream fetch usage. */
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /**
  * Creates a fetch replacement that injects
  * `Authorization: Bearer <tb_live_xxx>` into every outgoing request.
- * Used as a drop-in substitute for the x402 `payFetch` when TokenBoss mode
- * is active.
+ * Used as the sole upstream fetch function — TokenBoss mode is always active.
  *
- * Throws if called without `TOKENBOSS_API_KEY` set — callers should gate on
- * `isTokenBossMode()` first.
+ * Throws if TOKENBOSS_API_KEY is not set.
  */
 export function createTokenBossFetch(): FetchFn {
   const apiKey = getTokenBossApiKey();
   if (!apiKey) {
     throw new Error(
-      `${API_KEY_ENV} is not set. Set it to your tb_live_xxx proxy key, ` +
-        `or unset ${API_URL_ENV} to disable TokenBoss mode.`,
+      `${API_KEY_ENV} is not set. Set it to your tb_live_xxx proxy key and set ${API_URL_ENV} to your TokenBoss API URL.`,
     );
   }
   return async (input, init) => {

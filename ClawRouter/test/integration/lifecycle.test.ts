@@ -17,25 +17,20 @@ describe("ClawRouter proxy lifecycle", () => {
     await stopTestProxy();
   });
 
-  it("GET /health returns 200 with status ok and valid wallet address", async () => {
+  it("GET /health returns 200 with status ok", async () => {
     const res = await fetch(`${getTestProxyUrl()}/health`);
     expect(res.status).toBe(200);
 
-    const body = (await res.json()) as { status: string; wallet: string };
+    const body = (await res.json()) as { status: string };
     expect(body.status).toBe("ok");
-    expect(body.wallet).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
-  it("GET /health?full=true includes balance info", async () => {
+  it("GET /health?full=true returns status ok", async () => {
     const res = await fetch(`${getTestProxyUrl()}/health?full=true`);
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe("ok");
-
-    // Full health check includes either balance or balanceError
-    const hasBalanceInfo = "balance" in body || "balanceError" in body;
-    expect(hasBalanceInfo).toBe(true);
   });
 
   it("GET /v1/models returns model list with routing profiles", async () => {

@@ -12,7 +12,7 @@
  * successful remote fetch).
  */
 
-import { getTokenBossUpstream, isTokenBossMode } from "../tokenboss.js";
+import { getTokenBossUpstream } from "../tokenboss.js";
 import { DEFAULT_ROUTING_CONFIG } from "./config.js";
 import type { Tier, TierConfig } from "./types.js";
 
@@ -100,7 +100,6 @@ let refreshTimer: NodeJS.Timeout | undefined;
  * `await` it on startup if they want the first decision to use remote config.
  */
 export function startRemoteTiersRefresh(): Promise<void> {
-  if (!isTokenBossMode()) return Promise.resolve();
   const baseUrl = getTokenBossUpstream();
   if (!baseUrl) return Promise.resolve();
 

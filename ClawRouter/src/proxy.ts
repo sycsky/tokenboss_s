@@ -1,44 +1,30 @@
 /**
- * Local x402 Proxy Server
+ * Local Proxy Server
  *
  * Sits between OpenClaw's pi-ai (which makes standard OpenAI-format requests)
- * and BlockRun's API (which requires x402 micropayments).
+ * and the TokenBoss backend API.
  *
  * Flow:
  *   pi-ai → http://localhost:{port}/v1/chat/completions
- *        → proxy forwards to https://blockrun.ai/api/v1/chat/completions
- *        → gets 402 → @x402/fetch signs payment → retries
+ *        → proxy forwards to TokenBoss backend
  *        → streams response back to pi-ai
  *
  * Optimizations (v0.3.0):
  *   - SSE heartbeat: for streaming requests, sends headers + heartbeat immediately
- *     before the x402 flow, preventing OpenClaw's 10-15s timeout from firing.
+ *     before forwarding, preventing OpenClaw's 10-15s timeout from firing.
  *   - Response dedup: hashes request bodies and caches responses for 30s,
  *     preventing double-charging when OpenClaw retries after timeout.
  *   - Smart routing: when model is "blockrun/auto", classify query and pick cheapest model.
  *   - Usage logging: log every request as JSON line to ~/.openclaw/blockrun/logs/
  */
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-
-// Per-request payment tracking via AsyncLocalStorage (safe for concurrent requests).
-// The x402 onAfterPaymentCreation hook writes the actual payment amount into the
-// request-scoped store, and the logging code reads it after payFetch completes.
-const paymentStore = new AsyncLocalStorage<{ amountUsd: number }>();
 import { finished } from "node:stream";
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile, stat as fsStat } from "node:fs/promises";
 import { readFileSync, existsSync } from "node:fs";
-import { createPublicClient, http } from "viem";
-import { base } from "viem/chains";
-import { privateKeyToAccount } from "viem/accounts";
-import { x402Client } from "@x402/fetch";
-import { createPayFetchWithPreAuth } from "./payment-preauth.js";
-import { registerExactEvmScheme } from "@x402/evm/exact/client";
-import { toClientEvmSigner } from "@x402/evm";
 import {
   route,
   getFallbackChain,
@@ -69,12 +55,6 @@ import { logUsage, type UsageEntry } from "./logger.js";
 import { getStats, clearStats } from "./stats.js";
 import { RequestDeduplicator } from "./dedup.js";
 import { ResponseCache, type ResponseCacheConfig } from "./response-cache.js";
-import { BalanceMonitor } from "./balance.js";
-import type { SolanaBalanceMonitor } from "./solana-balance.js";
-
-/** Union type for chain-agnostic balance monitoring */
-type AnyBalanceMonitor = BalanceMonitor | SolanaBalanceMonitor;
-import { resolvePaymentChain } from "./auth.js";
 import { compressContext, shouldCompress, type NormalizedMessage } from "./compression/index.js";
 // Error classes available for programmatic use but not used in proxy
 // (universal free fallback means we don't throw balance errors anymore)
@@ -93,7 +73,6 @@ import { PROXY_PORT } from "./config.js";
 import { SessionJournal } from "./journal.js";
 import { applyUpstreamProxy } from "./upstream-proxy.js";
 import {
-  isTokenBossMode,
   createTokenBossFetch,
   getTokenBossUpstream,
 } from "./tokenboss.js";
@@ -103,7 +82,6 @@ import { getModelsCached } from "./model-cache.js";
 // TokenBoss fork sets TOKENBOSS_API_URL to its own API origin (e.g.
 // "https://api.tokenboss.co") and the proxy appends /v1/... paths directly.
 const BLOCKRUN_API = getTokenBossUpstream() ?? "https://blockrun.ai/api";
-const BLOCKRUN_SOLANA_API = "https://sol.blockrun.ai/api";
 const IMAGE_DIR = join(homedir(), ".openclaw", "blockrun", "images");
 const AUDIO_DIR = join(homedir(), ".openclaw", "blockrun", "audio");
 // Routing profile models - virtual models that trigger intelligent routing
@@ -192,193 +170,6 @@ async function readBodyWithTimeout(
   }
 
   return chunks;
-}
-
-/**
- * Transform upstream payment errors into user-friendly messages.
- * Parses the raw x402 error and formats it nicely.
- */
-export function transformPaymentError(errorBody: string): string {
-  try {
-    // Try to parse the error JSON
-    const parsed = JSON.parse(errorBody) as {
-      error?: string;
-      details?: string;
-      // blockrun-sol (Solana) format uses code+debug instead of details
-      code?: string;
-      debug?: string;
-      payer?: string;
-    };
-
-    // Check if this is a payment verification error
-    if (parsed.error === "Payment verification failed" && parsed.details) {
-      // Extract the nested JSON from details
-      // Format: "Verification failed: {json}\n"
-      const match = parsed.details.match(/Verification failed:\s*(\{.*\})/s);
-      if (match) {
-        const innerJson = JSON.parse(match[1]) as {
-          invalidMessage?: string;
-          invalidReason?: string;
-          payer?: string;
-        };
-
-        if (innerJson.invalidReason === "insufficient_funds" && innerJson.invalidMessage) {
-          // Parse "insufficient balance: 251 < 11463"
-          const balanceMatch = innerJson.invalidMessage.match(
-            /insufficient balance:\s*(\d+)\s*<\s*(\d+)/i,
-          );
-          if (balanceMatch) {
-            const currentMicros = parseInt(balanceMatch[1], 10);
-            const requiredMicros = parseInt(balanceMatch[2], 10);
-            const currentUSD = (currentMicros / 1_000_000).toFixed(6);
-            const requiredUSD = (requiredMicros / 1_000_000).toFixed(6);
-            const wallet = innerJson.payer || "unknown";
-            const shortWallet =
-              wallet.length > 12 ? `${wallet.slice(0, 6)}...${wallet.slice(-4)}` : wallet;
-
-            return JSON.stringify({
-              error: {
-                message: `Insufficient USDC balance. Current: $${currentUSD}, Required: ~$${requiredUSD}`,
-                type: "insufficient_funds",
-                wallet: wallet,
-                current_balance_usd: currentUSD,
-                required_usd: requiredUSD,
-                help: `Fund wallet ${shortWallet} with USDC on Base, or use free model: /model free`,
-              },
-            });
-          }
-        }
-
-        // Handle invalid_payload errors (signature issues, malformed payment)
-        if (innerJson.invalidReason === "invalid_payload") {
-          return JSON.stringify({
-            error: {
-              message: "Payment signature invalid. This may be a temporary issue.",
-              type: "invalid_payload",
-              help: "Try again. If this persists, reinstall ClawRouter: curl -fsSL https://blockrun.ai/ClawRouter-update | bash",
-            },
-          });
-        }
-
-        // Handle transaction simulation failures (Solana on-chain validation)
-        if (innerJson.invalidReason === "transaction_simulation_failed") {
-          console.error(
-            `[ClawRouter] Solana transaction simulation failed: ${innerJson.invalidMessage || "unknown"}`,
-          );
-          return JSON.stringify({
-            error: {
-              message: "Solana payment simulation failed. Retrying with a different model.",
-              type: "transaction_simulation_failed",
-              help: "This is usually temporary. If it persists, check your Solana USDC balance or try: /model free",
-            },
-          });
-        }
-      }
-    }
-
-    // Handle code=PAYMENT_INVALID + debug format (used by blockrun-sol, can also
-    // appear from blockrun Base when CDP returns non-200 with structured JSON body)
-    if (
-      parsed.error === "Payment verification failed" &&
-      parsed.code === "PAYMENT_INVALID" &&
-      parsed.debug
-    ) {
-      const debugLower = parsed.debug.toLowerCase();
-      const wallet = parsed.payer || "unknown";
-      const shortWallet =
-        wallet.length > 12 ? `${wallet.slice(0, 6)}...${wallet.slice(-4)}` : wallet;
-      // Detect chain from payer address format (0x = EVM, else Solana)
-      const chain = wallet.startsWith("0x") ? "Base" : "Solana";
-
-      if (debugLower.includes("insufficient")) {
-        return JSON.stringify({
-          error: {
-            message: `Insufficient ${chain} USDC balance.`,
-            type: "insufficient_funds",
-            wallet,
-            help:
-              chain === "Solana"
-                ? `Fund wallet ${shortWallet} with USDC on Solana, or switch to Base: /wallet base`
-                : `Fund wallet ${shortWallet} with USDC on Base, or use free model: /model free`,
-          },
-        });
-      }
-
-      if (
-        debugLower.includes("transaction_simulation_failed") ||
-        debugLower.includes("simulation")
-      ) {
-        console.error(`[ClawRouter] ${chain} transaction simulation failed: ${parsed.debug}`);
-        return JSON.stringify({
-          error: {
-            message: `${chain} payment simulation failed. Retrying with a different model.`,
-            type: "transaction_simulation_failed",
-            help: "This is usually temporary. If it persists, try: /model free",
-          },
-        });
-      }
-
-      if (debugLower.includes("invalid signature") || debugLower.includes("invalid_signature")) {
-        return JSON.stringify({
-          error: {
-            message: `${chain} payment signature invalid.`,
-            type: "invalid_payload",
-            help: "Try again. If this persists, reinstall ClawRouter: curl -fsSL https://blockrun.ai/ClawRouter-update | bash",
-          },
-        });
-      }
-
-      if (debugLower.includes("expired")) {
-        return JSON.stringify({
-          error: {
-            message: `${chain} payment expired. Retrying.`,
-            type: "expired",
-            help: "This is usually temporary.",
-          },
-        });
-      }
-
-      // Unknown verification error — surface the debug reason
-      console.error(
-        `[ClawRouter] ${chain} payment verification failed: ${parsed.debug} payer=${wallet}`,
-      );
-      return JSON.stringify({
-        error: {
-          message: `${chain} payment verification failed: ${parsed.debug}`,
-          type: "payment_invalid",
-          wallet,
-          help:
-            chain === "Solana"
-              ? "Try again or switch to Base: /wallet base"
-              : "Try again. If this persists, try: /model free",
-        },
-      });
-    }
-
-    // Handle settlement failures (gas estimation, on-chain errors)
-    if (
-      parsed.error === "Settlement failed" ||
-      parsed.error === "Payment settlement failed" ||
-      parsed.details?.includes("Settlement failed") ||
-      parsed.details?.includes("transaction_simulation_failed")
-    ) {
-      const details = parsed.details || "";
-      const gasError = details.includes("unable to estimate gas");
-
-      return JSON.stringify({
-        error: {
-          message: gasError
-            ? "Payment failed: network congestion or gas issue. Try again."
-            : "Payment settlement failed. Try again in a moment.",
-          type: "settlement_failed",
-          help: "This is usually temporary. If it persists, try: /model free",
-        },
-      });
-    }
-  } catch {
-    // If parsing fails, return original
-  }
-  return errorBody;
 }
 
 /**
@@ -543,12 +334,6 @@ function safeWrite(res: ServerResponse, data: string | Buffer): boolean {
   return res.write(data);
 }
 
-// Extra buffer for balance check (on top of estimateAmount's 20% buffer)
-// Total effective buffer: 1.2 * 1.5 = 1.8x (80% safety margin)
-// This prevents x402 payment failures after streaming headers are sent,
-// which would trigger OpenClaw's 5-24 hour billing cooldown.
-const BALANCE_CHECK_BUFFER = 1.5;
-
 /**
  * Get the proxy port from pre-loaded configuration.
  * Port is validated at module load time, this just returns the cached value.
@@ -559,11 +344,9 @@ export function getProxyPort(): number {
 
 /**
  * Check if a proxy is already running on the given port.
- * Returns the wallet address if running, undefined otherwise.
+ * Returns true if running, false otherwise.
  */
-async function checkExistingProxy(
-  port: number,
-): Promise<{ wallet: string; paymentChain?: string } | undefined> {
+async function checkExistingProxy(port: number): Promise<boolean> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
 
@@ -572,21 +355,10 @@ async function checkExistingProxy(
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const data = (await response.json()) as {
-        status?: string;
-        wallet?: string;
-        paymentChain?: string;
-      };
-      if (data.status === "ok" && data.wallet) {
-        return { wallet: data.wallet, paymentChain: data.paymentChain };
-      }
-    }
-    return undefined;
+    return response.ok;
   } catch {
     clearTimeout(timeoutId);
-    return undefined;
+    return false;
   }
 }
 
@@ -1144,43 +916,13 @@ function stripThinkingTokens(content: string): string {
   return cleaned;
 }
 
-/** Callback info for low balance warning */
-export type LowBalanceInfo = {
-  balanceUSD: string;
-  walletAddress: string;
-};
-
-/** Callback info for insufficient funds error */
-export type InsufficientFundsInfo = {
-  balanceUSD: string;
-  requiredUSD: string;
-  walletAddress: string;
-};
-
-/**
- * Wallet config: either a plain EVM private key string, or the full
- * resolution object from resolveOrGenerateWalletKey() which may include
- * Solana keys. Using the full object prevents callers from accidentally
- * forgetting to forward Solana key bytes.
- */
-export type WalletConfig = string | { key: string; solanaPrivateKeyBytes?: Uint8Array };
-
-export type PaymentChain = "base" | "solana";
-
 export type ProxyOptions = {
-  wallet: WalletConfig;
   apiBase?: string;
-  /** Payment chain: "base" (default) or "solana". Can also be set via CLAWROUTER_PAYMENT_CHAIN env var. */
-  paymentChain?: PaymentChain;
   /** Port to listen on (default: 8402) */
   port?: number;
   routingConfig?: Partial<RoutingConfig>;
-  /** Request timeout in ms (default: 180000 = 3 minutes). Covers on-chain tx + LLM response. */
+  /** Request timeout in ms (default: 180000 = 3 minutes). Covers LLM response. */
   requestTimeoutMs?: number;
-  /** Skip balance checks (for testing only). Default: false */
-  skipBalanceCheck?: boolean;
-  /** Override the balance monitor with a mock (for testing only). */
-  _balanceMonitorOverride?: AnyBalanceMonitor;
   /**
    * Session persistence config. When enabled, maintains model selection
    * across requests within a session to prevent mid-task model switching.
@@ -1225,12 +967,7 @@ export type ProxyOptions = {
   excludeModels?: Set<string>;
   onReady?: (port: number) => void;
   onError?: (error: Error) => void;
-  onPayment?: (info: { model: string; amount: string; network: string }) => void;
   onRouted?: (decision: RoutingDecision) => void;
-  /** Called when balance drops below $1.00 (warning, request still proceeds) */
-  onLowBalance?: (info: LowBalanceInfo) => void;
-  /** Called when balance is insufficient for a request (request fails) */
-  onInsufficientFunds?: (info: InsufficientFundsInfo) => void;
   /**
    * Upstream proxy URL for all outgoing requests.
    * Supports http://, https://, and socks5:// schemes.
@@ -1243,9 +980,6 @@ export type ProxyOptions = {
 export type ProxyHandle = {
   port: number;
   baseUrl: string;
-  walletAddress: string;
-  solanaAddress?: string;
-  balanceMonitor: AnyBalanceMonitor;
   close: () => Promise<void>;
 };
 
@@ -1372,18 +1106,17 @@ function estimateImageCost(model: string, size?: string, n: number = 1): number 
 }
 
 /**
- * Proxy a partner API request through x402 payment flow.
+ * Proxy a partner API request.
  *
  * Simplified proxy for partner endpoints (/v1/x/*, /v1/partner/*).
  * No smart routing, SSE, compression, or sessions — just collect body,
- * forward via payFetch (which handles 402 automatically), and stream back.
+ * forward via payFetch and stream back.
  */
 async function proxyPartnerRequest(
   req: IncomingMessage,
   res: ServerResponse,
   apiBase: string,
   payFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  getActualPaymentUsd: () => number,
 ): Promise<void> {
   const startTime = Date.now();
   const upstreamUrl = `${apiBase}${req.url}`;
@@ -1441,8 +1174,8 @@ async function proxyPartnerRequest(
   const latencyMs = Date.now() - startTime;
   console.log(`[ClawRouter] Partner response: ${upstream.status} (${latencyMs}ms)`);
 
-  // Log partner usage with actual x402 payment amount (previously logged cost: 0)
-  const partnerCost = getActualPaymentUsd();
+  // Log partner usage
+  const partnerCost = 0;
   logUsage({
     timestamp: new Date().toISOString(),
     model: "partner",
@@ -1519,10 +1252,10 @@ async function uploadDataUriToHost(dataUri: string): Promise<string> {
 }
 
 /**
- * Start the local x402 proxy server.
+ * Start the local proxy server.
  *
  * If a proxy is already running on the target port, reuses it instead of failing.
- * Port can be configured via BLOCKRUN_PROXY_PORT environment variable.
+ * Port can be configured via TOKENBOSS_PROXY_PORT environment variable.
  *
  * Returns a handle with the assigned port, base URL, and a close function.
  */
@@ -1533,153 +1266,28 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     console.log(`[ClawRouter] Upstream proxy: ${upstreamProxy}`);
   }
 
-  // Normalize wallet config: string = EVM-only, object = full resolution
-  const walletKey = typeof options.wallet === "string" ? options.wallet : options.wallet.key;
-  const solanaPrivateKeyBytes =
-    typeof options.wallet === "string" ? undefined : options.wallet.solanaPrivateKeyBytes;
-
-  // Payment chain: options > env var > persisted file > default "base".
-  // No dynamic switching — user selects chain via /wallet solana or /wallet base.
-  const paymentChain = options.paymentChain ?? (await resolvePaymentChain());
-  const apiBase =
-    options.apiBase ??
-    (paymentChain === "solana" && solanaPrivateKeyBytes ? BLOCKRUN_SOLANA_API : BLOCKRUN_API);
-  if (paymentChain === "solana" && !solanaPrivateKeyBytes) {
-    console.warn(
-      `[ClawRouter] ⚠ Payment chain is Solana but no mnemonic found — falling back to Base (EVM).`,
-    );
-    console.warn(
-      `[ClawRouter]   To fix: run "npx @blockrun/clawrouter wallet recover" if your mnemonic exists,`,
-    );
-    console.warn(`[ClawRouter]   or run "npx @blockrun/clawrouter chain base" to switch to EVM.`);
-  } else if (paymentChain === "solana") {
-    console.log(`[ClawRouter] Payment chain: Solana (${BLOCKRUN_SOLANA_API})`);
-  }
+  const apiBase = options.apiBase ?? BLOCKRUN_API;
 
   // Determine port: options.port > env var > default
   const listenPort = options.port ?? getProxyPort();
 
   // Check if a proxy is already running on this port
-  const existingProxy = await checkExistingProxy(listenPort);
-  if (existingProxy) {
+  const proxyRunning = await checkExistingProxy(listenPort);
+  if (proxyRunning) {
     // Proxy already running — reuse it instead of failing with EADDRINUSE
-    const account = privateKeyToAccount(walletKey as `0x${string}`);
     const baseUrl = `http://127.0.0.1:${listenPort}`;
-
-    // Verify the existing proxy is using the same wallet (or warn if different)
-    if (existingProxy.wallet !== account.address) {
-      console.warn(
-        `[ClawRouter] Existing proxy on port ${listenPort} uses wallet ${existingProxy.wallet}, but current config uses ${account.address}. Reusing existing proxy.`,
-      );
-    }
-
-    // Verify the existing proxy is using the same payment chain
-    if (existingProxy.paymentChain) {
-      if (existingProxy.paymentChain !== paymentChain) {
-        throw new Error(
-          `Existing proxy on port ${listenPort} is using ${existingProxy.paymentChain} but ${paymentChain} was requested. ` +
-            `Stop the existing proxy first or use a different port.`,
-        );
-      }
-    } else if (paymentChain !== "base") {
-      // Old proxy doesn't report chain — assume Base. Reject if Solana was requested.
-      console.warn(
-        `[ClawRouter] Existing proxy on port ${listenPort} does not report paymentChain (pre-v0.11 instance). Assuming Base.`,
-      );
-      throw new Error(
-        `Existing proxy on port ${listenPort} is a pre-v0.11 instance (assumed Base) but ${paymentChain} was requested. ` +
-          `Stop the existing proxy first or use a different port.`,
-      );
-    }
-
-    // Derive Solana address if keys are available (for wallet status display)
-    let reuseSolanaAddress: string | undefined;
-    if (solanaPrivateKeyBytes) {
-      const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-      const solanaSigner = await createKeyPairSignerFromPrivateKeyBytes(solanaPrivateKeyBytes);
-      reuseSolanaAddress = solanaSigner.address;
-    }
-
-    // Use chain-appropriate balance monitor (lazy import to avoid loading @solana/kit on Base chain)
-    let balanceMonitor: AnyBalanceMonitor;
-    if (paymentChain === "solana" && reuseSolanaAddress) {
-      const { SolanaBalanceMonitor } = await import("./solana-balance.js");
-      balanceMonitor = new SolanaBalanceMonitor(reuseSolanaAddress);
-    } else {
-      balanceMonitor = new BalanceMonitor(account.address);
-    }
-
     options.onReady?.(listenPort);
-
     return {
       port: listenPort,
       baseUrl,
-      walletAddress: existingProxy.wallet,
-      solanaAddress: reuseSolanaAddress,
-      balanceMonitor,
       close: async () => {
         // No-op: we didn't start this proxy, so we shouldn't close it
       },
     };
   }
 
-  // Create x402 payment client with EVM scheme (always available)
-  const account = privateKeyToAccount(walletKey as `0x${string}`);
-  const evmPublicClient = createPublicClient({ chain: base, transport: http() });
-  const evmSigner = toClientEvmSigner(account, evmPublicClient);
-  const x402 = new x402Client();
-  registerExactEvmScheme(x402, { signer: evmSigner });
-
-  // Register Solana scheme if key is available
-  // Uses registerExactSvmScheme helper which registers:
-  //   - solana:* wildcard (catches any CAIP-2 Solana network)
-  //   - V1 compat names: "solana", "solana-devnet", "solana-testnet"
-  let solanaAddress: string | undefined;
-  if (solanaPrivateKeyBytes) {
-    const { registerExactSvmScheme } = await import("@x402/svm/exact/client");
-    const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-    const solanaSigner = await createKeyPairSignerFromPrivateKeyBytes(solanaPrivateKeyBytes);
-    solanaAddress = solanaSigner.address;
-    registerExactSvmScheme(x402, { signer: solanaSigner });
-    console.log(`[ClawRouter] Solana wallet: ${solanaAddress}`);
-  }
-
-  // Log which chain is used for each payment and capture actual payment amount
-  x402.onAfterPaymentCreation(async (context) => {
-    const network = context.selectedRequirements.network;
-    const chain = network.startsWith("eip155")
-      ? "Base (EVM)"
-      : network.startsWith("solana")
-        ? "Solana"
-        : network;
-    // Capture actual payment amount in USD (amount is in USDC micro units, 6 decimals)
-    const amountMicros = parseInt(context.selectedRequirements.amount || "0", 10);
-    const amountUsd = amountMicros / 1_000_000;
-    // Write to request-scoped store (if available)
-    const store = paymentStore.getStore();
-    if (store) store.amountUsd = amountUsd;
-    console.log(`[ClawRouter] Payment signed on ${chain} (${network}) — $${amountUsd.toFixed(6)}`);
-  });
-
-  // In TokenBoss fork mode, bypass the x402 payment flow entirely and send
-  // a plain bearer-token fetch to the TokenBoss backend. The x402 client
-  // constructed above is left unused — full removal is a follow-up cleanup.
-  const payFetch = isTokenBossMode()
-    ? createTokenBossFetch()
-    : createPayFetchWithPreAuth(fetch, x402, undefined, {
-        skipPreAuth: paymentChain === "solana",
-      });
-
-  // Create balance monitor for pre-request checks (lazy import to avoid loading @solana/kit on Base chain)
-  let balanceMonitor: AnyBalanceMonitor;
-  if (options._balanceMonitorOverride) {
-    balanceMonitor = options._balanceMonitorOverride;
-  } else if (paymentChain === "solana" && solanaAddress) {
-    const { SolanaBalanceMonitor } = await import("./solana-balance.js");
-    balanceMonitor = new SolanaBalanceMonitor(solanaAddress);
-  } else {
-    balanceMonitor = new BalanceMonitor(account.address);
-  }
+  // Create TokenBoss fetch — injects Bearer token for all upstream requests
+  const payFetch = createTokenBossFetch();
 
   // Build router options (100% local — no external API calls for routing)
   const routingConfig = mergeRoutingConfig(options.routingConfig);
@@ -1705,8 +1313,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   const connections = new Set<import("net").Socket>();
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    // Wrap in paymentStore.run() so x402 hook can write actual payment amount per-request
-    paymentStore.run({ amountUsd: 0 }, async () => {
+    void (async () => {
       // Add stream error handlers to prevent server crashes
       req.on("error", (err) => {
         console.error(`[ClawRouter] Request stream error: ${err.message}`);
@@ -1734,32 +1341,13 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         }
       });
 
-      // Health check with optional balance info
+      // Health check
       if (req.url === "/health" || req.url?.startsWith("/health?")) {
-        const url = new URL(req.url, "http://localhost");
-        const full = url.searchParams.get("full") === "true";
-
         const response: Record<string, unknown> = {
           status: "ok",
-          wallet: account.address,
-          paymentChain,
         };
-        if (solanaAddress) {
-          response.solana = solanaAddress;
-        }
         if (upstreamProxy) {
           response.upstreamProxy = upstreamProxy;
-        }
-
-        if (full) {
-          try {
-            const balanceInfo = await balanceMonitor.checkBalance();
-            response.balance = balanceInfo.balanceUSD;
-            response.isLow = balanceInfo.isLow;
-            response.isEmpty = balanceInfo.isEmpty;
-          } catch {
-            response.balanceError = "Could not fetch balance";
-          }
         }
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -1906,9 +1494,8 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         return;
       }
 
-      // --- Handle /v1/images/generations: proxy with x402 payment + save data URIs locally ---
+      // --- Handle /v1/images/generations: proxy and save data URIs locally ---
       // NOTE: image generation endpoints bypass maxCostPerRun budget tracking entirely.
-      // Cost is charged via x402 micropayment directly — no session accumulation or cap enforcement.
       if (req.url === "/v1/images/generations" && req.method === "POST") {
         const imgStartTime = Date.now();
         const chunks: Buffer[] = [];
@@ -1987,7 +1574,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
             }
           }
           // Log image generation usage with actual x402 payment (previously missing entirely)
-          const imgActualCost = paymentStore.getStore()?.amountUsd ?? imgCost;
+          const imgActualCost = imgCost;
           logUsage({
             timestamp: new Date().toISOString(),
             model: imgModel,
@@ -2122,7 +1709,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
             }
           }
           // Log image editing usage with actual x402 payment (previously missing entirely)
-          const img2imgActualCost = paymentStore.getStore()?.amountUsd ?? img2imgCost;
+          const img2imgActualCost = img2imgCost;
           logUsage({
             timestamp: new Date().toISOString(),
             model: img2imgModel,
@@ -2209,7 +1796,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
               }
             }
           }
-          const audioActualCost = paymentStore.getStore()?.amountUsd ?? 0.15;
+          const audioActualCost = 0.15;
           logUsage({
             timestamp: new Date().toISOString(),
             model: audioModel,
@@ -2240,7 +1827,6 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
             res,
             apiBase,
             payFetch,
-            () => paymentStore.getStore()?.amountUsd ?? 0,
           );
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
@@ -2273,7 +1859,6 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
           options,
           routerOpts,
           deduplicator,
-          balanceMonitor,
           sessionStore,
           responseCache,
           sessionJournal,
@@ -2298,7 +1883,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
           res.end();
         }
       }
-    }); // end paymentStore.run()
+    })();
   });
 
   // Listen on configured port with retry logic for TIME_WAIT handling
@@ -2315,11 +1900,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
           if (existingProxy2) {
             // Proxy is actually running - this is fine, reuse it
             console.log(`[ClawRouter] Existing proxy detected on port ${listenPort}, reusing`);
-            rejectAttempt({
-              code: "REUSE_EXISTING",
-              wallet: existingProxy2.wallet,
-              existingChain: existingProxy2.paymentChain,
-            });
+            rejectAttempt({ code: "REUSE_EXISTING" });
             return;
           }
 
@@ -2360,29 +1941,16 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
     } catch (err: unknown) {
       const error = err as {
         code?: string;
-        wallet?: string;
-        existingChain?: string;
         attempt?: number;
       };
 
-      if (error.code === "REUSE_EXISTING" && error.wallet) {
-        // Validate payment chain matches (same check as pre-listen reuse path)
-        if (error.existingChain && error.existingChain !== paymentChain) {
-          throw new Error(
-            `Existing proxy on port ${listenPort} is using ${error.existingChain} but ${paymentChain} was requested. ` +
-              `Stop the existing proxy first or use a different port.`,
-            { cause: err },
-          );
-        }
-
+      if (error.code === "REUSE_EXISTING") {
         // Proxy is running, reuse it
         const baseUrl = `http://127.0.0.1:${listenPort}`;
         options.onReady?.(listenPort);
         return {
           port: listenPort,
           baseUrl,
-          walletAddress: error.wallet,
-          balanceMonitor,
           close: async () => {
             // No-op: we didn't start this proxy, so we shouldn't close it
           },
@@ -2460,9 +2028,6 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   return {
     port,
     baseUrl,
-    walletAddress: account.address,
-    solanaAddress,
-    balanceMonitor,
     close: () =>
       new Promise<void>((res, rej) => {
         const timeout = setTimeout(() => {
@@ -2509,7 +2074,6 @@ async function tryModelRequest(
   modelId: string,
   maxTokens: number,
   payFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  balanceMonitor: AnyBalanceMonitor,
   signal: AbortSignal,
 ): Promise<ModelRequestResult> {
   // Update model in body and normalize messages
@@ -2627,7 +2191,7 @@ async function tryModelRequest(
 }
 
 /**
- * Proxy a single request through x402 payment flow to BlockRun API.
+ * Proxy a single request to the upstream API.
  *
  * Optimizations applied in order:
  *   1. Dedup check — if same request body seen within 30s, replay cached response
@@ -2643,7 +2207,6 @@ async function proxyRequest(
   options: ProxyOptions,
   routerOpts: RouterOptions,
   deduplicator: RequestDeduplicator,
-  balanceMonitor: AnyBalanceMonitor,
   sessionStore: SessionStore,
   responseCache: ResponseCache,
   sessionJournal: SessionJournal,
@@ -3061,7 +2624,7 @@ async function proxyRequest(
             console.log(`[ClawRouter] /imagegen success: ${images.length} image(s) generated`);
             // Log /imagegen usage with actual x402 payment
             const imagegenActualCost =
-              paymentStore.getStore()?.amountUsd ?? estimateImageCost(imageModel, imageSize, 1);
+              estimateImageCost(imageModel, imageSize, 1);
             logUsage({
               timestamp: new Date().toISOString(),
               model: imageModel,
@@ -3300,7 +2863,7 @@ async function proxyRequest(
             console.log(`[ClawRouter] /img2img success: ${images.length} image(s)`);
             // Log /img2img usage with actual x402 payment
             const img2imgActualCost2 =
-              paymentStore.getStore()?.amountUsd ?? estimateImageCost(img2imgModel, img2imgSize, 1);
+              estimateImageCost(img2imgModel, img2imgSize, 1);
             logUsage({
               timestamp: new Date().toISOString(),
               model: img2imgModel,
@@ -3328,20 +2891,13 @@ async function proxyRequest(
         return;
       }
 
-      // BlockRun mode: force stream:false so ClawRouter can buffer + transform
-      // the full JSON response before re-emitting SSE.
       // TokenBoss mode: upstream supports real streaming — keep stream:true and
       // ask for usage in the final chunk so billing stats still land.
       if (parsed.stream === true) {
-        if (isTokenBossMode()) {
-          const existing =
-            (parsed.stream_options as Record<string, unknown> | undefined) ?? {};
-          if (existing.include_usage !== true) {
-            parsed.stream_options = { ...existing, include_usage: true };
-            bodyModified = true;
-          }
-        } else {
-          parsed.stream = false;
+        const existing =
+          (parsed.stream_options as Record<string, unknown> | undefined) ?? {};
+        if (existing.include_usage !== true) {
+          parsed.stream_options = { ...existing, include_usage: true };
           bodyModified = true;
         }
       }
@@ -3685,79 +3241,7 @@ async function proxyRequest(
   // Register this request as in-flight
   deduplicator.markInflight(dedupKey);
 
-  // --- Pre-request balance check ---
-  // Estimate cost and check if wallet has sufficient balance
-  // Skip if skipBalanceCheck is set (for testing) or if using free model
-  // In TokenBoss mode, balance/credit is managed by the upstream TokenBoss
-  // backend — ClawRouter must NOT downgrade the request to a free model here,
-  // because the user's requested model name has to reach the backend intact
-  // so the backend's credit engine can bill it correctly.
-  let estimatedCostMicros: bigint | undefined;
-  // Use `let` so the balance-fallback path can update this when modelId is switched to a free model.
-  let isFreeModel = FREE_MODELS.has(modelId ?? "");
-
-  if (modelId && !options.skipBalanceCheck && !isFreeModel && !isTokenBossMode()) {
-    const estimated = estimateAmount(modelId, body.length, maxTokens);
-    if (estimated) {
-      estimatedCostMicros = BigInt(estimated);
-
-      // Apply extra buffer for balance check to prevent x402 failures after streaming starts.
-      // This is aggressive to avoid triggering OpenClaw's 5-24 hour billing cooldown.
-      const bufferedCostMicros =
-        (estimatedCostMicros * BigInt(Math.ceil(BALANCE_CHECK_BUFFER * 100))) / 100n;
-
-      // Check balance before proceeding (using buffered amount)
-      // Wrap in try/catch: Solana RPC failures (timeouts, rate limits) should
-      // not silently downgrade the request — pass through optimistically instead.
-      let sufficiency: Awaited<ReturnType<typeof balanceMonitor.checkSufficient>> | null = null;
-      try {
-        sufficiency = await balanceMonitor.checkSufficient(bufferedCostMicros);
-      } catch (balanceErr) {
-        console.warn(
-          `[ClawRouter] Balance check failed (${balanceErr instanceof Error ? balanceErr.message : String(balanceErr)}) — proceeding optimistically`,
-        );
-      }
-
-      if (sufficiency && (sufficiency.info.isEmpty || !sufficiency.sufficient)) {
-        // Wallet is empty or insufficient — fallback to best available free model
-        const freeFallback = pickFreeModel(loadExcludeList()) ?? FREE_MODEL;
-        const originalModel = modelId;
-        console.log(
-          `[ClawRouter] Wallet ${sufficiency.info.isEmpty ? "empty" : "insufficient"} (${sufficiency.info.balanceUSD}), falling back to free model: ${freeFallback} (requested: ${originalModel})`,
-        );
-        modelId = freeFallback;
-        isFreeModel = true; // keep in sync — budget logic gates on !isFreeModel
-        // Update the body with new model (map free/ → nvidia/ for upstream)
-        const parsed = JSON.parse(body.toString()) as Record<string, unknown>;
-        parsed.model = toUpstreamModelId(FREE_MODEL);
-        body = Buffer.from(JSON.stringify(parsed));
-
-        // Build fund instruction — include wallet address so user knows where to send
-        const walletAddr = sufficiency.info.walletAddress;
-        const fundHint = walletAddr
-          ? ` Send USDC to \`${walletAddr}\`.`
-          : " Run `/wallet` to see your address.";
-
-        // Set notice to prepend to response so user knows about the fallback
-        balanceFallbackNotice = sufficiency.info.isEmpty
-          ? `> **⚠️ Wallet empty** — using free model.${fundHint}\n\n`
-          : `> **⚠️ Insufficient balance** (${sufficiency.info.balanceUSD}) — using free model instead of ${originalModel}.${fundHint}\n\n`;
-
-        // Notify about the fallback
-        options.onLowBalance?.({
-          balanceUSD: sufficiency.info.balanceUSD,
-          walletAddress: sufficiency.info.walletAddress,
-        });
-      } else if (sufficiency?.info.isLow) {
-        // Balance is low but sufficient — warn and proceed
-        options.onLowBalance?.({
-          balanceUSD: sufficiency.info.balanceUSD,
-          walletAddress: sufficiency.info.walletAddress,
-        });
-      }
-    }
-  }
-
+  const isFreeModel = FREE_MODELS.has(modelId ?? "");
   // --- Cost cap check: strict mode hard-stop ---
   // In 'strict' mode, reject if the projected session spend (accumulated + this request's
   // estimate) would exceed the cap. Checking projected cost (not just historical) prevents
@@ -3774,11 +3258,9 @@ async function proxyRequest(
     // Include this request's estimated cost so even the first request is blocked
     // if it would push the session over the cap.
     const thisReqEstStr =
-      estimatedCostMicros !== undefined
-        ? estimatedCostMicros.toString()
-        : modelId
-          ? estimateAmount(modelId, body.length, maxTokens)
-          : undefined;
+      modelId
+        ? estimateAmount(modelId, body.length, maxTokens)
+        : undefined;
     const thisReqEstUsd = thisReqEstStr ? Number(thisReqEstStr) / 1_000_000 : 0;
     const projectedCostUsd = runCostUsd + thisReqEstUsd;
     if (projectedCostUsd > options.maxCostPerRunUsd) {
@@ -3974,17 +3456,7 @@ async function proxyRequest(
     let modelsToTry: string[];
     const excludeList = options.excludeModels ?? loadExcludeList();
 
-    // Short-circuit: if balance check already determined wallet is empty/insufficient,
-    // skip the entire routing chain (all paid models would 429 anyway) and go straight
-    // to the free model. This avoids 4-5 wasted x402 payment signature attempts.
-    // Only applies when balance check actually ran (not when skipBalanceCheck is set).
-    if (isFreeModel && routingDecision && !options.skipBalanceCheck) {
-      const freeFallback = pickFreeModel(excludeList) ?? FREE_MODEL;
-      modelsToTry = [freeFallback];
-      console.log(
-        `[ClawRouter] Wallet empty — skipping routing chain, using free model: ${freeFallback}`,
-      );
-    } else if (routingDecision) {
+    if (routingDecision) {
       // Estimate total context: input tokens (~4 chars per token) + max output tokens
       const estimatedInputTokens = Math.ceil(body.length / 4);
       const estimatedTotalTokens = estimatedInputTokens + maxTokens;
@@ -4065,22 +3537,6 @@ async function proxyRequest(
     } else {
       // For explicit model requests, use the requested model
       modelsToTry = modelId ? [modelId] : [];
-    }
-
-    // Ensure a free model is the last-resort fallback for non-tool requests.
-    // Skip free fallback when tools are present — free models lack tool calling
-    // support and would produce broken responses for agentic tasks.
-    // Picks the best available free model that isn't excluded by the user.
-    //
-    // In TokenBoss mode, skip this fallback entirely: the TokenBoss backend
-    // doesn't know about the BlockRun `nvidia/gpt-oss-120b` model name, so a
-    // retry with it would just produce a confusing second failure. All
-    // billing/fallback decisions belong to the backend.
-    if (!hasTools && !isTokenBossMode()) {
-      const freeFallback = pickFreeModel(excludeList);
-      if (freeFallback && !modelsToTry.includes(freeFallback)) {
-        modelsToTry.push(freeFallback);
-      }
     }
 
     // --- Budget-aware routing (graceful mode) ---
@@ -4188,7 +3644,7 @@ async function proxyRequest(
         throw new Error(`Request timed out after ${timeoutMs}ms`);
       }
 
-      console.log(`[ClawRouter] Trying mode1l ${i + 1}/${modelsToTry.length}: ${tryModel}`);
+      console.log(`[ClawRouter] Trying model ${i + 1}/${modelsToTry.length}: ${tryModel}`);
 
       // Per-model abort controller — each model attempt gets its own 60s window.
       // When it fires, the fallback loop moves to the next model rather than failing.
@@ -4204,7 +3660,6 @@ async function proxyRequest(
         tryModel,
         maxTokens,
         payFetch,
-        balanceMonitor,
         combinedSignal,
       );
       clearTimeout(modelTimeoutId);
@@ -4231,7 +3686,7 @@ async function proxyRequest(
         if (options.maxCostPerRunUsd && effectiveSessionId && !FREE_MODELS.has(tryModel)) {
           const costEst = estimateAmount(tryModel, body.length, maxTokens);
           if (costEst) {
-            sessionStore.addSessionCost(effectiveSessionId, BigInt(costEst));
+            sessionStore.addSessionCost(effectiveSessionId, Number(costEst));
           }
         }
         break;
@@ -4247,41 +3702,6 @@ async function proxyRequest(
         reason: result.errorCategory || `HTTP ${result.errorStatus || 500}`,
         status: result.errorStatus || 500,
       });
-
-      // Payment error (insufficient funds, simulation failure) — skip remaining
-      // paid models, jump straight to free model. No point trying other paid
-      // models with the same wallet state.
-      // Must be checked BEFORE isProviderError gate: payment settlement failures
-      // may return non-standard HTTP codes that categorizeError doesn't recognize,
-      // causing isProviderError=false and breaking out of the fallback loop.
-      const isPaymentErr =
-        /payment.*verification.*failed|payment.*settlement.*failed|insufficient.*funds|transaction_simulation_failed/i.test(
-          result.errorBody || "",
-        );
-      if (isPaymentErr && !FREE_MODELS.has(tryModel) && !isLastAttempt) {
-        failedAttempts.push({
-          ...failedAttempts[failedAttempts.length - 1],
-          reason: "payment_error",
-        });
-        // Find a free model already in the chain
-        const freeInChain = modelsToTry.findIndex((m, idx) => idx > i && FREE_MODELS.has(m));
-        if (freeInChain > i + 1) {
-          console.log(
-            `[ClawRouter] Payment error — skipping to free model: ${modelsToTry[freeInChain]}`,
-          );
-          i = freeInChain - 1; // loop will increment to freeInChain
-          continue;
-        }
-        // No free model in chain — pick best available and append
-        if (freeInChain === -1) {
-          const freeFallback = pickFreeModel(excludeList);
-          if (freeFallback) {
-            modelsToTry.push(freeFallback);
-            console.log(`[ClawRouter] Payment error — appending free model: ${freeFallback}`);
-            continue;
-          }
-        }
-      }
 
       // If it's a provider error and not the last attempt, try next model
       if (result.isProviderError && !isLastAttempt) {
@@ -4328,7 +3748,6 @@ async function proxyRequest(
                 tryModel,
                 maxTokens,
                 payFetch,
-                balanceMonitor,
                 retrySignal,
               );
               clearTimeout(retryTimeoutId);
@@ -4339,7 +3758,7 @@ async function proxyRequest(
                 if (options.maxCostPerRunUsd && effectiveSessionId && tryModel !== FREE_MODEL) {
                   const costEst = estimateAmount(tryModel, body.length, maxTokens);
                   if (costEst) {
-                    sessionStore.addSessionCost(effectiveSessionId, BigInt(costEst));
+                    sessionStore.addSessionCost(effectiveSessionId, Number(costEst));
                   }
                 }
                 break;
@@ -4452,9 +3871,6 @@ async function proxyRequest(
       const rawErrBody = lastError?.body || structuredMessage;
       const errStatus = lastError?.status || 502;
 
-      // Transform payment errors into user-friendly messages
-      const transformedErr = transformPaymentError(rawErrBody);
-
       // Mark as error for usage logging (logs this failed attempt with cost)
       requestHadError = true;
 
@@ -4466,7 +3882,7 @@ async function proxyRequest(
         // to throw a generic "Unexpected error" instead of a meaningful message.
         let errPayload: string;
         try {
-          const parsed = JSON.parse(transformedErr);
+          const parsed = JSON.parse(rawErrBody);
           if (parsed && typeof parsed === "object" && "error" in parsed) {
             // Already has the correct {"error": {...}} wrapper — use as-is
             errPayload = JSON.stringify(parsed);
@@ -4500,12 +3916,12 @@ async function proxyRequest(
           "x-context-used-kb": String(originalContextSizeKB),
           "x-context-limit-kb": String(CONTEXT_LIMIT_KB),
         });
-        res.end(transformedErr);
+        res.end(rawErrBody);
 
         deduplicator.complete(dedupKey, {
           status: errStatus,
           headers: { "content-type": "application/json" },
-          body: Buffer.from(transformedErr),
+          body: Buffer.from(rawErrBody),
           completedAt: Date.now(),
         });
       }
@@ -4514,7 +3930,7 @@ async function proxyRequest(
       // cost = actual x402 payment if any was made, otherwise 0
       const errModel = routingDecision?.model ?? modelId;
       if (errModel) {
-        const errPayment = paymentStore.getStore()?.amountUsd ?? 0;
+        const errPayment = 0;
         logUsage({
           timestamp: new Date().toISOString(),
           model: errModel,
@@ -5103,11 +4519,6 @@ async function proxyRequest(
       }
     }
 
-    // --- Optimistic balance deduction after successful response ---
-    if (estimatedCostMicros !== undefined) {
-      balanceMonitor.deductEstimated(estimatedCostMicros);
-    }
-
     // Mark request as completed (for client disconnect cleanup)
     completed = true;
   } catch (err) {
@@ -5124,9 +4535,6 @@ async function proxyRequest(
     // Remove in-flight entry so retries aren't blocked
     deduplicator.removeInflight(dedupKey);
 
-    // Invalidate balance cache on payment failure (might be out of date)
-    balanceMonitor.invalidate();
-
     // Convert abort error to more descriptive timeout error
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`Request timed out after ${timeoutMs}ms`, { cause: err });
@@ -5136,47 +4544,20 @@ async function proxyRequest(
   }
 
   // --- Usage logging (fire-and-forget) ---
-  // Use actual x402 payment amount from the per-request AsyncLocalStorage store.
-  // This is the real amount the user paid — no estimation needed.
-  // Falls back to local estimate only for free models (no x402 payment).
+  // Estimate cost based on model pricing and request size.
   const logModel = routingDecision?.model ?? modelId;
   if (logModel) {
-    const actualPayment = paymentStore.getStore()?.amountUsd ?? 0;
-
-    // For free models (no x402 payment), use local cost calculation as fallback
-    let logCost: number;
-    let logBaseline: number;
-    let logSavings: number;
-    if (actualPayment > 0) {
-      logCost = actualPayment;
-      // Calculate baseline for savings comparison
-      const chargedInputTokens = Math.ceil(body.length / 4);
-      const modelDef = BLOCKRUN_MODELS.find((m) => m.id === logModel);
-      const chargedOutputTokens = modelDef ? Math.min(maxTokens, modelDef.maxOutput) : maxTokens;
-      const baseline = calculateModelCost(
-        logModel,
-        routerOpts.modelPricing,
-        chargedInputTokens,
-        chargedOutputTokens,
-        routingProfile ?? undefined,
-      );
-      logBaseline = baseline.baselineCost;
-      logSavings = logBaseline > 0 ? Math.max(0, (logBaseline - logCost) / logBaseline) : 0;
-    } else {
-      const chargedInputTokens = Math.ceil(body.length / 4);
-      const costs = calculateModelCost(
-        logModel,
-        routerOpts.modelPricing,
-        chargedInputTokens,
-        maxTokens,
-        routingProfile ?? undefined,
-      );
-      // Free models: actual cost is $0 (no x402 payment ever made).
-      // MIN_PAYMENT_USD floor in calculateModelCost would falsely inflate stats.
-      logCost = FREE_MODELS.has(logModel) ? 0 : costs.costEstimate;
-      logBaseline = costs.baselineCost;
-      logSavings = FREE_MODELS.has(logModel) ? 1 : costs.savings;
-    }
+    const chargedInputTokens = Math.ceil(body.length / 4);
+    const costs = calculateModelCost(
+      logModel,
+      routerOpts.modelPricing,
+      chargedInputTokens,
+      maxTokens,
+      routingProfile ?? undefined,
+    );
+    const logCost = FREE_MODELS.has(logModel) ? 0 : costs.costEstimate;
+    const logBaseline = costs.baselineCost;
+    const logSavings = FREE_MODELS.has(logModel) ? 1 : costs.savings;
 
     const entry: UsageEntry = {
       timestamp: new Date().toISOString(),

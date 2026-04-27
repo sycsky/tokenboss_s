@@ -23,7 +23,6 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { startProxy } from "../../src/proxy.js";
-import { resolveOrGenerateWalletKey } from "../../src/auth.js";
 import type { ProxyHandle } from "../../src/proxy.js";
 
 // ─── Mock upstream server ─────────────────────────────────────────────────────
@@ -114,12 +113,9 @@ describe("multi-turn reasoning model (issue #135)", () => {
     const { server, url } = await startMockUpstream();
     mockServer = server;
 
-    const wallet = await resolveOrGenerateWalletKey();
     proxy = await startProxy({
-      wallet,
       port: 0, // random free port
       apiBase: url, // point at mock upstream
-      skipBalanceCheck: true,
       // Force kimi-k2.5 as the routing decision so normalizeMessagesForThinking runs
       // We inject it via the model override below rather than routing config
     });

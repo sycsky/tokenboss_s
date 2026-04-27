@@ -7,7 +7,6 @@
  */
 
 import { startProxy } from "../../src/proxy.js";
-import { resolveOrGenerateWalletKey } from "../../src/auth.js";
 import type { ProxyHandle } from "../../src/proxy.js";
 
 const HEALTH_POLL_INTERVAL_MS = 200;
@@ -33,13 +32,10 @@ function getTestPort(): number {
 export async function startTestProxy(): Promise<ProxyHandle> {
   if (proxyHandle) return proxyHandle;
 
-  const wallet = await resolveOrGenerateWalletKey();
   const testPort = getTestPort();
 
   proxyHandle = await startProxy({
-    wallet,
     port: testPort,
-    skipBalanceCheck: true,
   });
 
   // Wait for /health to return 200

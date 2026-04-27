@@ -19,7 +19,7 @@ export type SessionEntry = {
   strikes: number; // Consecutive similar request count
   escalated: boolean; // Whether session was already escalated via three-strike
   // --- Cost accumulation for maxCostPerRun ---
-  sessionCostMicros: bigint; // Total estimated cost for this session run (USDC 6-decimal)
+  sessionCostMicros: number; // Total estimated cost for this session run (in USD)
 };
 
 export type SessionConfig = {
@@ -106,7 +106,7 @@ export class SessionStore {
         recentHashes: [],
         strikes: 0,
         escalated: false,
-        sessionCostMicros: 0n,
+        sessionCostMicros: 0,
       });
     }
   }
@@ -220,7 +220,7 @@ export class SessionStore {
    * Creates a cost-tracking-only entry if none exists (e.g., explicit model requests
    * that never go through the routing path).
    */
-  addSessionCost(sessionId: string, additionalMicros: bigint): void {
+  addSessionCost(sessionId: string, additionalMicros: number): void {
     let entry = this.sessions.get(sessionId);
     if (!entry) {
       const now = Date.now();
@@ -233,7 +233,7 @@ export class SessionStore {
         recentHashes: [],
         strikes: 0,
         escalated: false,
-        sessionCostMicros: 0n,
+        sessionCostMicros: 0,
       };
       this.sessions.set(sessionId, entry);
     }

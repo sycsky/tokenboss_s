@@ -30,17 +30,7 @@ import type {
 import { blockrunProvider, setActiveProxy } from "./provider.js";
 import { startProxy, getProxyPort } from "./proxy.js";
 import { startRemoteTiersRefresh } from "./router/remote-tiers.js";
-import {
-  resolveOrGenerateWalletKey,
-  setupSolana,
-  savePaymentChain,
-  resolvePaymentChain,
-  WALLET_FILE,
-  MNEMONIC_FILE,
-} from "./auth.js";
-import type { WalletResolution } from "./auth.js";
 import type { RoutingConfig } from "./router/index.js";
-import { BalanceMonitor } from "./balance.js";
 import { loadExcludeList } from "./exclude-models.js";
 
 /**
@@ -75,9 +65,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { VERSION } from "./version.js";
-import { privateKeyToAccount } from "viem/accounts";
 import { getStats } from "./stats.js";
-import { buildPartnerTools, PARTNER_SERVICES } from "./partners/index.js";
 import { createStatsCommand } from "./commands/stats.js";
 import { createExcludeCommand } from "./commands/exclude.js";
 
@@ -642,40 +630,6 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
     api.logger.warn(`Remote tier config fetch failed: ${(err as Error).message}`);
   }
 
-  // Resolve wallet key: plugin config → saved file → env var → auto-generate.
-  // pluginConfig.walletKey is declared in openclaw.plugin.json configSchema but
-  // was previously never read here — that was a bug.
-  const configKey = api.pluginConfig?.walletKey as string | undefined;
-  let wallet: WalletResolution;
-
-  if (typeof configKey === "string" && /^0x[0-9a-fA-F]{64}$/.test(configKey)) {
-    const account = privateKeyToAccount(configKey as `0x${string}`);
-    wallet = { key: configKey, address: account.address, source: "config" };
-  } else {
-    if (configKey !== undefined) {
-      api.logger.warn(
-        `pluginConfig.walletKey is set but invalid (expected 0x + 64 hex chars) — falling back to saved wallet`,
-      );
-    }
-    wallet = await resolveOrGenerateWalletKey();
-  }
-
-  // Log wallet source
-  if (wallet.source === "generated") {
-    api.logger.warn(`════════════════════════════════════════════════`);
-    api.logger.warn(`  NEW WALLET GENERATED — BACK UP YOUR KEY NOW!`);
-    api.logger.warn(`  Address : ${wallet.address}`);
-    api.logger.warn(`  Run /wallet export to get your private key`);
-    api.logger.warn(`  Losing this key = losing your USDC funds`);
-    api.logger.warn(`════════════════════════════════════════════════`);
-  } else if (wallet.source === "saved") {
-    api.logger.info(`Using saved wallet: ${wallet.address}`);
-  } else if (wallet.source === "config") {
-    api.logger.info(`Using wallet from plugin config: ${wallet.address}`);
-  } else {
-    api.logger.info(`Using wallet from BLOCKRUN_WALLET_KEY: ${wallet.address}`);
-  }
-
   // Resolve routing config overrides from plugin config
   const routingConfig = api.pluginConfig?.routing as Partial<RoutingConfig> | undefined;
 
@@ -694,29 +648,20 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
   }
 
   const proxy = await startProxy({
-    wallet,
     routingConfig,
     maxCostPerRunUsd,
     maxCostPerRunMode,
     onReady: (port) => {
-      api.logger.info(`BlockRun x402 proxy listening on port ${port}`);
+      api.logger.info(`TokenBoss proxy listening on port ${port}`);
     },
     onError: (error) => {
-      api.logger.error(`BlockRun proxy error: ${error.message}`);
+      api.logger.error(`TokenBoss proxy error: ${error.message}`);
     },
     onRouted: (decision) => {
       const cost = decision.costEstimate.toFixed(4);
       const saved = (decision.savings * 100).toFixed(0);
       api.logger.info(
         `[${decision.tier}] ${decision.model} $${cost} (saved ${saved}%) | ${decision.reasoning}`,
-      );
-    },
-    onLowBalance: (info) => {
-      api.logger.warn(`[!] Low balance: ${info.balanceUSD}. Fund wallet: ${info.walletAddress}`);
-    },
-    onInsufficientFunds: (info) => {
-      api.logger.error(
-        `[!] Insufficient funds. Balance: ${info.balanceUSD}, Needed: ${info.requiredUSD}. Fund wallet: ${info.walletAddress}`,
       );
     },
   });
@@ -736,47 +681,6 @@ async function startProxyInBackground(api: OpenClawPluginApi): Promise<void> {
   api.logger.info(`ClawRouter ready — smart routing enabled`);
   api.logger.info(`Pricing: Simple ~$0.001 | Code ~$0.01 | Complex ~$0.05 | Free: $0`);
 
-  // Non-blocking balance check AFTER proxy is ready (won't hang startup)
-  // Uses the proxy's chain-aware balance monitor and matching active-chain address.
-  const currentChain = await resolvePaymentChain();
-  const displayAddress =
-    currentChain === "solana" && proxy.solanaAddress ? proxy.solanaAddress : wallet.address;
-  const network = currentChain === "solana" ? "Solana" : "Base";
-  proxy.balanceMonitor
-    .checkBalance()
-    .then(async (balance) => {
-      if (balance.isEmpty) {
-        api.logger.info(`Wallet (${network}): ${displayAddress}`);
-        api.logger.info(
-          `Balance: $0.00 — send USDC on ${network} to the address above to unlock paid models.`,
-        );
-      } else if (balance.isLow) {
-        api.logger.info(
-          `Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD} (low — top up soon)`,
-        );
-      } else {
-        api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: ${balance.balanceUSD}`);
-      }
-      // On Solana, if USDC is low/empty, check for SOL and suggest swap
-      if (currentChain === "solana" && (balance.isEmpty || balance.isLow)) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const solLamports: bigint = await (proxy.balanceMonitor as any).checkSolBalance();
-          // Only suggest if they have meaningful SOL (> 0.01 SOL = 10M lamports)
-          if (solLamports > 10_000_000n) {
-            const sol = Number(solLamports) / 1_000_000_000;
-            api.logger.info(
-              `You have ${sol.toFixed(2)} SOL — swap to USDC: https://jup.ag/swap/SOL-USDC`,
-            );
-          }
-        } catch {
-          // SOL check is best-effort, don't block startup
-        }
-      }
-    })
-    .catch(() => {
-      api.logger.info(`Wallet (${network}): ${displayAddress} | Balance: (checking...)`);
-    });
 }
 
 // createStatsCommand moved to src/commands/stats.ts
@@ -829,7 +733,7 @@ function buildImageGenerationProvider(): ImageGenerationProviderPlugin {
         ],
       },
     },
-    isConfigured: () => existsSync(WALLET_FILE),
+    isConfigured: () => true,
     generateImage: async (req: ImageGenerationRequest) => {
       const port = getProxyPort();
       const body = JSON.stringify({
@@ -894,7 +798,7 @@ function buildMusicGenerationProvider(): MusicGenerationProviderPlugin {
       supportsFormat: true,
       supportedFormats: ["mp3"],
     },
-    isConfigured: () => existsSync(WALLET_FILE),
+    isConfigured: () => true,
     generateMusic: async (req: MusicGenerationRequest) => {
       const port = getProxyPort();
       const body = JSON.stringify({
@@ -952,315 +856,6 @@ function buildMusicGenerationProvider(): MusicGenerationProviderPlugin {
   };
 }
 
-/**
- * Restart the proxy in-place after a chain switch.
- * Closes the running proxy (freeing port 8402) and starts a fresh one
- * that reads the newly persisted payment-chain preference from disk.
- * Fire-and-forget — the wallet command returns immediately with a status message.
- */
-function restartProxyForChainSwitch(api: OpenClawPluginApi): void {
-  const oldHandle = activeProxyHandle;
-  activeProxyHandle = null;
-  const doRestart = async () => {
-    if (oldHandle) {
-      try {
-        await oldHandle.close();
-      } catch {
-        // Ignore close errors — port may already be free
-      }
-    }
-    // Brief pause so the OS releases the port before we re-bind
-    await new Promise((r) => setTimeout(r, 300));
-    await startProxyInBackground(api);
-  };
-  doRestart().catch((err) => {
-    api.logger.error(
-      `Failed to restart proxy after chain switch: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  });
-}
-
-function createWalletCommand(api?: OpenClawPluginApi): OpenClawPluginCommandDefinition {
-  return {
-    name: "wallet",
-    description: "Show BlockRun wallet info, balance, chain, or export key",
-    acceptsArgs: true,
-    requireAuth: true,
-    handler: async (ctx: PluginCommandContext) => {
-      const subcommand = ctx.args?.trim().toLowerCase() || "status";
-
-      // Read wallet key if it exists
-      let walletKey: string | undefined;
-      let address: string | undefined;
-      try {
-        if (existsSync(WALLET_FILE)) {
-          walletKey = readTextFileSync(WALLET_FILE).trim();
-          if (walletKey.startsWith("0x") && walletKey.length === 66) {
-            const account = privateKeyToAccount(walletKey as `0x${string}`);
-            address = account.address;
-          }
-        }
-      } catch {
-        // Wallet file doesn't exist or is invalid
-      }
-
-      if (!walletKey || !address) {
-        return {
-          text: `No ClawRouter wallet found.\n\nRun \`openclaw plugins install @blockrun/clawrouter\` to generate a wallet.`,
-          isError: true,
-        };
-      }
-
-      if (subcommand === "export") {
-        // Export private key + mnemonic for backup
-        const lines = [
-          "**ClawRouter Wallet Export**",
-          "",
-          "**SECURITY WARNING**: Your private key and mnemonic control your wallet funds.",
-          "Never share these. Anyone with them can spend your USDC.",
-          "",
-          "**EVM (Base):**",
-          `  Address: \`${address}\``,
-          `  Private Key: \`${walletKey}\``,
-        ];
-
-        // Include mnemonic if it exists (Solana wallet derived from it)
-        let hasMnemonic = false;
-        try {
-          if (existsSync(MNEMONIC_FILE)) {
-            const mnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-            if (mnemonic) {
-              hasMnemonic = true;
-              // Derive Solana address for display
-              const { deriveSolanaKeyBytes } = await import("./wallet.js");
-              const solKeyBytes = deriveSolanaKeyBytes(mnemonic);
-              const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-              const signer = await createKeyPairSignerFromPrivateKeyBytes(solKeyBytes);
-
-              lines.push(
-                "",
-                "**Solana:**",
-                `  Address: \`${signer.address}\``,
-                `  (Derived from mnemonic below)`,
-                "",
-                "**Mnemonic (24 words):**",
-                `\`${mnemonic}\``,
-                "",
-                "CRITICAL: Back up this mnemonic. It is the ONLY way to recover your Solana wallet.",
-              );
-            }
-          }
-        } catch {
-          // No mnemonic - EVM-only wallet
-        }
-
-        lines.push(
-          "",
-          "**To restore on a new machine:**",
-          "1. Set the environment variable before running OpenClaw:",
-          `   \`export BLOCKRUN_WALLET_KEY=${walletKey}\``,
-          "2. Or save to file:",
-          `   \`mkdir -p ~/.openclaw/blockrun && echo "${walletKey}" > ~/.openclaw/blockrun/wallet.key && chmod 600 ~/.openclaw/blockrun/wallet.key\``,
-        );
-
-        if (hasMnemonic) {
-          lines.push(
-            "3. Restore the mnemonic for Solana:",
-            `   \`echo "<your mnemonic>" > ~/.openclaw/blockrun/mnemonic && chmod 600 ~/.openclaw/blockrun/mnemonic\``,
-          );
-        }
-
-        return { text: lines.join("\n") };
-      }
-
-      if (subcommand === "solana") {
-        // Switch to Solana chain. If mnemonic already exists, just persist the selection.
-        // If no mnemonic, set up Solana wallet first.
-        try {
-          let solanaAddr: string | undefined;
-
-          // Check if Solana wallet is already set up (mnemonic exists)
-          if (existsSync(MNEMONIC_FILE)) {
-            const existingMnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-            if (existingMnemonic) {
-              // Already set up — switch chain and restart proxy in-place
-              await savePaymentChain("solana");
-              const { deriveSolanaKeyBytes } = await import("./wallet.js");
-              const solKeyBytes = deriveSolanaKeyBytes(existingMnemonic);
-              const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-              const signer = await createKeyPairSignerFromPrivateKeyBytes(solKeyBytes);
-              solanaAddr = signer.address;
-              if (api) restartProxyForChainSwitch(api);
-              return {
-                text: [
-                  "✓ Payment chain switched to **Solana**.",
-                  api ? "Proxy restarting in background (~2s)." : "Restart the gateway to apply.",
-                  "",
-                  `**Solana Address:** \`${solanaAddr}\``,
-                  `**Fund with USDC on Solana:** https://solscan.io/account/${solanaAddr}`,
-                ].join("\n"),
-              };
-            }
-          }
-
-          // No mnemonic — first-time Solana setup
-          const { solanaPrivateKeyBytes } = await setupSolana();
-          await savePaymentChain("solana");
-          const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-          const signer = await createKeyPairSignerFromPrivateKeyBytes(solanaPrivateKeyBytes);
-          if (api) restartProxyForChainSwitch(api);
-          return {
-            text: [
-              "**Solana Wallet Set Up**",
-              "",
-              `**Solana Address:** \`${signer.address}\``,
-              `**Mnemonic File:** \`${MNEMONIC_FILE}\``,
-              "",
-              "Your existing EVM wallet is unchanged.",
-              api
-                ? "✓ Payment chain switched to Solana. Proxy restarting in background (~2s)."
-                : "Payment chain set to Solana. Restart the gateway to apply.",
-              "",
-              `**Fund with USDC on Solana:** https://solscan.io/account/${signer.address}`,
-            ].join("\n"),
-          };
-        } catch (err) {
-          return {
-            text: `Failed to set up Solana: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-        }
-      }
-
-      if (subcommand === "base") {
-        // Switch back to Base (EVM) payment chain
-        try {
-          await savePaymentChain("base");
-          if (api) restartProxyForChainSwitch(api);
-          return {
-            text: api
-              ? "✓ Payment chain switched to **Base (EVM)**. Proxy restarting in background (~2s)."
-              : "Payment chain set to Base (EVM). Restart the gateway to apply.",
-          };
-        } catch (err) {
-          return {
-            text: `Failed to set payment chain: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-        }
-      }
-
-      // Default: show wallet status — run all checks in parallel for speed
-      const evmBalancePromise = (async () => {
-        try {
-          const monitor = new BalanceMonitor(address!);
-          const balance = await monitor.checkBalance();
-          return `Balance: ${balance.balanceUSD}`;
-        } catch {
-          return "Balance: (could not check)";
-        }
-      })();
-
-      const solanaPromise = (async () => {
-        try {
-          if (!existsSync(MNEMONIC_FILE)) return "";
-          const { deriveSolanaKeyBytes } = await import("./wallet.js");
-          const mnemonic = readTextFileSync(MNEMONIC_FILE).trim();
-          if (!mnemonic) return "";
-          const solKeyBytes = deriveSolanaKeyBytes(mnemonic);
-          const { createKeyPairSignerFromPrivateKeyBytes } = await import("@solana/kit");
-          const signer = await createKeyPairSignerFromPrivateKeyBytes(solKeyBytes);
-          const solAddr = signer.address;
-
-          let solBalanceText = "Balance: (could not check)";
-          try {
-            const { SolanaBalanceMonitor } = await import("./solana-balance.js");
-            const solMonitor = new SolanaBalanceMonitor(solAddr);
-            const solBalance = await solMonitor.checkBalance();
-            solBalanceText = `Balance: ${solBalance.balanceUSD}`;
-          } catch {
-            // keep default
-          }
-
-          return [
-            "",
-            "**Solana:**",
-            `  Address: \`${solAddr}\``,
-            `  ${solBalanceText}`,
-            `  Fund (USDC only): https://solscan.io/account/${solAddr}`,
-          ].join("\n");
-        } catch {
-          return "";
-        }
-      })();
-
-      const chainPromise = resolvePaymentChain();
-
-      const usagePromise = (async () => {
-        try {
-          const stats = await getStats(7);
-          if (stats.totalRequests === 0) return "";
-          const modelLines = Object.entries(stats.byModel)
-            .sort((a, b) => b[1].count - a[1].count)
-            .slice(0, 8)
-            .map(
-              ([model, data]) =>
-                `  ${model.length > 30 ? model.slice(0, 27) + "..." : model}  ${data.count} reqs  $${data.cost.toFixed(4)}`,
-            );
-          return [
-            "",
-            `**Usage (${stats.period}):**`,
-            `  Total: ${stats.totalRequests} requests, $${stats.totalCost.toFixed(4)} spent`,
-            stats.totalSavings > 0
-              ? `  Saved: $${stats.totalSavings.toFixed(4)} (${stats.savingsPercentage.toFixed(0)}% vs Opus baseline)`
-              : "",
-            "",
-            "**Top Models:**",
-            ...modelLines,
-          ]
-            .filter(Boolean)
-            .join("\n");
-        } catch {
-          return "";
-        }
-      })();
-
-      const [evmBalanceText, solanaSection, currentChain, usageSection] = await Promise.all([
-        evmBalancePromise,
-        solanaPromise,
-        chainPromise,
-        usagePromise,
-      ]);
-
-      return {
-        text: [
-          "**ClawRouter Wallet**",
-          "",
-          `**Payment Chain:** ${currentChain === "solana" ? "Solana" : "Base (EVM)"}`,
-          "",
-          "**Base (EVM):**",
-          `  Address: \`${address}\``,
-          `  ${evmBalanceText}`,
-          `  Fund (USDC only): https://basescan.org/address/${address}`,
-          solanaSection,
-          usageSection,
-          "",
-          `**Key File:** \`${WALLET_FILE}\``,
-          "",
-          "**Commands:**",
-          "• `/wallet` - Show this status",
-          "• `/wallet export` - Export private key for backup",
-          "• `/stats` - Detailed usage breakdown",
-          !solanaSection ? "• `/wallet solana` - Enable Solana payments" : "",
-          solanaSection ? "• `/wallet base` - Switch to Base (EVM)" : "",
-          solanaSection ? "• `/wallet solana` - Switch to Solana" : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      };
-    },
-  };
-}
 
 const plugin: OpenClawPluginDefinition = {
   id: "tokenboss-router",
@@ -1336,74 +931,13 @@ const plugin: OpenClawPluginDefinition = {
       api.logger.info("BlockRun provider registered (55+ models via x402)");
     }
 
-    // Register partner API tools (Twitter/X lookup, etc.)
-    try {
-      const proxyBaseUrl = `http://127.0.0.1:${runtimePort}`;
-      const partnerTools = buildPartnerTools(proxyBaseUrl);
-      for (const tool of partnerTools) {
-        api.registerTool(tool);
-      }
-      if (partnerTools.length > 0 && firstTime) {
-        api.logger.info(
-          `Registered ${partnerTools.length} partner tool(s): ${partnerTools.map((t) => t.name).join(", ")}`,
-        );
-      }
-    } catch (err) {
-      api.logger.warn(
-        `Failed to register partner tools: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
     // Register commands
-    api.registerCommand({
-      name: "partners",
-      description: "List available partner APIs and pricing",
-      acceptsArgs: false,
-      requireAuth: false,
-      handler: async () => {
-        if (PARTNER_SERVICES.length === 0) {
-          return { text: "No partner APIs available." };
-        }
-
-        const lines = ["**Partner APIs** (paid via your ClawRouter wallet)", ""];
-
-        for (const svc of PARTNER_SERVICES) {
-          lines.push(`**${svc.name}** (${svc.partner})`);
-          lines.push(`  ${svc.description}`);
-          lines.push(`  Tool: \`${`blockrun_${svc.id}`}\``);
-          lines.push(
-            `  Pricing: ${svc.pricing.perUnit} per ${svc.pricing.unit} (min ${svc.pricing.minimum}, max ${svc.pricing.maximum})`,
-          );
-          lines.push(
-            `  **How to use:** Ask "Look up Twitter user @elonmusk" or "Get info on these X accounts: @naval, @balajis"`,
-          );
-          lines.push("");
-        }
-
-        return { text: lines.join("\n") };
-      },
-    });
-
-    // Register commands synchronously so OpenClaw sees them during the register() call.
-    // These factories are plain functions (no top-level await) — marking them async
-    // caused .then() callbacks to fire after register() returned, making OpenClaw miss them.
-    // Primary: /wallet (original name, lobster.cash removed by update script)
-    api.registerCommand(createWalletCommand(api));
-    // Alias: /blockrun (guaranteed unique fallback)
-    try {
-      const blockrunAlias = createWalletCommand(api);
-      blockrunAlias.name = "blockrun";
-      api.registerCommand(blockrunAlias);
-    } catch {
-      // Silently ignored if "blockrun" is already claimed
-    }
     api.registerCommand(createStatsCommand());
     api.registerCommand(createExcludeCommand());
     if (firstTime) {
-      api.logger.info("Commands registered: /wallet, /blockrun, /stats, /exclude");
+      api.logger.info("Commands registered: /stats, /exclude");
       logProc.__clawrouterRegisterLogged = true;
     }
-
     // Register a service with stop() for cleanup on gateway shutdown
     // This prevents EADDRINUSE when the gateway restarts
     api.registerService({
@@ -1441,38 +975,14 @@ const plugin: OpenClawPluginDefinition = {
     // The proxy keeps the Node.js event loop alive, preventing CLI commands from exiting
     // The proxy will start automatically when the gateway runs
     if (!isGatewayMode()) {
-      // Generate wallet on first install (even outside gateway mode)
-      // This ensures users can see their wallet address immediately after install
-      resolveOrGenerateWalletKey()
-        .then(({ address, source }) => {
-          if (source === "generated") {
-            api.logger.warn(`════════════════════════════════════════════════`);
-            api.logger.warn(`  NEW WALLET GENERATED — BACK UP YOUR KEY NOW!`);
-            api.logger.warn(`  Address : ${address}`);
-            api.logger.warn(`  Run /wallet export to get your private key`);
-            api.logger.warn(`  Losing this key = losing your USDC funds`);
-            api.logger.warn(`════════════════════════════════════════════════`);
-          } else if (source === "saved") {
-            api.logger.info(`Using saved wallet: ${address}`);
-          } else if (source === "config") {
-            api.logger.info(`Using wallet from plugin config: ${address}`);
-          } else {
-            api.logger.info(`Using wallet from BLOCKRUN_WALLET_KEY: ${address}`);
-          }
-        })
-        .catch((err) => {
-          api.logger.warn(
-            `Failed to initialize wallet: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
       api.logger.info("Not in gateway mode — proxy will start when gateway runs");
       return;
     }
 
-    // Start x402 proxy in background WITHOUT blocking register()
+
+    // Start proxy in background WITHOUT blocking register()
     // CRITICAL: Do NOT await here - this was blocking model selection UI for 3+ seconds
     // causing Chandler's "infinite loop" issue where model selection never finishes
-    // Note: startProxyInBackground calls resolveOrGenerateWalletKey internally
     //
     // Guard: only start proxy once per process. When OpenClaw loads duplicate plugin
     // instances (stale install-stage dirs), each calls register() — provider/command
@@ -1668,15 +1178,7 @@ export default plugin;
 
 // Re-export for programmatic use
 export { startProxy, getProxyPort } from "./proxy.js";
-export type {
-  ProxyOptions,
-  ProxyHandle,
-  WalletConfig,
-  PaymentChain,
-  LowBalanceInfo,
-  InsufficientFundsInfo,
-} from "./proxy.js";
-export type { WalletResolution } from "./auth.js";
+export type { ProxyOptions, ProxyHandle } from "./proxy.js";
 export { blockrunProvider } from "./provider.js";
 export {
   OPENCLAW_MODELS,
@@ -1700,43 +1202,9 @@ export { logUsage } from "./logger.js";
 export type { UsageEntry } from "./logger.js";
 export { RequestDeduplicator } from "./dedup.js";
 export type { CachedResponse } from "./dedup.js";
-export { BalanceMonitor, BALANCE_THRESHOLDS } from "./balance.js";
-export type { BalanceInfo, SufficiencyResult } from "./balance.js";
-export { SolanaBalanceMonitor } from "./solana-balance.js";
-export type { SolanaBalanceInfo } from "./solana-balance.js";
-export {
-  SpendControl,
-  FileSpendControlStorage,
-  InMemorySpendControlStorage,
-  formatDuration,
-} from "./spend-control.js";
-export type {
-  SpendWindow,
-  SpendLimits,
-  SpendRecord,
-  SpendingStatus,
-  CheckResult,
-  SpendControlStorage,
-  SpendControlOptions,
-} from "./spend-control.js";
-export {
-  generateWalletMnemonic,
-  isValidMnemonic,
-  deriveEvmKey,
-  deriveSolanaKeyBytes,
-  deriveAllKeys,
-} from "./wallet.js";
-export type { DerivedKeys } from "./wallet.js";
-export { setupSolana, savePaymentChain, loadPaymentChain, resolvePaymentChain } from "./auth.js";
-export {
-  InsufficientFundsError,
-  EmptyWalletError,
-  RpcError,
-  isInsufficientFundsError,
-  isEmptyWalletError,
-  isBalanceError,
-  isRpcError,
-} from "./errors.js";
+
+
+
 export { fetchWithRetry, isRetryable, DEFAULT_RETRY_CONFIG } from "./retry.js";
 export type { RetryConfig } from "./retry.js";
 export { getStats, formatStatsAscii, clearStats } from "./stats.js";
@@ -1750,5 +1218,4 @@ export {
 export type { SessionEntry, SessionConfig } from "./session.js";
 export { ResponseCache } from "./response-cache.js";
 export type { CachedLLMResponse, ResponseCacheConfig } from "./response-cache.js";
-export { PARTNER_SERVICES, getPartnerService, buildPartnerTools } from "./partners/index.js";
-export type { PartnerServiceDefinition, PartnerToolDefinition } from "./partners/index.js";
+
