@@ -390,12 +390,12 @@ function FirstTimeGuide() {
         现在开始
       </div>
       <ol className="space-y-2 mb-3">
-        <Step n="1" title="新建一把 API Key" hint="下面 + 创建新 Key" />
+        <Step n="1" title="新建一把 API Key" hint="点下面的「现在新建 →」" />
         <Step n="2" title="粘到你的 Agent" hint="OpenClaw / Hermes / Codex 都支持" />
         <Step n="3" title="让 Agent 跑一次" hint="这里就会出现真实数据" />
       </ol>
       <Link
-        to="/install/manual"
+        to="/dashboard/keys"
         className={
           'block text-center px-4 py-2 mb-3 bg-yellow-stamp border-2 border-ink rounded ' +
           'text-[12.5px] font-bold tracking-tight text-yellow-stamp-ink ' +
@@ -405,14 +405,14 @@ function FirstTimeGuide() {
           'transition-all'
         }
       >
-        看接入文档 →
+        现在新建 →
       </Link>
-      <div className="border-t-2 border-ink/10 pt-3">
-        <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
-          API KEY
-        </div>
-        <APIKeyList keys={[]} loadError={null} keyStats={new Map()} onChanged={() => location.reload()} />
-      </div>
+      <Link
+        to="/install/manual"
+        className="block text-center font-mono text-[11px] text-[#A89A8D] hover:text-ink underline underline-offset-2 transition-colors"
+      >
+        或先看接入文档
+      </Link>
     </div>
   );
 }

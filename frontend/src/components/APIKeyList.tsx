@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { api, ApiError, type ProxyKeySummary } from '../lib/api';
 
 export interface KeyStats {
@@ -18,24 +19,14 @@ export interface APIKeyListProps {
 }
 
 /**
- * Renders the user's TokenBoss proxy keys as flat rows. Each key now
- * shows a small "last used 5m ago · 142 次" footer when usage stats are
- * present, attributing real Agent activity to the specific key. Designed
- * to live inside a parent Slock-pixel card.
+ * Renders the user's TokenBoss proxy keys as flat rows. Each key shows
+ * a small "5m 前 · 142 次 · $0.034" footer when usage stats are present
+ * (attributing real Agent activity to the specific key). The component
+ * is read-only-ish: the create flow lives on /dashboard/keys (the
+ * dedicated management page that handles label input + the one-shot
+ * "copy now" banner). Revoke stays inline since it's a single confirm.
  */
 export function APIKeyList({ keys, loadError, keyStats, onChanged }: APIKeyListProps) {
-  async function handleCreate() {
-    const label = prompt('Key 名称（可选）');
-    if (label === null) return;
-    try {
-      const newKey = await api.createKey({ label: label.trim() || undefined });
-      alert(`新 key（仅显示一次）:\n${newKey.key}`);
-      onChanged();
-    } catch (e) {
-      alert(e instanceof ApiError ? e.message : `创建失败: ${(e as Error).message}`);
-    }
-  }
-
   async function handleRevoke(keyId: string) {
     if (!confirm('吊销后该 key 立即失效，且无法恢复。确认吗？')) return;
     try {
@@ -97,10 +88,10 @@ export function APIKeyList({ keys, loadError, keyStats, onChanged }: APIKeyListP
           </div>
         );
       })}
-      <button
-        onClick={handleCreate}
+      <Link
+        to="/dashboard/keys"
         className={
-          'w-full mt-3 px-4 py-2 bg-white border-2 border-dashed border-ink rounded ' +
+          'block text-center w-full mt-3 px-4 py-2 bg-white border-2 border-dashed border-ink rounded ' +
           'text-[12.5px] font-bold tracking-tight text-ink ' +
           'shadow-[3px_3px_0_0_#1C1917] ' +
           'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
@@ -108,8 +99,8 @@ export function APIKeyList({ keys, loadError, keyStats, onChanged }: APIKeyListP
           'transition-all'
         }
       >
-        + 创建新 Key
-      </button>
+        {keys.length === 0 ? '+ 创建第一把 Key' : '管理 Key →'}
+      </Link>
     </div>
   );
 }
