@@ -3,6 +3,7 @@ import Landing from './screens/Landing';
 import Login from './screens/Login';
 import MagicLogin from './screens/MagicLogin';
 import Register from './screens/Register';
+import VerifyEmail from './screens/VerifyEmail';
 import OnboardWelcome from './screens/OnboardWelcome';
 import OnboardInstall from './screens/OnboardInstall';
 import OnboardSuccess from './screens/OnboardSuccess';
@@ -22,6 +23,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/login/magic" element={<MagicLogin />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
 
       <Route path="/onboard/welcome" element={<RequireAuth><OnboardWelcome /></RequireAuth>} />
       <Route path="/onboard/install" element={<RequireAuth><OnboardInstall /></RequireAuth>} />

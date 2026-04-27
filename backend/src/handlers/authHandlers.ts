@@ -26,16 +26,20 @@ import type {
 
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
-import { sendVerificationEmail } from "../lib/emailService.js";
+import { sendVerificationEmail, sendVerifyLinkEmail } from "../lib/emailService.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
 import {
   createBucket,
+  createEmailVerifyToken,
+  consumeEmailVerifyToken,
   consumeVerificationCode,
   getUser,
   getUserIdByEmail,
+  markEmailVerified,
   putEmailIndex,
   putUser,
   recentCodeCount,
+  recentEmailVerifyTokenCount,
   saveVerificationCode,
   type UserRecord,
 } from "../lib/store.js";
@@ -117,10 +121,27 @@ async function buildUserProfile(
     userId: u.userId,
     email: u.email,
     displayName: u.displayName,
+    emailVerified: u.emailVerified === true,
     balance,
     freeQuota: getSignupQuota(),
     createdAt: u.createdAt,
   };
+}
+
+/**
+ * Issue a fresh verification token for `userId` and dispatch the link
+ * email. Throws on email-send failure so the caller can surface a 502 — we
+ * don't want to silently create a token the user can't see.
+ */
+async function issueVerificationLink(
+  userId: string,
+  email: string,
+  displayName?: string,
+): Promise<void> {
+  const { token } = createEmailVerifyToken(userId, email);
+  const appUrl = process.env.APP_URL ?? "http://localhost:5179";
+  const link = `${appUrl.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}`;
+  await sendVerifyLinkEmail(email, link, displayName);
 }
 
 /**
@@ -226,6 +247,15 @@ export const registerHandler = async (
   await putEmailIndex(email, userId);
   grantTrialBucket(userId);
 
+  // Send the verification link. If delivery fails (Resend down, no DNS,
+  // dev console disabled), keep the account intact and return 201 — the
+  // user can still log in and trigger /v1/auth/resend-verification.
+  try {
+    await issueVerificationLink(userId, email, displayName);
+  } catch (err) {
+    console.warn(`[register] verification email failed for ${userId}:`, (err as Error).message);
+  }
+
   const token = signSession(userId);
   return jsonResponse(201, {
     token,
@@ -266,6 +296,90 @@ export const loginHandler = async (
     token,
     user: await buildUserProfile(user),
   });
+};
+
+// ---------- POST /v1/auth/verify-email ----------
+
+/**
+ * Consume a verification token (delivered via email) and mark the user
+ * verified. Returns a fresh AuthResponse so the verify page can auto-log
+ * the user in — clicking the email link IS proof of email ownership.
+ */
+export const verifyEmailHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const body = parseJsonBody(event);
+  if (!body) return jsonError(400, "invalid_request_error", "Body must be valid JSON.");
+
+  const token = typeof body.token === "string" ? body.token.trim() : "";
+  if (!token) {
+    return jsonError(400, "invalid_request_error", "Missing token.", "missing_token");
+  }
+
+  const consumed = consumeEmailVerifyToken(token);
+  if (!consumed) {
+    return jsonError(
+      400,
+      "invalid_request_error",
+      "验证链接无效或已过期。请重新发送。",
+      "invalid_token",
+    );
+  }
+
+  markEmailVerified(consumed.userId);
+  const user = await getUser(consumed.userId);
+  if (!user) {
+    // Token was valid but user is gone — should not happen, but be defensive.
+    return jsonError(404, "not_found", "Account not found.", "user_missing");
+  }
+
+  const sessionToken = signSession(user.userId);
+  return jsonResponse(200, {
+    token: sessionToken,
+    user: await buildUserProfile(user),
+  });
+};
+
+// ---------- POST /v1/auth/resend-verification ----------
+
+/**
+ * Authenticated. Re-issues a verification link for the current user. No-op
+ * (still 200) if the email is already verified — keeps the client logic
+ * simple. Rate-limited: 1 / 60s and 5 / hour per user.
+ */
+export const resendVerificationHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const authHeader =
+    event.headers?.authorization ?? event.headers?.Authorization ?? undefined;
+  const auth = await verifySessionHeader(authHeader);
+  if (isAuthFailure(auth)) {
+    return jsonError(auth.status, "authentication_error", auth.message, auth.code);
+  }
+
+  const u = auth.user;
+  if (u.emailVerified) {
+    return jsonResponse(200, { ok: true, alreadyVerified: true });
+  }
+  if (!u.email) {
+    return jsonError(400, "invalid_request_error", "No email on file.", "no_email");
+  }
+
+  if (recentEmailVerifyTokenCount(u.userId, 60) >= 1) {
+    return jsonError(429, "rate_limited", "请稍候再试。", "too_soon");
+  }
+  if (recentEmailVerifyTokenCount(u.userId, 3600) >= 5) {
+    return jsonError(429, "rate_limited", "重发次数已达上限，请 1 小时后再试。", "hourly_limit");
+  }
+
+  try {
+    await issueVerificationLink(u.userId, u.email, u.displayName);
+  } catch (err) {
+    console.error(`[resend-verification] email send failed for ${u.userId}:`, (err as Error).message);
+    return jsonError(502, "upstream_error", "邮件发送失败，请稍后重试。", "email_send_failed");
+  }
+
+  return jsonResponse(200, { ok: true });
 };
 
 // ---------- GET /v1/me ----------

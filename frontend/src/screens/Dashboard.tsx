@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth';
 import { api, type BucketRecord, type UsageDetailResponse } from '../lib/api';
 import { APIKeyList } from '../components/APIKeyList';
 import { UsageRow } from '../components/UsageRow';
+import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -47,6 +48,12 @@ export default function Dashboard() {
           <button onClick={logout} className="w-7 h-7 bg-ink rounded-full text-white text-[11px] font-mono font-bold">{initial}</button>
         </div>
       </nav>
+
+      {user && !user.emailVerified && user.email && (
+        <div className="max-w-[1200px] mx-auto px-5 pt-4">
+          <UnverifiedEmailBanner email={user.email} />
+        </div>
+      )}
 
       <main className="max-w-[1200px] mx-auto px-5 pt-5 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
         {/* Balance hero — full width */}

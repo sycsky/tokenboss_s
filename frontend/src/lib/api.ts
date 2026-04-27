@@ -123,6 +123,8 @@ export interface UserProfile {
   userId: string;
   email: string;
   displayName?: string;
+  /** True after the user clicks the verification link sent on register. */
+  emailVerified: boolean;
   balance: number;
   freeQuota: number;
   createdAt: string;
@@ -243,6 +245,19 @@ export const api = {
       body: { email, password },
       token: null,
     });
+  },
+  verifyEmail(token: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/v1/auth/verify-email", {
+      method: "POST",
+      body: { token },
+      token: null,
+    });
+  },
+  resendVerification(): Promise<{ ok: true; alreadyVerified?: boolean }> {
+    return request<{ ok: true; alreadyVerified?: boolean }>(
+      "/v1/auth/resend-verification",
+      { method: "POST", body: {} },
+    );
   },
 
   // auth — email-code flow (passwordless / "forgot password" recovery)

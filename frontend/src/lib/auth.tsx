@@ -37,6 +37,10 @@ interface AuthContextValue extends AuthState {
   register: (input: { email: string; password: string; displayName?: string }) => Promise<import("./api.js").AuthResponse>;
   /** Log in with email + password. */
   login: (email: string, password: string) => Promise<import("./api.js").AuthResponse>;
+  /** Consume a verification token from the email link. Auto-logs the user in. */
+  verifyEmail: (token: string) => Promise<import("./api.js").AuthResponse>;
+  /** Resend the verification email for the current session. */
+  resendVerification: () => Promise<{ ok: true; alreadyVerified?: boolean }>;
   /** Send a one-time code to the given email address (used by recovery / magic-link flow). */
   sendCode: (email: string) => Promise<void>;
   /**
@@ -104,6 +108,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res;
   }, []);
 
+  const verifyEmail = useCallback(async (token: string): Promise<AuthResponse> => {
+    const res = await api.verifyEmail(token);
+    setStoredSession(res.token);
+    setState({ user: res.user, token: res.token });
+    return res;
+  }, []);
+
+  const resendVerification = useCallback(async () => {
+    return api.resendVerification();
+  }, []);
+
   const sendCode = useCallback(async (email: string) => {
     await api.sendCode(email);
   }, []);
@@ -139,12 +154,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token: state.token,
       register,
       login,
+      verifyEmail,
+      resendVerification,
       sendCode,
       loginWithCode,
       logout,
       refresh,
     }),
-    [state, register, login, sendCode, loginWithCode, logout, refresh],
+    [state, register, login, verifyEmail, resendVerification, sendCode, loginWithCode, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

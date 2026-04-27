@@ -34,8 +34,10 @@ import {
   loginHandler,
   meHandler,
   registerHandler,
+  resendVerificationHandler,
   sendCodeHandler,
   verifyCodeHandler,
+  verifyEmailHandler,
 } from "./handlers/authHandlers.js";
 import {
   createKeyHandler,
@@ -72,6 +74,8 @@ const routes: Route[] = [
   { method: "GET", path: "/hello", handler: helloHandler as LambdaHandler },
   { method: "POST", path: "/v1/auth/register", handler: registerHandler },
   { method: "POST", path: "/v1/auth/login", handler: loginHandler },
+  { method: "POST", path: "/v1/auth/verify-email", handler: verifyEmailHandler },
+  { method: "POST", path: "/v1/auth/resend-verification", handler: resendVerificationHandler },
   { method: "POST", path: "/v1/auth/send-code", handler: sendCodeHandler },
   { method: "POST", path: "/v1/auth/verify-code", handler: verifyCodeHandler },
   { method: "GET", path: "/v1/me", handler: meHandler },

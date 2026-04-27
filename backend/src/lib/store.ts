@@ -28,6 +28,8 @@ export interface UserRecord {
   phone?: string;
   passwordHash?: string;
   createdAt: string;
+  /** True after the user clicks the verification link sent on register. */
+  emailVerified?: boolean;
   /** newapi user ID (if provisioned). */
   newapiUserId?: number;
   /**
@@ -81,6 +83,7 @@ export function init(): void {
       phone          TEXT,
       passwordHash   TEXT,
       createdAt      TEXT NOT NULL,
+      emailVerified  INTEGER NOT NULL DEFAULT 0,
       newapiUserId   INTEGER,
       newapiPassword TEXT
     );
@@ -98,7 +101,22 @@ export function init(): void {
     if (!have.has("newapiPassword")) {
       db.exec(`ALTER TABLE users ADD COLUMN newapiPassword TEXT`);
     }
+    if (!have.has("emailVerified")) {
+      db.exec(`ALTER TABLE users ADD COLUMN emailVerified INTEGER NOT NULL DEFAULT 0`);
+    }
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS email_verify_tokens (
+      token       TEXT PRIMARY KEY,
+      userId      TEXT NOT NULL,
+      email       TEXT NOT NULL,
+      createdAt   TEXT NOT NULL,
+      expiresAt   TEXT NOT NULL,
+      consumedAt  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_evt_user ON email_verify_tokens(userId, createdAt DESC);
+  `);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS credit_bucket (
@@ -168,6 +186,7 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     phone: (row.phone as string) ?? undefined,
     passwordHash: (row.passwordHash as string) ?? undefined,
     createdAt: row.createdAt as string,
+    emailVerified: ((row.emailVerified as number) ?? 0) === 1,
     newapiUserId: (row.newapiUserId as number) ?? undefined,
     newapiPassword: (row.newapiPassword as string) ?? undefined,
   };
@@ -185,9 +204,9 @@ export async function getUser(userId: string): Promise<UserRecord | null> {
 export function putUser(rec: UserRecord): void {
   db.prepare(`
     INSERT OR REPLACE INTO users
-      (userId, displayName, email, phone, passwordHash, createdAt, newapiUserId, newapiPassword)
+      (userId, displayName, email, phone, passwordHash, createdAt, emailVerified, newapiUserId, newapiPassword)
     VALUES
-      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @newapiUserId, @newapiPassword)
+      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified, @newapiUserId, @newapiPassword)
   `).run({
     userId: rec.userId,
     displayName: rec.displayName ?? null,
@@ -195,6 +214,7 @@ export function putUser(rec: UserRecord): void {
     phone: rec.phone ?? null,
     passwordHash: rec.passwordHash ?? null,
     createdAt: rec.createdAt,
+    emailVerified: rec.emailVerified ? 1 : 0,
     newapiUserId: rec.newapiUserId ?? null,
     newapiPassword: rec.newapiPassword ?? null,
   });
@@ -372,6 +392,71 @@ export function recentCodeCount(email: string, sinceSeconds: number): number {
     SELECT COUNT(*) AS n FROM verification_codes
     WHERE email = ? AND createdAt > ? AND consumed = 0
   `).get(email.toLowerCase(), since) as { n: number };
+  return row.n;
+}
+
+// ---------- Public API — Email Verification (link-based) ----------
+
+const EMAIL_VERIFY_TTL_HOURS = 24;
+
+/**
+ * Mint a one-shot URL-safe token tied to (userId, email). Caller embeds
+ * the token in a verification link delivered by email.
+ */
+export function createEmailVerifyToken(userId: string, email: string): {
+  token: string;
+  expiresAt: string;
+} {
+  const token = randomBytes(32).toString("base64url");
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + EMAIL_VERIFY_TTL_HOURS * 3600e3).toISOString();
+  db.prepare(`
+    INSERT INTO email_verify_tokens (token, userId, email, createdAt, expiresAt, consumedAt)
+    VALUES (?, ?, ?, ?, ?, NULL)
+  `).run(token, userId, email.toLowerCase(), now.toISOString(), expiresAt);
+  return { token, expiresAt };
+}
+
+/**
+ * Atomically consume a token. Returns the (userId, email) pair on success,
+ * or null when the token is unknown, expired, or already consumed.
+ */
+export function consumeEmailVerifyToken(token: string): {
+  userId: string;
+  email: string;
+} | null {
+  const row = db.prepare(`
+    SELECT userId, email, expiresAt, consumedAt
+    FROM email_verify_tokens
+    WHERE token = ?
+  `).get(token) as
+    | { userId: string; email: string; expiresAt: string; consumedAt: string | null }
+    | undefined;
+  if (!row) return null;
+  if (row.consumedAt) return null;
+  if (new Date(row.expiresAt) < new Date()) return null;
+
+  db.prepare(`
+    UPDATE email_verify_tokens SET consumedAt = ? WHERE token = ?
+  `).run(new Date().toISOString(), token);
+  return { userId: row.userId, email: row.email };
+}
+
+/** Mark a user's email verified after a successful token consume. */
+export function markEmailVerified(userId: string): void {
+  db.prepare(`UPDATE users SET emailVerified = 1 WHERE userId = ?`).run(userId);
+}
+
+/**
+ * How many verify-token rows have been minted for this user in the past N
+ * seconds. Used to rate-limit the resend endpoint (1 / 60s, 5 / hour).
+ */
+export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number): number {
+  const since = new Date(Date.now() - sinceSeconds * 1000).toISOString();
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM email_verify_tokens
+    WHERE userId = ? AND createdAt > ?
+  `).get(userId, since) as { n: number };
   return row.n;
 }
 

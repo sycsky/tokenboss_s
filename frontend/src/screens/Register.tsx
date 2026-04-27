@@ -6,6 +6,7 @@ import { slockBtn } from '../lib/slockBtn';
 import {
   AuthShell,
   ComingSoonBadge,
+  EnvelopePlate,
   GitHubIcon,
   GoogleIcon,
   authInputCls,
@@ -19,12 +20,14 @@ import {
  */
 export default function Register() {
   const nav = useNavigate();
-  const { register } = useAuth();
+  const { register, resendVerification } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,12 +38,13 @@ export default function Register() {
     setLoading(true);
     setError(null);
     try {
+      const normalizedEmail = email.trim().toLowerCase();
       await register({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         password,
         displayName: displayName.trim() || undefined,
       });
-      nav('/onboard/welcome');
+      setRegisteredEmail(normalizedEmail);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === 'email_taken') {
         setError('这个邮箱已注册，请直接登录');
@@ -50,6 +54,63 @@ export default function Register() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleResend() {
+    setResendState('sending');
+    try {
+      await resendVerification();
+      setResendState('sent');
+    } catch {
+      setResendState('error');
+    }
+  }
+
+  if (registeredEmail) {
+    return (
+      <AuthShell>
+        <div className="text-center">
+          <div className="inline-block mb-5">
+            <EnvelopePlate />
+          </div>
+          <h1 className="text-[24px] font-bold text-ink tracking-tight mb-1.5">
+            查收你的邮箱
+          </h1>
+          <p className="text-[13.5px] text-[#6B5E52] mb-1">
+            我们刚把验证邮件发到了
+          </p>
+          <p className="font-mono text-[14px] text-ink font-semibold mb-7 break-all">
+            {registeredEmail}
+          </p>
+          <p className="text-[13px] text-[#6B5E52] leading-relaxed mb-7 -mt-3">
+            点击邮件里的"验证我的邮箱"按钮即可完成注册。链接 24 小时内有效。
+          </p>
+
+          <button
+            type="button"
+            onClick={() => nav('/onboard/welcome')}
+            className={slockBtn('primary') + ' w-full mb-3'}
+          >
+            稍后验证 · 进入控制台
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={resendState === 'sending' || resendState === 'sent'}
+            className="text-[13px] text-ink underline underline-offset-4 decoration-2 hover:text-accent disabled:opacity-50 transition-colors"
+          >
+            {resendState === 'sending'
+              ? '发送中…'
+              : resendState === 'sent'
+                ? '已重新发送 ✓'
+                : resendState === 'error'
+                  ? '发送失败，重试'
+                  : '没收到？重新发送'}
+          </button>
+        </div>
+      </AuthShell>
+    );
   }
 
   return (
