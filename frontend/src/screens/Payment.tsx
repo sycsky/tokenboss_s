@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppNav } from '../components/AppNav';
 import { TIERS, tierPrice } from '../lib/pricing';
-import { useCurrency } from '../lib/currency';
-import { api, type BillingChannel, type BillingPlanId } from '../lib/api';
+import { api, type BillingChannel, type BillingPlanId, type BucketRecord } from '../lib/api';
+import { ContactSalesModal } from '../components/ContactSalesModal';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -39,12 +39,39 @@ export default function Payment() {
   const [params] = useSearchParams();
   const planId = asPlanId(params.get('plan'));
   const navigate = useNavigate();
-  const { currency } = useCurrency();
 
   // Channel default: 支付宝 (xunhupay). Most users in CN, fewer steps.
   const [channel, setChannel] = useState<BillingChannel>('xunhupay');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Lock-out for already-paid users. v1 has no self-serve renew/upgrade,
+  // so anyone with an active plan_* sub bouncing into /billing/pay would
+  // hit a dead end — the gateway might even take their money for a
+  // duplicate sub. Pull buckets on mount and short-circuit to a
+  // "联系客服" page when we detect a paid sub.
+  const [paidSku, setPaidSku] = useState<BucketRecord['skuType'] | null>(null);
+  const [bucketsLoaded, setBucketsLoaded] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api.getBuckets()
+      .then((res) => {
+        if (cancelled) return;
+        const paid = res.buckets.find((b) =>
+          b.skuType === 'plan_plus' ||
+          b.skuType === 'plan_super' ||
+          b.skuType === 'plan_ultra',
+        );
+        setPaidSku(paid?.skuType ?? null);
+      })
+      .catch(() => {
+        // Network blip — don't block the user. Worst case they hit the
+        // gateway and double-pay, which is recoverable via support.
+      })
+      .finally(() => { if (!cancelled) setBucketsLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
 
   if (!planId) {
     return (
@@ -66,8 +93,62 @@ export default function Payment() {
     );
   }
 
+  // Lock-out: user already has a paid plan, can't self-checkout for
+  // another. Tell them clearly + provide a "联系客服" path. Wait for the
+  // buckets fetch so we don't flash this page on every mount.
+  if (bucketsLoaded && paidSku) {
+    const tierName = paidSku.replace('plan_', '').toUpperCase();
+    return (
+      <div className="min-h-screen bg-bg pb-12">
+        <AppNav current="console" />
+        <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-10">
+          <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
+            BILLING · 已订阅
+          </div>
+          <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3">
+            你已经订阅了 {tierName}
+          </h1>
+          <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
+            v1.0 还没开放自助续费 / 升级。要调整套餐请联系客服，或者等当前订阅到期后重新选购。
+          </p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setContactOpen(true)}
+              className={
+                'px-5 py-2.5 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold ' +
+                'shadow-[3px_3px_0_0_#1C1917] ' +
+                'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+                'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+                'transition-all'
+              }
+            >
+              联系客服 →
+            </button>
+            <Link
+              to="/console"
+              className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
+            >
+              ← 返回控制台
+            </Link>
+          </div>
+        </main>
+        <ContactSalesModal
+          open={contactOpen}
+          onClose={() => setContactOpen(false)}
+          reason={paidSku === 'plan_ultra' ? 'renew' : 'upgrade'}
+        />
+      </div>
+    );
+  }
+
   const plan = planByIdSafe(planId);
-  const price = tierPrice(plan, currency);
+  // Price displayed on this page tracks the selected channel, NOT the
+  // user's currency-switcher preference. xunhupay is CNY-only; epusdt
+  // quotes in USD. The actual amount charged to the gateway matches
+  // what's shown here.
+  const displayCurrency = channel === 'epusdt' ? 'usdc' : 'rmb';
+  const price = tierPrice(plan, displayCurrency);
 
   async function submit() {
     if (!planId) return;

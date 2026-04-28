@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useCurrency } from '../lib/currency';
@@ -7,6 +8,8 @@ import { SectionHeader } from '../components/SectionHeader';
 import { TopNav } from '../components/TopNav';
 import { AppNav } from '../components/AppNav';
 import { CurrencySwitcher } from '../components/CurrencySwitcher';
+import { ContactSalesModal } from '../components/ContactSalesModal';
+import { api, type BucketRecord } from '../lib/api';
 
 export default function Plans() {
   const { user } = useAuth();
@@ -17,14 +20,54 @@ export default function Plans() {
   const goPay = (plan: 'plus' | 'super' | 'ultra') =>
     navigate(`/billing/pay?plan=${plan}`);
 
-  // Logged-in users get real "立即开通" CTAs; anonymous visitors are
-  // funneled into registration first (free trial then upgrade).
-  const tierCta = (plan: 'plus' | 'super' | 'ultra') =>
-    isLoggedIn
-      ? { text: '立即开通 →', onClick: () => goPay(plan) }
-      : { text: '免费开始 →', onClick: goRegister };
+  // Pull live subscription state from /v1/buckets — needed to decide
+  // whether a logged-in user can self-checkout (trial / no sub) or has
+  // to talk to support (paid). v1 has no self-serve renew/upgrade so any
+  // active paid plan locks self-checkout until it expires naturally.
+  const [paidSku, setPaidSku] = useState<BucketRecord['skuType'] | null>(null);
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    let cancelled = false;
+    api.getBuckets()
+      .then((res) => {
+        if (cancelled) return;
+        const paid = res.buckets.find((b) =>
+          b.skuType === 'plan_plus' ||
+          b.skuType === 'plan_super' ||
+          b.skuType === 'plan_ultra',
+        );
+        setPaidSku(paid?.skuType ?? null);
+      })
+      .catch(() => {
+        // Network blip — let the user proceed with normal CTAs rather than
+        // blocking them out of caution.
+      });
+    return () => { cancelled = true; };
+  }, [isLoggedIn]);
+
+  // Contact-sales modal (shared with Dashboard). Paid users hitting the
+  // tier CTA fire this instead of self-checkout.
+  const [contactReason, setContactReason] = useState<
+    'upgrade' | 'renew' | 'topup' | 'general' | null
+  >(null);
+
+  // CTA for the 3 paid tiers. Three states:
+  //   - anonymous           → "免费开始 →"     → /register
+  //   - logged in, no paid  → "立即开通 →"     → /billing/pay?plan=...
+  //   - logged in, has paid → "联系客服"        → ContactSalesModal
+  const tierCta = (plan: 'plus' | 'super' | 'ultra') => {
+    if (!isLoggedIn) return { text: '免费开始 →', onClick: goRegister };
+    if (paidSku) {
+      const isUltra = paidSku === 'plan_ultra';
+      return {
+        text: isUltra ? '已订阅 · 联系客服续费' : '已订阅 · 联系客服调整',
+        onClick: () => setContactReason(isUltra ? 'renew' : 'upgrade'),
+      };
+    }
+    return { text: '立即开通 →', onClick: () => goPay(plan) };
+  };
   const standardCta = isLoggedIn
-    ? { text: '联系客服充值', onClick: undefined }
+    ? { text: '联系客服充值', onClick: () => setContactReason('topup') }
     : { text: '免费开始 →', onClick: goRegister };
 
   const std = STANDARD_RATE[currency];
@@ -148,6 +191,12 @@ export default function Plans() {
           所有套餐含 24h 内不满意全额退款 · 套餐到期前 3 天提醒 · 不自动续费
         </div>
       </main>
+
+      <ContactSalesModal
+        open={contactReason !== null}
+        onClose={() => setContactReason(null)}
+        reason={contactReason ?? 'general'}
+      />
     </div>
   );
 }

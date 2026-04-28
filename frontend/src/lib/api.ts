@@ -125,8 +125,9 @@ export interface UserProfile {
   displayName?: string;
   /** True after the user clicks the verification link sent on register. */
   emailVerified: boolean;
+  /** Live remaining quota from newapi (USD). 0 when newapi is unreachable
+   *  or the user has no upstream account yet. */
   balance: number;
-  freeQuota: number;
   createdAt: string;
 }
 
@@ -193,6 +194,10 @@ export interface BucketRecord {
   expiresAt: string | null;
   modeLock: "none" | "auto_only" | "auto_eco_only";
   modelPool: "all" | "codex_only" | "eco_only";
+  /** When newapi will next refill this subscription. ISO string sourced
+   *  from the subscription's next_reset_time. null when the plan never
+   *  resets (e.g. trial: quota_reset_period=never). */
+  nextResetAt: string | null;
   createdAt: string;
 }
 
@@ -249,13 +254,16 @@ export interface MeResponse {
 export type BillingPlanId = "plus" | "super" | "ultra";
 export type BillingChannel = "epusdt" | "xunhupay";
 export type BillingStatus = "pending" | "paid" | "expired" | "failed";
+export type BillingCurrency = "CNY" | "USD";
 
 export interface BillingOrder {
   orderId: string;
   planId: BillingPlanId;
   channel: BillingChannel;
-  amountCNY: number;
-  /** USDT amount when channel=epusdt; equal to amountCNY when channel=xunhupay. */
+  /** Quoted amount in `currency` (CNY for xunhupay, USD for epusdt). */
+  amount: number;
+  currency: BillingCurrency;
+  /** Channel-side actual settled amount (USDT count for epusdt). */
   amountActual?: number;
   status: BillingStatus;
   paymentUrl?: string;
@@ -268,7 +276,8 @@ export interface CreateOrderResponse {
   orderId: string;
   planId: BillingPlanId;
   channel: BillingChannel;
-  amountCNY: number;
+  amount: number;
+  currency: BillingCurrency;
   amountActual?: number;
   paymentUrl: string;
   /** Direct QR image URL when channel=xunhupay. Use to render an

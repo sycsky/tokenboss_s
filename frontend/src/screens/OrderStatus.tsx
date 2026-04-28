@@ -163,7 +163,9 @@ export default function OrderStatus() {
             <span>{CHANNEL_LABEL[order.channel] ?? order.channel}</span>
           </Row>
           <Row label="金额">
-            <span className="font-mono">¥{order.amountCNY.toFixed(2)}</span>
+            <span className="font-mono">
+              {order.currency === 'USD' ? '$' : '¥'}{order.amount.toFixed(2)}
+            </span>
             {order.channel === 'epusdt' && order.amountActual ? (
               <span className="ml-2 font-mono text-[12px] text-text-secondary">
                 ≈ {order.amountActual.toFixed(4)} USDT
@@ -188,7 +190,8 @@ export default function OrderStatus() {
         <PendingActions
           paymentUrl={navState.paymentUrl ?? order.paymentUrl}
           qrCodeUrl={navState.qrCodeUrl}
-          amountCNY={order.amountCNY}
+          amount={order.amount}
+          currency={order.currency}
           channel={order.channel}
         />
       )}
@@ -285,12 +288,14 @@ function StatusHero({ status, hasQr }: { status: BillingStatus; hasQr: boolean }
 function PendingActions({
   paymentUrl,
   qrCodeUrl,
-  amountCNY,
+  amount,
+  currency,
   channel,
 }: {
   paymentUrl?: string;
   qrCodeUrl?: string;
-  amountCNY: number;
+  amount: number;
+  currency: BillingOrder['currency'];
   channel: BillingOrder['channel'];
 }) {
   // Inline QR — only shown when the upstream gave us a direct image URL
@@ -299,6 +304,7 @@ function PendingActions({
   // "open checkout in new tab" link below.
   if (qrCodeUrl) {
     const channelLabel = channel === 'xunhupay' ? '支付宝' : '钱包';
+    const symbol = currency === 'USD' ? '$' : '¥';
     return (
       <section className={`${card} p-6 mb-6`}>
         <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-4">
@@ -313,7 +319,7 @@ function PendingActions({
           />
           <div className="mt-4 font-mono text-[12px] text-ink-2 text-center">
             用 {channelLabel} 扫描二维码支付
-            <span className="ml-2 font-bold text-ink">¥{amountCNY.toFixed(2)}</span>
+            <span className="ml-2 font-bold text-ink">{symbol}{amount.toFixed(2)}</span>
           </div>
           <div className="mt-1 font-mono text-[11px] text-ink-3 text-center">
             扫码后请勿关闭此页 · 支付完成自动跳转
