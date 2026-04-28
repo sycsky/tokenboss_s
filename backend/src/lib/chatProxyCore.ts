@@ -126,7 +126,7 @@ async function resolveCallerPlan(
  *
  * Whenever the request resolves to a non-eco tier we hand it off to the
  * `eco` virtual profile, which `resolveVirtualModel` then resolves via
- * `data/router-tiers.json` `ecoTiers`. This keeps the eco model catalog
+ * `config/router-tiers.json` `ecoTiers`. This keeps the eco model catalog
  * in ONE place (the router config) instead of TokenBoss picking a model
  * out of thin air.
  *

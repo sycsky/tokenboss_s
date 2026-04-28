@@ -14,7 +14,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
-COPY --from=build /app/data ./data
+COPY --from=build /app/config ./config
 COPY --from=build /app/package.json ./package.json
 EXPOSE 8080
 ENV NODE_ENV=production

@@ -6,7 +6,7 @@
  * scoring as ClawRouter. Returns the full fallback chain so the proxy can
  * retry on upstream failure.
  *
- * Tier tables are loaded from `data/router-tiers.json` and merged with the
+ * Tier tables are loaded from `config/router-tiers.json` and merged with the
  * default scoring config (keywords / weights / boundaries).
  */
 
@@ -19,7 +19,7 @@ import { getFallbackChain } from "./selector.js";
 import { classifyByLLM, isLLMClassifierEnabled } from "./llmClassifier.js";
 import type { RoutingConfig, Tier, TierConfig } from "./types.js";
 
-const CONFIG_PATH = join(process.cwd(), "data", "router-tiers.json");
+const CONFIG_PATH = join(process.cwd(), "config", "router-tiers.json");
 const RELOAD_INTERVAL_MS = 60_000;
 
 type CachedConfig = { loadedAt: number; config: RoutingConfig };

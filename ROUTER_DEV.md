@@ -103,10 +103,10 @@ git push
 → 改 `src/router/` 下的文件，需发布新版本 NPM
 
 **加新模型**
-→ 改 `src/models.ts` 的模型列表，同时更新 `backend/data/router-tiers.json`，需发布新版本 NPM
+→ 改 `src/models.ts` 的模型列表，同时更新 `backend/config/router-tiers.json`，需发布新版本 NPM
 
 **改 Tier 配置**（哪种复杂度用哪个模型）
-→ 只改 `backend/data/router-tiers.json`，push 后插件 10 分钟内自动生效，**不需要发布新版本 NPM**
+→ 只改 `backend/config/router-tiers.json`，push 后插件 10 分钟内自动生效，**不需要发布新版本 NPM**
 
 **改安装脚本**
 → 改 `backend/public/install/install.ps1`，push 后 Zeabur 重新部署即生效，**不需要发布新版本 NPM**
@@ -143,7 +143,7 @@ openclaw → 本地代理 :8402 → TokenBoss 后端 → newapi → 真实 LLM
 | `blockrun/premium` | 优先选高质量模型（premiumTiers） |
 | `blockrun/agentic` | 工具调用场景（agenticTiers） |
 
-路由配置来自后端 `backend/data/router-tiers.json`，插件启动时拉取，每 10 分钟刷新一次。
+路由配置来自后端 `backend/config/router-tiers.json`，插件启动时拉取，每 10 分钟刷新一次。
 
 ### 打包说明
 

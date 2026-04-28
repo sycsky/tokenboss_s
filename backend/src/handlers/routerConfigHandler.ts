@@ -6,7 +6,7 @@
  * routing (primary/fallback per SIMPLE|MEDIUM|COMPLEX|REASONING) without
  * shipping a new client release.
  *
- * Storage is a plain JSON file at `backend/data/router-tiers.json`. Edit the
+ * Storage is a plain JSON file at `backend/config/router-tiers.json`. Edit the
  * file on the server; clients pick up changes on their next refresh tick.
  *
  * No auth — the tier mapping is not confidential and making this public
@@ -20,7 +20,7 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
-const CONFIG_PATH = join(process.cwd(), "data", "router-tiers.json");
+const CONFIG_PATH = join(process.cwd(), "config", "router-tiers.json");
 
 export const routerTiersHandler = async (
   _event: APIGatewayProxyEventV2,
