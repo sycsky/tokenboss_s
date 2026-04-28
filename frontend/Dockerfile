@@ -6,6 +6,11 @@ WORKDIR /app
 COPY frontend/package*.json .
 RUN npm ci
 COPY frontend/ .
+# `frontend/public/skill.md` is a git symlink → `../../skill.md` (repo root).
+# That symlink dangles inside the build container because we only COPY
+# the frontend/ subtree; overwrite it with the real file from the build
+# context root so Vite's publicDir can stat it.
+COPY skill.md ./public/skill.md
 RUN npm run build
 
 FROM nginx:alpine
