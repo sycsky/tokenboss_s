@@ -1,26 +1,115 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppNav } from '../components/AppNav';
-import { CurrencySwitcher } from '../components/CurrencySwitcher';
+import { TIERS, tierPrice } from '../lib/pricing';
 import { useCurrency } from '../lib/currency';
+import { api, type BillingChannel, type BillingPlanId } from '../lib/api';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
+type PlanInfo = (typeof TIERS)[number];
+
+const VALID_PLANS = new Set<BillingPlanId>(['plus', 'super', 'ultra']);
+
+function asPlanId(v: string | null): BillingPlanId | null {
+  if (!v) return null;
+  return VALID_PLANS.has(v as BillingPlanId) ? (v as BillingPlanId) : null;
+}
+
+function planByIdSafe(id: BillingPlanId): PlanInfo {
+  // TIERS uses display-cased names (Plus/Super/Ultra) — match case-insensitively.
+  return TIERS.find((t) => t.name.toLowerCase() === id) ?? TIERS[0];
+}
+
+/**
+ * Distinguish "phone" from "PC". `pointer: coarse` matches touch-primary
+ * devices, which on real Android/iOS phones is the most reliable signal —
+ * UA sniffing alone misses tablets-with-keyboard and Chinese in-app
+ * webviews. Width fallback covers DevTools "device toolbar" testing.
+ */
+function isMobileLike(): boolean {
+  if (typeof window === 'undefined') return false;
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const narrow = window.innerWidth < 768;
+  const ua = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return coarse || narrow || ua;
+}
+
 export default function Payment() {
-  const loc = useLocation();
-  const plan = (loc.state as { plan?: string } | null)?.plan;
+  const [params] = useSearchParams();
+  const planId = asPlanId(params.get('plan'));
+  const navigate = useNavigate();
   const { currency } = useCurrency();
-  const wechatId = 'tokenboss_admin';
 
-  const [copied, setCopied] = useState(false);
+  // Channel default: 支付宝 (xunhupay). Most users in CN, fewer steps.
+  const [channel, setChannel] = useState<BillingChannel>('xunhupay');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function copyWechat() {
+  if (!planId) {
+    return (
+      <div className="min-h-screen bg-bg pb-12">
+        <AppNav current="console" />
+        <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-10">
+          <h1 className="text-[28px] font-bold mb-3">未指定套餐</h1>
+          <p className="text-[14px] text-text-secondary mb-6">
+            从套餐页选择一个套餐再来。
+          </p>
+          <Link
+            to="/pricing"
+            className="inline-block px-5 py-2.5 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold shadow-[3px_3px_0_0_#1C1917]"
+          >
+            前往套餐页
+          </Link>
+        </main>
+      </div>
+    );
+  }
+
+  const plan = planByIdSafe(planId);
+  const price = tierPrice(plan, currency);
+
+  async function submit() {
+    if (!planId) return;
+    setSubmitting(true);
+    setError(null);
     try {
-      await navigator.clipboard.writeText(wechatId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — user can copy manually */
+      const res = await api.createOrder({ planId, channel });
+      const mobile = isMobileLike();
+
+      if (channel === 'xunhupay' && mobile) {
+        // Mobile + 支付宝: deeplink to Alipay via xunhupay's H5 page.
+        // Same-window navigation is required — popups are blocked /
+        // deeplinks must run in the user's primary browser context.
+        // After payment, gateway redirects to /billing/success?orderId=...
+        // (our return_url default), which is the OrderStatus page.
+        window.location.href = res.paymentUrl;
+        return;
+      }
+
+      if (channel === 'xunhupay' && !mobile && res.qrCodeUrl) {
+        // PC + 支付宝: render the QR inline on the status page so the user
+        // never leaves our app. Pass the QR URL via navigation state — it's
+        // not stored server-side and would be lost on a hard refresh, in
+        // which case OrderStatus falls back to a "重新打开支付页" link
+        // built from `paymentUrl` returned by getOrder.
+        navigate(`/billing/orders/${encodeURIComponent(res.orderId)}`, {
+          state: { qrCodeUrl: res.qrCodeUrl, paymentUrl: res.paymentUrl },
+        });
+        return;
+      }
+
+      // epusdt (区块链): epusdt's hosted checkout page handles QR/copy
+      // address itself. Open in a new tab on PC; same-window on mobile.
+      // Mobile + xunhupay without qrCodeUrl falls through here too.
+      if (res.paymentUrl) {
+        if (mobile) window.location.href = res.paymentUrl;
+        else window.open(res.paymentUrl, '_blank', 'noopener,noreferrer');
+      }
+      navigate(`/billing/orders/${encodeURIComponent(res.orderId)}`);
+    } catch (err) {
+      setError((err as Error).message || '下单失败，稍后再试');
+      setSubmitting(false);
     }
   }
 
@@ -29,102 +118,168 @@ export default function Payment() {
       <AppNav current="console" />
 
       <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-6">
+        {/* Crumbs */}
         <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
           <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
           <span className="mx-2 text-[#D9CEC2]">/</span>
           <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
           <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">开通</span>
+          <span className="text-ink-2">下单</span>
         </div>
 
-        <div className="flex items-start justify-between gap-4 mb-2">
-          <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold flex items-center gap-2">
-            <span className="bg-yellow-stamp text-yellow-stamp-ink border-2 border-ink rounded px-1.5 py-0.5 tracking-[0.12em]">
-              v1.0
-            </span>
-            <span>BILLING · 开通</span>
-          </div>
-          <CurrencySwitcher />
+        {/* Eyebrow */}
+        <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
+          BILLING · 下单
         </div>
         <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3">
-          {plan ? `${plan} 我们手动给你开通。` : '套餐我们手动给你开通。'}
+          {plan.name} 套餐
         </h1>
-        <p className="text-[14px] text-text-secondary mb-9 max-w-[520px] leading-relaxed">
-          {currency === 'usdc'
-            ? 'v1.0 还没接入自助支付。把注册邮箱、想买的套餐、USDC 收款地址需求告诉客服——'
-            : 'v1.0 还没接入自助支付。加客服微信，把你的注册邮箱和想买的套餐告诉他——'}
-          <span className="text-ink font-semibold">2 小时内</span>开通到账。
+        <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
+          确认订单信息并选择支付方式，付款完成后我们会在 1 分钟内自动激活你的套餐。
         </p>
 
-        {/* Contact card */}
+        {/* Order summary */}
         <section className={`${card} p-6 mb-6`}>
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-4">
-            客服微信
+            订单摘要
           </div>
-          <div className="flex flex-col sm:flex-row items-center gap-6">
-            {/* QR placeholder */}
-            <div className="w-40 h-40 bg-bg border-2 border-dashed border-ink rounded-md flex items-center justify-center font-mono text-[10.5px] text-[#A89A8D] flex-shrink-0">
-              [QR · 上线后替换]
-            </div>
-            <div className="flex-1 w-full">
-              <div className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#A89A8D] mb-1.5">
-                微信 ID
-              </div>
-              <div className="font-mono text-[18px] text-ink font-bold mb-3 break-all">
-                {wechatId}
-              </div>
-              <button
-                onClick={copyWechat}
-                className={
-                  'inline-flex items-center px-4 py-2 bg-ink text-bg border-2 border-ink rounded text-[13px] font-bold ' +
-                  'shadow-[2px_2px_0_0_#1C1917] ' +
-                  'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-                  'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-                  'transition-all'
-                }
-              >
-                {copied ? '已复制 ✓' : '复制微信号'}
-              </button>
-            </div>
-          </div>
+          <dl className="space-y-3">
+            <Row label="套餐">
+              <span className="font-bold">{plan.name}</span>
+            </Row>
+            <Row label="价格">
+              <span className="font-mono font-bold text-[18px]">{price.price}</span>
+              <span className="text-text-secondary ml-2 text-[13px]">{price.period}</span>
+            </Row>
+            <Row label="额度">
+              <span className="text-[13.5px]">{plan.totalQuota}</span>
+            </Row>
+            <Row label="每日 cap">
+              <span className="text-[13.5px]">{plan.dailyCap}</span>
+            </Row>
+            <Row label="模型">
+              <span className="text-[13.5px]">{plan.models}</span>
+            </Row>
+          </dl>
         </section>
 
-        {/* What to send */}
-        <section className={`${card} p-6 mb-9`}>
+        {/* Channel picker */}
+        <section className="mb-6">
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
-            发给客服时带这些
+            支付方式
           </div>
-          <ul className="space-y-2 text-[13.5px] text-text-secondary leading-relaxed">
-            <Bullet>你的注册邮箱（控制台右上角 avatar 看得到）</Bullet>
-            <Bullet>{plan ? `想买的套餐：${plan}` : '想买的套餐（Plus / Super / Ultra / 标准充值）'}</Bullet>
-            <Bullet>{currency === 'usdc' ? '付款偏好：USDC（链 / 钱包地址客服会发给你）' : '付款偏好（微信 / 支付宝）'}</Bullet>
-          </ul>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <ChannelOption
+              active={channel === 'xunhupay'}
+              onClick={() => setChannel('xunhupay')}
+              title="支付宝"
+              subtitle="PC 扫码 / 手机直跳"
+              tag="即时到账"
+            />
+            <ChannelOption
+              active={channel === 'epusdt'}
+              onClick={() => setChannel('epusdt')}
+              title="USDT-TRC20"
+              subtitle="区块链稳定币 · TRON"
+              tag="海外友好"
+            />
+          </div>
         </section>
 
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <Link
-            to="/console"
-            className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
-          >
-            ← 返回控制台
-          </Link>
+        {/* Error */}
+        {error && (
+          <div className="mb-5 p-3 border-2 border-red-600 rounded-md bg-red-50 font-mono text-[12px] text-red-700">
+            {error}
+          </div>
+        )}
+
+        {/* Action */}
+        <div className="flex items-center justify-between flex-wrap gap-3 mt-8">
           <Link
             to="/pricing"
             className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
           >
-            重新选套餐 →
+            ← 重新选套餐
           </Link>
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className={
+              'px-6 py-3 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold ' +
+              'shadow-[3px_3px_0_0_#1C1917] ' +
+              (submitting
+                ? 'opacity-60 cursor-not-allowed'
+                : 'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+                  'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+                  'transition-all')
+            }
+          >
+            {submitting ? '生成订单中…' : `去付款 · ${price.price}`}
+          </button>
+        </div>
+
+        <div className="mt-10 font-mono text-[11.5px] text-ink-3 leading-relaxed">
+          · 支付完成后会自动跳转回控制台，套餐 1 分钟内生效<br />
+          · 支付页面会在新窗口打开，本页面会显示订单状态<br />
+          · 24h 内不满意可联系客服全额退款
         </div>
       </main>
     </div>
   );
 }
 
-function Bullet({ children }: { children: React.ReactNode }) {
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <li className="flex items-start gap-2">
-      <span className="font-mono text-accent font-bold flex-shrink-0 leading-snug">·</span>
-      <span>{children}</span>
-    </li>
+    <div className="flex items-baseline justify-between gap-4 py-1">
+      <dt className="font-mono text-[12px] text-[#A89A8D] uppercase tracking-[0.06em] flex-shrink-0">
+        {label}
+      </dt>
+      <dd className="text-right text-ink">{children}</dd>
+    </div>
+  );
+}
+
+function ChannelOption({
+  active,
+  onClick,
+  title,
+  subtitle,
+  tag,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  subtitle: string;
+  tag: string;
+}) {
+  const base =
+    'block w-full text-left p-5 border-2 border-ink rounded-md transition-all';
+  const onState = active
+    ? 'bg-ink text-bg shadow-[3px_3px_0_0_#1C1917]'
+    : 'bg-white text-ink shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#1C1917]';
+
+  return (
+    <button onClick={onClick} className={`${base} ${onState}`} type="button">
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <span className="text-[16px] font-bold">{title}</span>
+        <span
+          className={
+            'font-mono text-[10px] tracking-[0.08em] px-1.5 py-0.5 rounded border-2 ' +
+            (active
+              ? 'border-bg text-bg'
+              : 'border-ink text-ink-2')
+          }
+        >
+          {tag}
+        </span>
+      </div>
+      <div
+        className={
+          'text-[12.5px] ' + (active ? 'text-bg/80' : 'text-text-secondary')
+        }
+      >
+        {subtitle}
+      </div>
+    </button>
   );
 }

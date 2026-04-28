@@ -14,13 +14,15 @@ export default function Plans() {
   const isLoggedIn = !!user;
   const navigate = useNavigate();
   const goRegister = () => navigate('/register');
+  const goPay = (plan: 'plus' | 'super' | 'ultra') =>
+    navigate(`/billing/pay?plan=${plan}`);
 
-  const tierCta = isLoggedIn
-    ? { text: '联系客服购买', onClick: undefined }
-    : { text: '免费开始 →', onClick: goRegister };
-  const ultraCta = isLoggedIn
-    ? { text: '名额已满', onClick: undefined, variant: 'disabled' as const, soldOut: true }
-    : { text: '免费开始 →', onClick: goRegister, variant: 'secondary' as const, soldOut: false };
+  // Logged-in users get real "立即开通" CTAs; anonymous visitors are
+  // funneled into registration first (free trial then upgrade).
+  const tierCta = (plan: 'plus' | 'super' | 'ultra') =>
+    isLoggedIn
+      ? { text: '立即开通 →', onClick: () => goPay(plan) }
+      : { text: '免费开始 →', onClick: goRegister };
   const standardCta = isLoggedIn
     ? { text: '联系客服充值', onClick: undefined }
     : { text: '免费开始 →', onClick: goRegister };
@@ -109,8 +111,8 @@ export default function Plans() {
             totalUsd={plus.totalQuota}
             dailyCap={plus.dailyCap}
             models={plus.models}
-            ctaText={tierCta.text}
-            onCtaClick={tierCta.onClick}
+            ctaText={tierCta('plus').text}
+            onCtaClick={tierCta('plus').onClick}
             ctaVariant="secondary"
             tooltipExtras={plus.tooltipExtras}
           />
@@ -121,8 +123,8 @@ export default function Plans() {
             totalUsd={sup.totalQuota}
             dailyCap={sup.dailyCap}
             models={sup.models}
-            ctaText={tierCta.text}
-            onCtaClick={tierCta.onClick}
+            ctaText={tierCta('super').text}
+            onCtaClick={tierCta('super').onClick}
             ctaVariant="primary"
             featured
             tooltipExtras={sup.tooltipExtras}
@@ -134,10 +136,9 @@ export default function Plans() {
             totalUsd={ultra.totalQuota}
             dailyCap={ultra.dailyCap}
             models={ultra.models}
-            ctaText={ultraCta.text}
-            onCtaClick={ultraCta.onClick}
-            ctaVariant={ultraCta.variant}
-            soldOut={ultraCta.soldOut}
+            ctaText={tierCta('ultra').text}
+            onCtaClick={tierCta('ultra').onClick}
+            ctaVariant="secondary"
             tooltipExtras={ultra.tooltipExtras}
           />
         </div>

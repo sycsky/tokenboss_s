@@ -244,6 +244,40 @@ export interface MeResponse {
   user: UserProfile;
 }
 
+// ---------- billing types ----------
+
+export type BillingPlanId = "plus" | "super" | "ultra";
+export type BillingChannel = "epusdt" | "xunhupay";
+export type BillingStatus = "pending" | "paid" | "expired" | "failed";
+
+export interface BillingOrder {
+  orderId: string;
+  planId: BillingPlanId;
+  channel: BillingChannel;
+  amountCNY: number;
+  /** USDT amount when channel=epusdt; equal to amountCNY when channel=xunhupay. */
+  amountActual?: number;
+  status: BillingStatus;
+  paymentUrl?: string;
+  blockTxId?: string;
+  createdAt: string;
+  paidAt?: string;
+}
+
+export interface CreateOrderResponse {
+  orderId: string;
+  planId: BillingPlanId;
+  channel: BillingChannel;
+  amountCNY: number;
+  amountActual?: number;
+  paymentUrl: string;
+  /** Direct QR image URL when channel=xunhupay. Use to render an
+   *  inline QR on PC instead of redirecting to the gateway. */
+  qrCodeUrl?: string;
+  expiresAt?: number;
+  status: BillingStatus;
+}
+
 // ---------- public API ----------
 
 export const api = {
@@ -346,5 +380,27 @@ export const api = {
         .map(([k, v]) => [k, String(v)]),
     ).toString();
     return request<UsageAggregateResponse>(`/v1/usage?${qs}`, { method: 'GET' });
+  },
+
+  // billing
+  createOrder(input: {
+    planId: BillingPlanId;
+    channel: BillingChannel;
+    /** Optional: where to send the user back after the gateway. Defaults
+     *  to backend-side `${PUBLIC_BASE_URL}/billing/success?orderId=...`. */
+    redirectUrl?: string;
+  }): Promise<CreateOrderResponse> {
+    return request<CreateOrderResponse>("/v1/billing/orders", {
+      method: "POST",
+      body: input,
+    });
+  },
+  getOrder(orderId: string): Promise<{ order: BillingOrder }> {
+    return request<{ order: BillingOrder }>(
+      `/v1/billing/orders/${encodeURIComponent(orderId)}`,
+    );
+  },
+  listOrders(): Promise<{ orders: BillingOrder[] }> {
+    return request<{ orders: BillingOrder[] }>("/v1/billing/orders");
   },
 };
