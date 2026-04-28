@@ -21,7 +21,8 @@ export interface PlanConfig {
   priceCNY: number;
   /** Daily $ allowance pushed into newapi.quota at midnight. */
   dailyQuotaUsd: number;
-  /** Subscription length in days (default cycle = 30). */
+  /** Subscription length in days. Default cycle is 28 (= 4 weeks) so the
+   *  expiry date matches the "/ 4 周" copy on the marketing/Plans page. */
   durationDays: number;
   /** newapi user-group name applied on subscription start. */
   group: string;
@@ -32,21 +33,21 @@ export const PLANS = {
     displayName: "Plus",
     priceCNY: 288,
     dailyQuotaUsd: 30,
-    durationDays: 30,
+    durationDays: 28,
     group: "plus",
   },
   super: {
     displayName: "Super",
     priceCNY: 688,
     dailyQuotaUsd: 80,
-    durationDays: 30,
+    durationDays: 28,
     group: "super",
   },
   ultra: {
     displayName: "Ultra",
     priceCNY: 1688,
     dailyQuotaUsd: 720,
-    durationDays: 30,
+    durationDays: 28,
     group: "ultra",
   },
 } as const satisfies Record<string, PlanConfig>;
