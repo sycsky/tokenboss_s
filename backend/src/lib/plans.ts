@@ -59,6 +59,34 @@ export function isPlanId(v: unknown): v is PlanId {
   return typeof v === "string" && (PLAN_IDS as readonly string[]).includes(v);
 }
 
+/**
+ * Resolve the effective CNY price for a plan, honouring an optional env
+ * override of the form `PLAN_PRICE_<PLANID>_CNY=<number>`.
+ *
+ * Use case: end-to-end payment testing in production (or any deployed
+ * environment) without touching source. Set e.g. `PLAN_PRICE_PLUS_CNY=10`
+ * in Zeabur Variables, redeploy the backend, run a real ¥10 order through
+ * 支付宝/USDT, then unset the var to restore the real price.
+ *
+ * Notes:
+ *   • USDT (epusdt) channels reject amounts under their per-instance min
+ *     (commonly 0.5 USDT ≈ ¥4). Pick override ≥ ¥5 if you plan to test
+ *     the crypto path.
+ *   • Frontend pricing copy in `frontend/src/lib/pricing.ts` is NOT tied
+ *     to this — the displayed price stays the marketing one even with
+ *     the override on. The amount the user actually pays at the gateway
+ *     is what this function returns.
+ */
+export function getPlanPriceCNY(planId: PlanId): number {
+  const envKey = `PLAN_PRICE_${planId.toUpperCase()}_CNY`;
+  const raw = process.env[envKey];
+  if (raw) {
+    const v = parseFloat(raw);
+    if (Number.isFinite(v) && v > 0) return v;
+  }
+  return PLANS[planId].priceCNY;
+}
+
 /** Free-tier defaults. Free users are NOT in `PLANS` — they get a
  *  one-shot $10 quota at signup with no daily reset. The `free` group on
  *  newapi can be configured to restrict eco-only channels if you want

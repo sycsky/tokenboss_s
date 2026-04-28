@@ -46,6 +46,10 @@ export interface CreateOrderInput {
 export interface CreateOrderResult {
   upstreamTradeId: string;
   paymentUrl: string;
+  /** Direct QR-code image URL when the channel exposes one (xunhupay).
+   *  Lets the frontend render the QR inline on PC instead of routing the
+   *  user to the gateway's hosted checkout page. */
+  qrCodeUrl?: string;
   amountActual: number;
   expiresAt: number;
 }

@@ -18,6 +18,8 @@ import type {
 } from "aws-lambda";
 
 import { epusdtFromEnv } from "../lib/payment/epusdt.js";
+import { xunhupayFromEnv } from "../lib/payment/xunhupay.js";
+import type { PaymentChannelClient } from "../lib/payment/types.js";
 import {
   getOrder,
   getUser,
@@ -70,44 +72,54 @@ function parseBody(event: APIGatewayProxyEventV2): Record<string, unknown> | nul
   }
 }
 
-// ---------- POST /v1/billing/webhook/epusdt ----------
+// ---------- shared core ----------
 
-export const epusdtWebhookHandler = async (
+/**
+ * Core webhook flow shared by all channels: parse body, verify signature,
+ * settle the order, kick the plan into newapi. The only per-channel things
+ * are the client used for verification and the literal ack string the
+ * gateway expects.
+ */
+async function processWebhook(
   event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> => {
-  const client = epusdtFromEnv();
+  client: PaymentChannelClient | null,
+  channel: string,
+  ack: string,
+): Promise<APIGatewayProxyResultV2> {
+  const tag = `[webhook/${channel}]`;
+
   if (!client) {
-    // Misconfiguration: log loud, fail hard. Returning non-"ok" makes
-    // epusdt retry, which is what we want until ops fixes the env.
-    console.error("[webhook/epusdt] not configured — refusing");
-    return textResponse(503, "epusdt_not_configured");
+    // Misconfiguration: log loud, fail hard. Returning a non-ack body makes
+    // the gateway retry, which is what we want until ops fixes the env.
+    console.error(`${tag} not configured — refusing`);
+    return textResponse(503, `${channel}_not_configured`);
   }
 
   const body = parseBody(event);
   if (!body) {
-    console.warn("[webhook/epusdt] unparsable body");
+    console.warn(`${tag} unparsable body`);
     return textResponse(400, "bad_request");
   }
 
   const verified = client.verifyCallback(body);
   if (!verified) {
-    console.warn("[webhook/epusdt] signature verification failed", {
-      orderId: body.order_id,
+    console.warn(`${tag} signature verification failed`, {
+      orderId: body.order_id ?? body.trade_order_id,
     });
     return textResponse(403, "bad_signature");
   }
 
   const order = await getOrder(verified.orderId);
   if (!order) {
-    console.warn("[webhook/epusdt] unknown order", { orderId: verified.orderId });
-    // Returning "ok" tells epusdt to stop retrying; if we 5xx it'll keep
-    // hammering us. The order genuinely doesn't exist — nothing to do.
-    return textResponse(200, "ok");
+    console.warn(`${tag} unknown order`, { orderId: verified.orderId });
+    // Returning the ack tells the gateway to stop retrying; the order
+    // genuinely doesn't exist on our side — nothing to do.
+    return textResponse(200, ack);
   }
 
   if (verified.status === "expired") {
     await markOrderStatus({ orderId: order.orderId, status: "expired" });
-    return textResponse(200, "ok");
+    return textResponse(200, ack);
   }
 
   if (verified.status === "paid") {
@@ -119,17 +131,33 @@ export const epusdtWebhookHandler = async (
       receiveAddress: verified.receiveAddress,
     });
     if (settled) {
-      console.info("[webhook/epusdt] order settled", {
+      console.info(`${tag} order settled`, {
         orderId: order.orderId,
         userId: order.userId,
         planId: order.planId,
         amountActual: verified.amountActual,
       });
-      await applyPlanToUser(order.userId, order.planId);
+      await applyPlanToUser(order.userId, order.planId, channel);
     }
   }
 
-  return textResponse(200, "ok");
+  return textResponse(200, ack);
+}
+
+// ---------- POST /v1/billing/webhook/epusdt ----------
+
+export const epusdtWebhookHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  return processWebhook(event, epusdtFromEnv(), "epusdt", "ok");
+};
+
+// ---------- POST /v1/billing/webhook/xunhupay ----------
+
+export const xunhupayWebhookHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  return processWebhook(event, xunhupayFromEnv(), "xunhupay", "success");
 };
 
 /**
@@ -143,9 +171,14 @@ export const epusdtWebhookHandler = async (
  * so a transient newapi outage doesn't block the webhook ack — the next
  * dailyCron run will pick the user up by their `users.plan` row anyway.
  */
-async function applyPlanToUser(userId: string, planId: string): Promise<void> {
+async function applyPlanToUser(
+  userId: string,
+  planId: string,
+  channel: string,
+): Promise<void> {
+  const tag = `[webhook/${channel}]`;
   if (!isPlanId(planId)) {
-    console.error(`[webhook/epusdt] unknown planId on settled order: ${planId}`);
+    console.error(`${tag} unknown planId on settled order: ${planId}`);
     return;
   }
   const cfg = PLANS[planId];
@@ -166,7 +199,7 @@ async function applyPlanToUser(userId: string, planId: string): Promise<void> {
   const user = await getUser(userId);
   if (!user || user.newapiUserId == null) {
     console.warn(
-      `[webhook/epusdt] user ${userId} has no newapi link — skipping quota push`,
+      `${tag} user ${userId} has no newapi link — skipping quota push`,
     );
     return;
   }
@@ -180,12 +213,12 @@ async function applyPlanToUser(userId: string, planId: string): Promise<void> {
       group: cfg.group,
     });
     console.info(
-      `[webhook/epusdt] applied ${planId} to user=${userId}: quota=$${cfg.dailyQuotaUsd}/day group=${cfg.group}`,
+      `${tag} applied ${planId} to user=${userId}: quota=$${cfg.dailyQuotaUsd}/day group=${cfg.group}`,
     );
   } catch (err) {
     const msg = err instanceof NewapiError ? err.message : (err as Error).message;
     console.error(
-      `[webhook/epusdt] newapi.updateUser failed for ${userId}: ${msg}`,
+      `${tag} newapi.updateUser failed for ${userId}: ${msg}`,
     );
   }
 }

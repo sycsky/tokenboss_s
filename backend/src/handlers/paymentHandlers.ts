@@ -23,20 +23,19 @@ import {
   verifySessionHeader,
 } from "../lib/auth.js";
 import { epusdtFromEnv, EpusdtError } from "../lib/payment/epusdt.js";
-import type { PaymentChannel, PlanId } from "../lib/payment/types.js";
+import { xunhupayFromEnv, XunhupayError } from "../lib/payment/xunhupay.js";
+import type { PaymentChannel } from "../lib/payment/types.js";
 import {
   createOrder,
   getOrder,
   listOrdersByUser,
   type OrderRecord,
 } from "../lib/store.js";
-import { PLANS, isPlanId } from "../lib/plans.js";
+import { isPlanId, getPlanPriceCNY } from "../lib/plans.js";
 
-// Plan price (CNY) is derived from PLANS — keep that file as the single
-// source of truth. Frontend Payment.tsx should mirror PLANS values.
-const PLAN_PRICE: Record<PlanId, number> = Object.fromEntries(
-  Object.entries(PLANS).map(([id, cfg]) => [id, cfg.priceCNY]),
-) as Record<PlanId, number>;
+// PLAN_PRICE was a frozen snapshot of PLANS[*].priceCNY built at module
+// load — replaced by getPlanPriceCNY(), which reads the env override at
+// call time so PLAN_PRICE_<PLANID>_CNY can flip without a process bounce.
 
 function jsonResponse(
   statusCode: number,
@@ -153,7 +152,7 @@ export const createOrderHandler = async (
 
   const planId = body.planId;
   const channel = body.channel;
-  const amountCNY = PLAN_PRICE[planId];
+  const amountCNY = getPlanPriceCNY(planId);
 
   const baseUrl = resolvePublicBaseUrl(event);
   if (!baseUrl) {
@@ -176,12 +175,15 @@ export const createOrderHandler = async (
       );
     }
   } else {
-    return jsonError(
-      503,
-      "service_unavailable",
-      "xunhupay channel is not yet implemented.",
-      "xunhupay_not_implemented",
-    );
+    client = xunhupayFromEnv();
+    if (!client) {
+      return jsonError(
+        503,
+        "service_unavailable",
+        "xunhupay is not configured (set XUNHUPAY_APPID / XUNHUPAY_APPSECRET).",
+        "xunhupay_not_configured",
+      );
+    }
   }
 
   const orderId = newOrderId();
@@ -202,7 +204,8 @@ export const createOrderHandler = async (
         : `${baseUrl}/billing/success?orderId=${orderId}`,
     });
   } catch (err) {
-    const status = err instanceof EpusdtError ? 502 : 500;
+    const status =
+      err instanceof EpusdtError || err instanceof XunhupayError ? 502 : 500;
     return jsonError(
       status,
       "upstream_error",
@@ -231,6 +234,7 @@ export const createOrderHandler = async (
     amountCNY,
     amountActual: result.amountActual,
     paymentUrl: result.paymentUrl,
+    qrCodeUrl: result.qrCodeUrl,
     expiresAt: result.expiresAt,
     status: "pending",
   });

@@ -51,7 +51,7 @@ import {
   getOrderHandler,
   listOrdersHandler,
 } from "./handlers/paymentHandlers.js";
-import { epusdtWebhookHandler } from "./handlers/paymentWebhook.js";
+import { epusdtWebhookHandler, xunhupayWebhookHandler } from "./handlers/paymentWebhook.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { catalogJsonHandler } from "./handlers/catalogJson.js";
 import { skillMdHandler } from "./handlers/skillMd.js";
@@ -97,6 +97,7 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/billing/orders", handler: listOrdersHandler },
   { method: "GET", path: "/v1/billing/orders/{orderId}", handler: getOrderHandler },
   { method: "POST", path: "/v1/billing/webhook/epusdt", handler: epusdtWebhookHandler },
+  { method: "POST", path: "/v1/billing/webhook/xunhupay", handler: xunhupayWebhookHandler },
   { method: "GET", path: "/skill.md", handler: skillMdHandler as LambdaHandler },
   { method: "GET", path: "/api/catalog.json", handler: catalogJsonHandler },
 ];
