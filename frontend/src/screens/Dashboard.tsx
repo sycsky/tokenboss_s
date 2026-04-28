@@ -164,14 +164,6 @@ export default function Dashboard() {
   const keyStats = useMemo(() => shapeKeyStats(keyHintGroups), [keyHintGroups]);
   const noActivity = (usage.totals?.calls ?? 0) === 0;
 
-  // Wallet balance — independent of subscription quota. user.balance is
-  // newapi's live `quota - used_quota`, i.e. money the user has on top of
-  // any subscription (e.g. from a future top-up). Currently $0 for users
-  // who haven't done a top-up — but it's NOT subscription quota, so it
-  // gets its own display surface (was wrongly merged into the hero
-  // earlier and disappeared on V3).
-  const walletUsd = user?.balance ?? 0;
-
   // V3: trial is a subscription too. The hero treats trial / plus / super /
   // ultra uniformly as "subBucket" and only diverges in the chip color +
   // countdown phrasing.
@@ -378,15 +370,14 @@ export default function Dashboard() {
             <>
               <div className="flex items-baseline gap-3 flex-wrap">
                 <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                  钱包余额
+                  暂无订阅
                 </span>
-                <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
-                  <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
-                  {walletUsd.toFixed(4)}
+                <span className="font-mono text-[20px] sm:text-[24px] font-semibold leading-none">
+                  开通套餐立即用上 Agent
                 </span>
               </div>
 
-              <Link to="/pricing" className={slockBtn('secondary') + ' ml-auto'}>充值 →</Link>
+              <Link to="/pricing" className={slockBtn('secondary') + ' ml-auto'}>开通 →</Link>
             </>
           )}
         </section>
@@ -415,25 +406,6 @@ export default function Dashboard() {
                 <span>剩 <span className="text-ink font-semibold">${periodRemaining.toFixed(4)}</span></span>
                 <span>{formatResetHint(subBucket?.nextResetAt, isTrial)}</span>
               </div>
-            </section>
-          )}
-
-          {/* Wallet balance — independent from subscription. Shows the
-              user's topup / left-over money in newapi. Currently $0 for
-              fresh users; surfaced separately so the hero "试用剩 / 今日
-              剩" doesn't hide the fact that subscription quota and
-              wallet are different concepts. */}
-          {subBucket && (
-            <section className={`${card} p-4 flex items-center gap-3`}>
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold flex-shrink-0">
-                钱包余额
-              </span>
-              <span className="font-mono text-[16px] font-bold text-ink">
-                ${walletUsd.toFixed(4)}
-              </span>
-              <span className="font-mono text-[11px] text-[#A89A8D] flex-1">
-                独立于订阅；用于充值后的余量消耗
-              </span>
             </section>
           )}
 

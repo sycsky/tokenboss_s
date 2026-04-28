@@ -87,36 +87,23 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Build a profile for API responses. When newapi is configured and the user
- * has a provisioned newapi account, `balance` is the live remaining newapi
- * quota (`quota - used_quota`) — newapi is the single source of truth.
- *
- * V3 note: subscription state (current plan, expiry, daily reset) is NOT
- * surfaced here. Frontends should call `/v1/buckets` for that — it reads
- * directly from newapi's subscription module so the answer is always live
- * and TokenBoss has no stale-cache window.
+ * Build a profile for API responses. Identity-only — subscription state
+ * (active plan, expiry, period quota) lives in newapi and is exposed
+ * via `/v1/buckets`. The previous `balance` field was newapi's
+ * `quota - used_quota` which in V3 ends up being the SAME thing the
+ * subscription card shows (newapi's user.quota auto-tracks the active
+ * sub's remaining), so it was dropped to avoid confusing duplication.
+ * If V2-style topup ever returns we'll add it back as a true
+ * "wallet outside subscription" field.
  */
 async function buildUserProfile(
   u: UserRecord,
 ): Promise<Record<string, unknown>> {
-  let balance = 0;
-  if (isNewapiConfigured() && u.newapiUserId !== undefined) {
-    try {
-      const nu = await newapi.getUser(u.newapiUserId);
-      balance = Math.max(0, nu.quota - nu.used_quota);
-    } catch (err) {
-      console.warn(
-        `[userProfile] newapi getUser failed for ${u.userId}:`,
-        (err as Error).message,
-      );
-    }
-  }
   return {
     userId: u.userId,
     email: u.email,
     displayName: u.displayName,
     emailVerified: u.emailVerified === true,
-    balance,
     createdAt: u.createdAt,
   };
 }

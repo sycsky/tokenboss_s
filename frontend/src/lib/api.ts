@@ -125,9 +125,6 @@ export interface UserProfile {
   displayName?: string;
   /** True after the user clicks the verification link sent on register. */
   emailVerified: boolean;
-  /** Live remaining quota from newapi (USD). 0 when newapi is unreachable
-   *  or the user has no upstream account yet. */
-  balance: number;
   createdAt: string;
 }
 
