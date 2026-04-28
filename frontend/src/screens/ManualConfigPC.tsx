@@ -24,7 +24,68 @@ const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C191
 const codeChip =
   'font-mono text-[12px] text-ink bg-bg border-2 border-ink rounded px-2 py-0.5 break-all';
 const codeBlock =
-  'font-mono text-[12.5px] text-ink bg-bg border-2 border-ink rounded p-3 break-all leading-relaxed';
+  'font-mono text-[12.5px] text-ink bg-bg border-2 border-ink rounded p-3 ' +
+  // `whitespace-pre-wrap` keeps newlines + leading indent in multi-line
+  // snippets (curl with `\` continuation, JSON config, Python init, etc.)
+  // while still wrapping long single lines.
+  'whitespace-pre-wrap break-all leading-relaxed';
+
+/**
+ * Per-Agent recipe entry — name, where to put the config, the actual snippet
+ * to paste. Snippets reference the OpenAI-compatible endpoint (the only one
+ * the backend serves at /v1/chat/completions). Keys are 48-char raw tokens
+ * with no `tb_live_` / `sk-` prefix — that's what /console actually shows.
+ */
+interface AgentRecipe {
+  id: string;
+  name: string;
+  where: string;
+  snippet: string;
+  language?: 'json' | 'shell' | 'python';
+}
+
+const RECIPES: AgentRecipe[] = [
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    where: 'Settings → Models → OpenAI API Key + Override OpenAI Base URL',
+    snippet: `OpenAI API Key:    <你的 TokenBoss key>
+Base URL:          https://api.tokenboss.co/v1`,
+  },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    where: '环境变量（在 shell rc 里 export，或一次性放在前面）',
+    snippet: `export ANTHROPIC_BASE_URL=https://api.tokenboss.co/v1
+export ANTHROPIC_API_KEY=<你的 TokenBoss key>`,
+    language: 'shell',
+  },
+  {
+    id: 'continue',
+    name: 'Continue (VS Code)',
+    where: '~/.continue/config.json 的 models 数组',
+    snippet: `{
+  "title": "TokenBoss",
+  "provider": "openai",
+  "model": "gpt-5.5",
+  "apiBase": "https://api.tokenboss.co/v1",
+  "apiKey": "<你的 TokenBoss key>"
+}`,
+    language: 'json',
+  },
+  {
+    id: 'sdk',
+    name: 'OpenAI SDK (Python)',
+    where: '初始化 client 时传 base_url + api_key',
+    snippet: `from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://api.tokenboss.co/v1",
+    api_key="<你的 TokenBoss key>",
+)`,
+    language: 'python',
+  },
+];
 
 export default function ManualConfigPC() {
   return (
@@ -45,9 +106,9 @@ export default function ManualConfigPC() {
         <h1 className="text-[40px] md:text-[48px] font-bold tracking-tight leading-[1.05] mb-3">
           一行咒语，接通你的 Agent。
         </h1>
-        <p className="text-[14px] text-text-secondary mb-9 max-w-[540px] leading-relaxed">
+        <p className="text-[14px] text-text-secondary mb-9 max-w-[560px] leading-relaxed">
           大部分 Agent 都能识别"自然语言安装"——粘一行进终端，Agent 自己拉文档、自己问你要 Key、自己写配置。
-          下面也保留了传统的 4 步方式。
+          下面也有按 Agent 分的手动配置入口。
         </p>
 
         {/* 01 · One-liner spell (the recommended path) */}
@@ -62,70 +123,82 @@ export default function ManualConfigPC() {
             <p className="text-[13.5px] text-text-secondary mb-4 leading-relaxed">
               在你的 Agent 终端里粘这行——它会自己拉 <span className={codeChip}>skill.md</span> 完成接入。
             </p>
-            <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" />
+            <TerminalBlock cmd="set up tokenboss.co/skill.md" size="lg" />
             <CompatRow label="已支持" agents={AGENTS} className="mt-4" />
           </div>
         </section>
 
-        {/* 02 · Manual 4-step fallback */}
-        <section>
+        {/* 02 · Manual config — keep two foundational steps (key + endpoint),
+            then per-Agent recipes that put the snippet in the right place
+            for each tool. Replaces the old "传统 4 步" wall of text. */}
+        <section className="mb-10">
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3 flex items-center gap-2">
             <span className="bg-bg-alt text-ink-2 border-2 border-ink rounded px-1.5 py-0.5 tracking-[0.12em]">
-              备选
+              手动
             </span>
-            <span>传统 4 步</span>
+            <span>不识别咒语？两步搞定</span>
           </div>
-          <div className={`${card} p-6 space-y-5`}>
+
+          <div className={`${card} p-6 space-y-5 mb-5`}>
             <Step
               n="1"
-              title="创建一把 API Key"
+              title="拿一把 API Key"
               body={
                 <span>
-                  到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 右栏 API KEY 区，点「+ 创建 API Key」。
-                  弹窗里点 <span className="font-semibold text-ink">复制 API Key</span>，或之后回列表点 复制 也能再拿。
+                  到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 右栏 API KEY 标签旁的 <span className="font-semibold text-ink">+</span>。
+                  弹窗里直接 <span className="font-semibold text-ink">复制 API Key</span>；之后回 default 那行点复制图标也能再拿。
+                  <span className="block mt-1.5 font-mono text-[11px] text-[#A89A8D]">
+                    Key 是一串 48 位字符（无前缀），形如 <span className={codeChip}>AVtIT7M3aMM7…zBAu</span>
+                  </span>
                 </span>
               }
             />
             <Step
               n="2"
-              title="设置 Base URL"
+              title="把 Base URL 指到 TokenBoss"
               body={
                 <div className="space-y-2">
-                  <p>把这个地址作为你的 Agent 的 OpenAI 兼容 base URL：</p>
-                  <div className={codeBlock}>https://api.tokenboss.com/v1</div>
-                </div>
-              }
-            />
-            <Step
-              n="3"
-              title="设置环境变量"
-              body={
-                <div className="space-y-2">
-                  <p>把刚才复制的 key 写进环境变量（或粘到 Agent 配置的 API Key 字段）：</p>
-                  <div className={codeBlock}>{'export TOKENBOSS_API_KEY=tb_live_xxxxxxxx'}</div>
-                </div>
-              }
-            />
-            <Step
-              n="4"
-              title="跑一次测试"
-              body={
-                <div className="space-y-2">
-                  <p>看看 base URL 是否能访问、key 是否生效：</p>
-                  <div className={codeBlock}>{'curl -H "Authorization: Bearer $TOKENBOSS_API_KEY" \\\n     https://api.tokenboss.com/v1/models'}</div>
+                  <p>所有支持 OpenAI 兼容协议的 Agent 都通过这个地址走我们：</p>
+                  <div className={codeBlock}>https://api.tokenboss.co/v1</div>
                   <p className="font-mono text-[11px] text-[#A89A8D]">
-                    返回带 model 列表的 JSON 即接通成功。回到控制台，你会看到第一条调用记录。
+                    Cursor / Claude Code / Continue / Aider / OpenAI SDK 等都能用——下面有具体 Agent 的填写位置和模板。
                   </p>
                 </div>
               }
               last
             />
           </div>
+
+          {/* Per-Agent recipes */}
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
+            按你的 Agent 选
+          </div>
+          <div className="space-y-3">
+            {RECIPES.map((r) => (
+              <RecipeCard key={r.id} recipe={r} />
+            ))}
+          </div>
+        </section>
+
+        {/* 03 · Smoke test */}
+        <section className="mb-10">
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
+            验证
+          </div>
+          <div className={`${card} p-6`}>
+            <p className="text-[13.5px] text-text-secondary mb-2.5 leading-relaxed">
+              填完之后在终端跑一下，看看 base URL 是否能访问、key 是否生效：
+            </p>
+            <div className={codeBlock}>{'curl -H "Authorization: Bearer <你的 key>" \\\n     https://api.tokenboss.co/v1/models'}</div>
+            <p className="font-mono text-[11px] text-[#A89A8D] mt-2.5">
+              返回带 model 列表的 JSON 即接通成功。回到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 会看到第一条调用记录。
+            </p>
+          </div>
         </section>
 
         {/* Footer help line */}
-        <div className="mt-10 font-mono text-[11.5px] text-ink-3 max-w-[540px] leading-relaxed">
-          接入卡住？发 <span className={codeChip}>tokenboss.com/skill.md</span> 给你的 Agent，让它读完整文档帮你诊断；
+        <div className="mt-10 font-mono text-[11.5px] text-ink-3 max-w-[560px] leading-relaxed">
+          配置不顺？发 <span className={codeChip}>tokenboss.co/skill.md</span> 给你的 Agent，让它读完整 spec 帮你诊断；
           或回到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 看是否已有调用记录。
         </div>
       </main>
@@ -154,5 +227,30 @@ function Step({
         <div className="text-[13.5px] text-text-secondary leading-relaxed">{body}</div>
       </div>
     </div>
+  );
+}
+
+function RecipeCard({ recipe }: { recipe: AgentRecipe }) {
+  return (
+    <details className={`${card} group`}>
+      <summary className="flex items-center justify-between gap-3 px-5 py-3.5 cursor-pointer list-none">
+        <span className="text-[14px] font-bold text-ink">{recipe.name}</span>
+        <span className="font-mono text-[11px] text-[#A89A8D] tracking-tight truncate max-w-[60%] hidden sm:inline">
+          {recipe.where}
+        </span>
+        <span
+          aria-hidden="true"
+          className="font-mono text-[11px] text-[#A89A8D] flex-shrink-0 transition-transform group-open:rotate-180"
+        >
+          ▾
+        </span>
+      </summary>
+      <div className="px-5 pb-5 pt-0">
+        <p className="text-[12.5px] text-text-secondary mb-2.5 leading-relaxed sm:hidden">
+          {recipe.where}
+        </p>
+        <div className={codeBlock}>{recipe.snippet}</div>
+      </div>
+    </details>
   );
 }

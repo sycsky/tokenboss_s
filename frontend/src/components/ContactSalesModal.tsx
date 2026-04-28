@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 // v1.0 placeholders — swap when actual sales channels are live.
 const WECHAT_ID = 'tokenboss_sales';
-const EMAIL = 'sales@tokenboss.com';
+const EMAIL = 'sales@tokenboss.co';
 
 export interface ContactSalesModalProps {
   open: boolean;

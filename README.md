@@ -6,7 +6,7 @@ AI API proxy with email-code auth, credit bucket billing, and Agent skill integr
 
 - **Auth**: passwordless email-code (OTP). No passwords stored.
 - **Billing**: credit bucket model — plan buckets (daily cap + 28-day expiry) or topup buckets (depleting balance, no expiry). SKUs: `plan_plus`, `plan_super`, `plan_ultra`, `topup`.
-- **Agent support**: `tokenboss.com/skill.md` — one-line install for Claude Code / Codex / other Agent users.
+- **Agent support**: `tokenboss.co/skill.md` — one-line install for Claude Code / Codex / other Agent users.
 - **Stack**: Hono + Cloudflare Workers (backend) · Vite + React 18 (frontend) · SQLite via D1.
 
 ## Sub-projects
@@ -49,7 +49,7 @@ Override DB path: `SQLITE_PATH=/path/to/tokenboss.db ./grant-bucket.sh ...`
 For Claude Code / Codex users — add TokenBoss as an Agent skill:
 
 ```
-set up tokenboss.com/skill.md
+set up tokenboss.co/skill.md
 ```
 
 ## Tests

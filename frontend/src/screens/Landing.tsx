@@ -115,13 +115,13 @@ function HeroTerminalDemo() {
       <div className="p-5 min-h-[260px] text-[#A89A8D]">
         <div className="flex items-baseline gap-2">
           <span className="text-accent font-semibold">$</span>
-          <span className="text-[#FFF8F0] td-typing whitespace-nowrap overflow-hidden inline-block">set up tokenboss.com/skill.md</span>
+          <span className="text-[#FFF8F0] td-typing whitespace-nowrap overflow-hidden inline-block">set up tokenboss.co/skill.md</span>
           <span className="td-cursor inline-block w-[7px] h-[14px] bg-[#FFF8F0] -mb-[2px]"></span>
         </div>
 
         <div className="td-line td-line-1 mt-2 flex items-center gap-2">
           <span className="text-[#34D399]">→</span>
-          <span>fetching <span className="text-[#FFF8F0]">tokenboss.com/skill.md</span></span>
+          <span>fetching <span className="text-[#FFF8F0]">tokenboss.co/skill.md</span></span>
         </div>
 
         <div className="td-line td-line-2 mt-1 flex items-center gap-2">
@@ -184,7 +184,7 @@ export default function Landing() {
               <span className="text-accent">立刻用得起好模型。</span>
             </h1>
 
-            <TerminalBlock cmd="set up tokenboss.com/skill.md" size="lg" className="mt-7 max-w-[520px]" />
+            <TerminalBlock cmd="set up tokenboss.co/skill.md" size="lg" className="mt-7 max-w-[520px]" />
 
             <p className="text-[13.5px] sm:text-[14px] text-ink-2 max-w-[520px] mt-4 leading-relaxed">
               一行装好 → 顶级模型立刻可用 · 多 Agent 共用一份额度。

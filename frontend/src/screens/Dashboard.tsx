@@ -455,7 +455,7 @@ export default function Dashboard() {
                 re-installing on a new machine / agent gets the whole
                 bundle from one COPY. */}
             <TerminalBlock
-              cmd="set up tokenboss.com/skill.md"
+              cmd="set up tokenboss.co/skill.md"
               extra={spellExtra}
               extraResolver={spellResolver}
               loading={keys.length === 0 && !keysError}

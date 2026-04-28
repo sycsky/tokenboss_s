@@ -5,8 +5,8 @@ import { TerminalBlock } from '../TerminalBlock';
 
 describe('<TerminalBlock>', () => {
   it('renders cmd + COPY button', () => {
-    render(<TerminalBlock cmd="set up tokenboss.com/skill.md" />);
-    expect(screen.getByText('set up tokenboss.com/skill.md')).toBeInTheDocument();
+    render(<TerminalBlock cmd="set up tokenboss.co/skill.md" />);
+    expect(screen.getByText('set up tokenboss.co/skill.md')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
   });
 
@@ -24,7 +24,7 @@ describe('<TerminalBlock>', () => {
     const resolver = vi.fn().mockResolvedValue('TOKENBOSS_API_KEY=sk-real-plaintext');
     render(
       <TerminalBlock
-        cmd="set up tokenboss.com/skill.md"
+        cmd="set up tokenboss.co/skill.md"
         extra="TOKENBOSS_API_KEY=sk-mask...nA=="
         extraResolver={resolver}
       />,
@@ -34,7 +34,7 @@ describe('<TerminalBlock>', () => {
     await userEvent.click(screen.getByRole('button'));
     expect(resolver).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith(
-      'set up tokenboss.com/skill.md\nTOKENBOSS_API_KEY=sk-real-plaintext',
+      'set up tokenboss.co/skill.md\nTOKENBOSS_API_KEY=sk-real-plaintext',
     );
     // After resolve, the visible extra swaps to the plaintext value.
     expect(screen.getByText('TOKENBOSS_API_KEY=sk-real-plaintext')).toBeInTheDocument();

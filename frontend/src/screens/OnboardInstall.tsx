@@ -59,7 +59,7 @@ export default function OnboardInstall() {
       width="lg"
     >
       <TerminalBlock
-        cmd="set up tokenboss.com/skill.md"
+        cmd="set up tokenboss.co/skill.md"
         extra={apiKey ? `TOKENBOSS_API_KEY=${apiKey}` : undefined}
         loading={!apiKey && !keyError}
         size="lg"
