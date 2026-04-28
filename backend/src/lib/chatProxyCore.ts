@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { isMockMode } from "./upstream.js";
 import { detectVirtualProfile, resolveVirtualModel } from "../router/resolve.js";
 import { getUser, getUserIdByKeyHash } from "./store.js";
+import { newapi } from "./newapi.js";
 
 /**
  * Dedicated undici dispatcher for upstream calls.
@@ -97,27 +98,45 @@ function extractBearer(authHeader: string | undefined): string | null {
 }
 
 /**
- * Resolve the calling user's plan via the api_key_index reverse lookup.
+ * Resolve the calling user's effective tier via the api_key_index reverse
+ * lookup, then read the live group from newapi. V3 ("newapi-as-truth"):
+ * we don't trust TokenBoss DB plan because newapi auto-rolls expired
+ * subscriptions back to `default` and we have no cron syncing the local
+ * cache. Each chat call adds one extra `newapi.getUser` to be safe.
  *
- * Returns `'free' | 'plus' | 'super' | 'ultra' | null`. `null` means the
- * key is unknown to TokenBoss (anonymous direct caller, or a token created
- * before backfill ran) — chatProxyCore must treat these as pass-through
- * with no rewriting.
+ * Returns:
+ *   - `{ known: false }` — the key isn't in api_key_index (anonymous /
+ *     direct-to-newapi caller). chatProxyCore passes through unmodified.
+ *   - `{ known: true, group: 'trial' }` — trial subscriber. Eco-rewrite.
+ *   - `{ known: true, group: 'plus'|'super'|'ultra' }` — paid. No rewrite.
+ *   - `{ known: true, group: 'default' }` — known user, no active sub
+ *     (newapi rolled them back). Eco-rewrite.
+ *   - `{ known: true, group: null }` — newapi lookup failed; fall back to
+ *     pass-through to avoid blocking the user on a transient newapi blip.
  */
 async function resolveCallerPlan(
   authHeader: string | undefined,
-): Promise<string | null> {
+): Promise<{ known: boolean; group: string | null }> {
   const token = extractBearer(authHeader);
-  if (!token) return null;
+  if (!token) return { known: false, group: null };
   try {
     const hash = createHash("sha256").update(token).digest("hex");
     const userId = getUserIdByKeyHash(hash);
-    if (!userId) return null;
+    if (!userId) return { known: false, group: null };
     const user = await getUser(userId);
-    return user?.plan ?? null;
+    if (!user || user.newapiUserId == null) {
+      return { known: true, group: null };
+    }
+    try {
+      const nu = await newapi.getUser(user.newapiUserId);
+      return { known: true, group: nu.group ?? null };
+    } catch (err) {
+      console.warn(`[chatProxy] newapi.getUser failed for ${userId}: ${(err as Error).message}`);
+      return { known: true, group: null };
+    }
   } catch (err) {
     console.warn(`[chatProxy] resolveCallerPlan failed: ${(err as Error).message}`);
-    return null;
+    return { known: false, group: null };
   }
 }
 
@@ -180,12 +199,13 @@ export async function streamChatCore(
     return;
   }
 
-  // ---------- Free-tier model rewrite (silent) ----------
-  // Look up the caller's plan via api_key_index; if free, rewrite any
-  // non-eco model down to eco. Unknown callers (no index hit) pass through
-  // unchanged — newapi will still gate them by remain_quota.
-  const callerPlan = await resolveCallerPlan(authHeader);
-  if (callerPlan === "free") {
+  // ---------- Trial-tier model rewrite (silent) ----------
+  // Look up the caller's live newapi group. Known users in trial / default
+  // groups get any non-eco model rewritten down to eco. Paid groups
+  // (plus/super/ultra) pass through. Unknown callers pass through too —
+  // newapi gates them by remain_quota.
+  const caller = await resolveCallerPlan(authHeader);
+  if (caller.known && (caller.group === "trial" || caller.group === "default")) {
     rewriteForFreeUser(body);
   }
 

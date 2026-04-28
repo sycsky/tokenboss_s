@@ -174,6 +174,40 @@ async function req<T>(
 
 // ---------- Types ----------
 
+/** A single subscription record on a newapi user. Each call to
+ *  `bindSubscription` creates one of these; users can have multiple
+ *  active records simultaneously if `bind` was called repeatedly without
+ *  invalidating the prior ones. */
+export interface NewapiSubscription {
+  /** Per-record id (use with invalidateUserSubscription). NOT the plan id. */
+  id: number;
+  user_id: number;
+  /** id of the underlying plan in 订阅管理. */
+  plan_id: number;
+  /** Total quota granted by this subscription (raw newapi units; 500_000 ≈ $1). */
+  amount_total: number;
+  /** Quota consumed against this subscription. */
+  amount_used: number;
+  /** Unix seconds — subscription start. */
+  start_time: number;
+  /** Unix seconds — subscription end (newapi enforces; auto-rolls back group). */
+  end_time: number;
+  /** "active" | "invalidated" | "expired" | "consumed". */
+  status: string;
+  /** "admin" / "epay" / "stripe" / "creem" — how the sub was created. */
+  source?: string;
+  /** Unix seconds. */
+  last_reset_time?: number;
+  /** Unix seconds — when newapi will next refill amount_used = 0. */
+  next_reset_time?: number;
+  /** newapi user group this subscription pushes the user into. */
+  upgrade_group?: string;
+  /** Group the user was in before bind — newapi restores on invalidate. */
+  prev_user_group?: string;
+  created_at: number;
+  updated_at: number;
+}
+
 /** newapi user object (subset of fields we care about). */
 export interface NewapiUser {
   id: number;
@@ -496,11 +530,14 @@ export const newapi = {
     password: string;
     display_name?: string;
     email?: string;
-    /** Initial newapi quota to seed (raw newapi units; 500,000 ≈ $1). */
+    /** Initial newapi quota to seed (raw newapi units; 500,000 ≈ $1).
+     *  Optional. When omitted, no quota PUT is issued — the user starts
+     *  at newapi's default quota (typically 0) and the caller must set
+     *  it via a separate mechanism (e.g. `bindSubscription`). V3 register
+     *  flow relies on bind to set quota; V2 callers still pass an explicit
+     *  number when needed for direct provisioning. */
     quota?: number;
-    /** newapi user-group; defaults to "default". TokenBoss free users
-     *  pass "free" so the group can be configured to restrict eco-only
-     *  channels as defense-in-depth. */
+    /** newapi user-group; defaults to "default". */
     group?: string;
   }): Promise<{ newapiUserId: number }> {
     const group = input.group ?? "default";
@@ -512,16 +549,18 @@ export const newapi = {
       group,
     });
     // newapi's POST /api/user/ silently ignores the `quota` field at
-    // creation time — quota can only be set via PUT. Without this step
-    // every chat request fails with `insufficient_user_quota` because
-    // the user-level quota is a separate check from the token's
-    // `unlimited_quota` flag.
-    await this.updateUser({
-      id: user.id,
-      username: user.username,
-      quota: input.quota ?? 2_500_000,
-      group,
-    });
+    // creation time — quota can only be set via PUT. Only do the PUT when
+    // the caller explicitly asks for a quota (V2 paths). V3 register
+    // skips this and lets bindSubscription set the quota atomically with
+    // the trial subscription record.
+    if (input.quota !== undefined) {
+      await this.updateUser({
+        id: user.id,
+        username: user.username,
+        quota: input.quota,
+        group,
+      });
+    }
     return { newapiUserId: user.id };
   },
 
@@ -674,6 +713,74 @@ export const newapi = {
         model_name: query?.model_name,
         token_name: query?.token_name,
       },
+    );
+  },
+
+  // --- Subscriptions ---
+  //
+  // newapi has a subscription module (Trial/Plus/Super/Ultra plans configured
+  // in the admin panel under 订阅管理). bind here is the canonical way to
+  // upgrade a user — it atomically:
+  //   1. Creates a subscription record with the plan's duration + reset rules
+  //   2. Sets user.group = plan.upgrade_group (e.g. "plus")
+  //   3. Sets user.quota = plan.total_amount
+  //
+  // bind APPENDS — it does NOT cancel existing subscriptions. To replace
+  // (e.g. trial → plus on payment), call listUserSubscriptions first to
+  // find existing active records, then invalidateUserSubscription on each
+  // before binding the new plan. Otherwise the old subscription stays
+  // active and newapi may consume from it first (FIFO) which makes the
+  // user see "trial quota deducted while on plus".
+  //
+  // No native "cancel/expire entire subscription" endpoint exists for the
+  // user's group rollback — use updateUser({ group: "default" }) for that.
+  //
+  // Repeat-binding the same plan is idempotent (no error). Cross-plan bind
+  // (e.g. trial → plus) DOES NOT auto-cancel the trial — see above.
+
+  /**
+   * Bind a newapi user to a subscription plan. Returns the success message
+   * newapi echoes back; callers usually only care that this didn't throw.
+   *
+   * Note: this APPENDS a subscription record. If the user already has an
+   * active subscription, both will be live. Use listUserSubscriptions +
+   * invalidateUserSubscription first when you want a "replace" semantic.
+   */
+  async bindSubscription(input: {
+    userId: number;
+    planId: number;
+  }): Promise<{ message?: string }> {
+    return req<{ message?: string }>(
+      "POST",
+      "/api/subscription/admin/bind",
+      { user_id: input.userId, plan_id: input.planId },
+    );
+  },
+
+  /**
+   * List all subscription records for a newapi user (any status). The
+   * returned shape is `[{ subscription: { id, status, ... } }, ...]`. The
+   * `id` here is the per-record subscription id used to invalidate or
+   * delete a single record (different from the plan_id).
+   */
+  async listUserSubscriptions(userId: number): Promise<NewapiSubscription[]> {
+    const res = await req<Array<{ subscription: NewapiSubscription }>>(
+      "GET",
+      `/api/subscription/admin/users/${userId}/subscriptions`,
+    );
+    return (res ?? []).map((row) => row.subscription);
+  },
+
+  /**
+   * Invalidate (soft-cancel) a single subscription record by its id.
+   * Newapi flips the record's status to "invalidated" and stops counting
+   * its quota toward the user. Group rollback to the user's pre-sub group
+   * happens automatically per newapi's subscription rules.
+   */
+  async invalidateUserSubscription(subscriptionId: number): Promise<{ message?: string }> {
+    return req<{ message?: string }>(
+      "POST",
+      `/api/subscription/admin/user_subscriptions/${subscriptionId}/invalidate`,
     );
   },
 

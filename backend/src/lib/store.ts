@@ -38,7 +38,10 @@ export interface UserRecord {
    * `/v1/keys`. Never shown to the client.
    */
   newapiPassword?: string;
-  /** Subscription tier; 'free' for trial users, plan name for paid. */
+  /** Active subscription tier: 'trial' for new accounts (1 day), or
+   *  'plus'/'super'/'ultra' for paid (28 day). NULL when the user has
+   *  no active subscription (cron-expired or never bound). 'default' is
+   *  NOT a TokenBoss plan label — it's the newapi-side fallback group. */
   plan?: UserPlan;
   /** ISO timestamp the current subscription started; null for free. */
   subscriptionStartedAt?: string;
@@ -54,10 +57,11 @@ export interface UserRecord {
   quotaNextResetAt?: string;
 }
 
-export type UserPlan = "free" | "plus" | "super" | "ultra";
+export type UserPlan = "trial" | "plus" | "super" | "ultra";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 export type PaymentChannel = "epusdt" | "xunhupay";
+export type OrderCurrency = "CNY" | "USD";
 export type { PlanId } from "./plans.js";
 import type { PlanId } from "./plans.js";
 
@@ -66,7 +70,17 @@ export interface OrderRecord {
   userId: string;
   planId: PlanId;
   channel: PaymentChannel;
-  amountCNY: number;
+  /** Quoted amount in the order's `currency`. epusdt orders use USD,
+   *  xunhupay orders use CNY. (Stored in the DB column historically
+   *  named `amountCNY` — column kept for back-compat; the mapper
+   *  exposes it as `amount` regardless of currency.) */
+  amount: number;
+  /** Currency the `amount` is denominated in. Defaults to CNY for
+   *  legacy V2 rows that pre-date crypto-USD pricing. */
+  currency: OrderCurrency;
+  /** Channel-side actual settled amount. epusdt: USDT count after FX
+   *  (often differs slightly from amount due to exchange-rate spread).
+   *  xunhupay: same as amount in CNY. */
   amountActual?: number;
   status: OrderStatus;
   upstreamTradeId?: string;
@@ -160,20 +174,12 @@ export function init(): void {
     }
     if (!have.has("quotaNextResetAt")) {
       db.exec(`ALTER TABLE users ADD COLUMN quotaNextResetAt TEXT`);
-      // Bootstrap any pre-existing paid user with a +24h fresh window so
-      // they're not immediately reset on the next cron tick. Use ISO with
-      // Z so a JS roundtrip parses as UTC, not local time.
-      const future = new Date(Date.now() + 86_400_000).toISOString();
-      db.prepare(
-        `UPDATE users
-            SET quotaNextResetAt = ?
-          WHERE plan IS NOT NULL
-            AND plan != 'free'
-            AND quotaNextResetAt IS NULL`,
-      ).run(future);
     }
-    // Default existing users to "free" so the new code paths have a value to read.
-    db.exec(`UPDATE users SET plan = 'free' WHERE plan IS NULL`);
+    // V3 cleanup: any pre-V3 row with plan='free' is migrated to NULL
+    // (= no active subscription). 'free' is removed from the UserPlan
+    // type so leaving these around would let stale data leak past
+    // type-checked code paths.
+    db.exec(`UPDATE users SET plan = NULL WHERE plan = 'free'`);
   }
 
   db.exec(`
@@ -247,11 +253,19 @@ export function init(): void {
       blockTxId          TEXT,
       receiveAddress     TEXT,
       createdAt          TEXT NOT NULL,
-      paidAt             TEXT
+      paidAt             TEXT,
+      currency           TEXT NOT NULL DEFAULT 'CNY'
     );
     CREATE INDEX IF NOT EXISTS idx_orders_user
       ON orders(userId, createdAt DESC);
   `);
+
+  // Idempotent migration for pre-V3 dev DBs that don't have the column.
+  try {
+    db.exec(`ALTER TABLE orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'`);
+  } catch {
+    // Column already exists — fine.
+  }
 
   // Rename legacy plan ids → new tier names. Idempotent — once data is
   // migrated the CASE expression is a no-op for fresh rows.
@@ -296,7 +310,11 @@ function rowToOrder(row: Record<string, unknown>): OrderRecord {
     userId: row.userId as string,
     planId: row.planId as PlanId,
     channel: row.channel as PaymentChannel,
-    amountCNY: row.amountCNY as number,
+    // DB column historically named `amountCNY` for legacy reasons; the
+    // value's actual currency is in the `currency` column. Old rows
+    // default to CNY (set by the migration).
+    amount: row.amountCNY as number,
+    currency: ((row.currency as string) ?? "CNY") as OrderCurrency,
     amountActual: (row.amountActual as number) ?? undefined,
     status: row.status as OrderStatus,
     upstreamTradeId: (row.upstreamTradeId as string) ?? undefined,
@@ -366,13 +384,13 @@ export async function putEmailIndex(
 // ---------- Public API — Subscription / Plan ----------
 
 /** Patch the plan-related columns on a user row. All 4 fields are
- *  overwritten — pass explicit nulls to clear (e.g., on downgrade to
- *  free). To bump quotaNextResetAt without touching the rest, use
- *  `advanceQuotaNextResetAt`. */
+ *  overwritten — pass explicit nulls to clear. Pass `plan: null` to mark
+ *  the user as having no active subscription (the cron does this on
+ *  expiry; `default` is just a newapi group, not a TokenBoss plan). */
 export function setUserPlan(
   userId: string,
   patch: {
-    plan: UserPlan;
+    plan: UserPlan | null;
     subscriptionStartedAt?: string | null;
     subscriptionExpiresAt?: string | null;
     dailyQuotaUsd?: number | null;
@@ -395,60 +413,6 @@ export function setUserPlan(
     dailyQuotaUsd: patch.dailyQuotaUsd ?? null,
     quotaNextResetAt: patch.quotaNextResetAt ?? null,
   });
-}
-
-/**
- * Paid users whose 24h reset window is up and need a fresh quota push to
- * newapi. Filters out expired subscriptions (cron's expire-loop handles
- * those separately).
- */
-export function getUsersDueForReset(): UserRecord[] {
-  const rows = db
-    .prepare(`
-      SELECT * FROM users
-       WHERE plan IS NOT NULL
-         AND plan != 'free'
-         AND quotaNextResetAt IS NOT NULL
-         AND datetime(quotaNextResetAt) <= datetime('now')
-         AND (subscriptionExpiresAt IS NULL
-              OR datetime(subscriptionExpiresAt) > datetime('now'))
-    `)
-    .all() as Record<string, unknown>[];
-  return rows.map(rowToUser);
-}
-
-/** Paid users whose subscription has expired and need to be downgraded. */
-export function getExpiredPaidUsers(): UserRecord[] {
-  const rows = db
-    .prepare(`
-      SELECT * FROM users
-       WHERE plan IS NOT NULL
-         AND plan != 'free'
-         AND subscriptionExpiresAt IS NOT NULL
-         AND datetime(subscriptionExpiresAt) <= datetime('now')
-    `)
-    .all() as Record<string, unknown>[];
-  return rows.map(rowToUser);
-}
-
-/** Bump a user's quotaNextResetAt forward by 24 hours from its current
- *  value. Cron calls this after successfully pushing fresh quota to
- *  newapi. No-op when the column is null. */
-export function advanceQuotaNextResetAt(userId: string): void {
-  const row = db
-    .prepare(`SELECT quotaNextResetAt FROM users WHERE userId = ?`)
-    .get(userId) as { quotaNextResetAt: string | null } | undefined;
-  if (!row?.quotaNextResetAt) return;
-  // Compute in JS to keep the value as a UTC ISO string with millisecond
-  // precision; SQLite's `datetime(..., '+1 day')` strips the timezone
-  // marker which causes the next read to be parsed as local time.
-  const next = new Date(
-    new Date(row.quotaNextResetAt).getTime() + 86_400_000,
-  ).toISOString();
-  db.prepare(`UPDATE users SET quotaNextResetAt = ? WHERE userId = ?`).run(
-    next,
-    userId,
-  );
 }
 
 // ---------- Public API — API Key Index ----------
@@ -611,11 +575,11 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
 export async function createOrder(rec: OrderRecord): Promise<void> {
   db.prepare(`
     INSERT INTO orders
-      (orderId, userId, planId, channel, amountCNY, amountActual, status,
+      (orderId, userId, planId, channel, amountCNY, currency, amountActual, status,
        upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
        createdAt, paidAt)
     VALUES
-      (@orderId, @userId, @planId, @channel, @amountCNY, @amountActual, @status,
+      (@orderId, @userId, @planId, @channel, @amount, @currency, @amountActual, @status,
        @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
        @createdAt, @paidAt)
   `).run({
@@ -623,7 +587,8 @@ export async function createOrder(rec: OrderRecord): Promise<void> {
     userId: rec.userId,
     planId: rec.planId,
     channel: rec.channel,
-    amountCNY: rec.amountCNY,
+    amount: rec.amount,
+    currency: rec.currency,
     amountActual: rec.amountActual ?? null,
     status: rec.status,
     upstreamTradeId: rec.upstreamTradeId ?? null,

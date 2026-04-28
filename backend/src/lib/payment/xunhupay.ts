@@ -78,6 +78,17 @@ export function createXunhupayClient(cfg: XunhupayConfig): PaymentChannelClient 
 
   return {
     async createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
+      // xunhupay (虎皮椒) is a Chinese fiat gateway and only accepts CNY.
+      // Other currencies will be rejected with a vague gateway error;
+      // fail loudly here instead so callers get a clear signal.
+      if (input.currency !== "CNY") {
+        throw new XunhupayError(
+          0,
+          `xunhupay only supports CNY orders; got currency=${input.currency}. ` +
+            `Route USD orders through epusdt instead.`,
+        );
+      }
+
       // wap_url is the page the user came FROM — xunhupay shows a "Back to
       // <wap_name>" link pointing here on the checkout page. Strip query
       // string from redirectUrl so we don't trip URL-validation on the
@@ -91,7 +102,7 @@ export function createXunhupayClient(cfg: XunhupayConfig): PaymentChannelClient 
         version: "1.1",
         trade_order_id: input.orderId,
         // total_fee must be a numeric string with at most 2 decimals.
-        total_fee: input.amountCNY.toFixed(2),
+        total_fee: input.amount.toFixed(2),
         title: defaultTitle,
         time: unixSeconds(),
         nonce_str: nonceStr(),
@@ -152,7 +163,7 @@ export function createXunhupayClient(cfg: XunhupayConfig): PaymentChannelClient 
         paymentUrl: parsed.url,
         qrCodeUrl: parsed.url_qrcode,
         // Fiat channel — actual payable amount equals quoted CNY amount.
-        amountActual: input.amountCNY,
+        amountActual: input.amount,
         // xunhupay doesn't return an explicit expiration; pad 30min so
         // the OrderRecord has a non-zero value. Real expiry is enforced
         // upstream regardless of this field.

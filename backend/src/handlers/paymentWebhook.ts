@@ -25,14 +25,9 @@ import {
   getUser,
   markOrderPaidIfPending,
   markOrderStatus,
-  setUserPlan,
 } from "../lib/store.js";
-import { PLANS, isPlanId } from "../lib/plans.js";
-import { newapi, usdToNewapiQuota, NewapiError } from "../lib/newapi.js";
-
-function newapiUsername(userId: string): string {
-  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
-}
+import { isPlanId, getNewapiPlanId } from "../lib/plans.js";
+import { newapi, NewapiError } from "../lib/newapi.js";
 
 function textResponse(
   statusCode: number,
@@ -161,15 +156,19 @@ export const xunhupayWebhookHandler = async (
 };
 
 /**
- * Activate a paid plan for the user:
- *   1. Push the daily $ allowance into newapi as `quota` (units).
- *   2. Move the newapi user into the plan's group.
- *   3. Update users table with plan + start/expiry + dailyQuotaUsd.
+ * Activate a paid plan for the user (V3 newapi-as-truth flow):
+ *   1. Invalidate any existing active subscriptions on newapi (so a paid
+ *      Plus replaces the trial cleanly instead of stacking).
+ *   2. Bind the user to the corresponding newapi subscription plan, which
+ *      atomically sets group + quota + daily reset cadence on newapi side.
+ *
+ * No TokenBoss DB write — newapi is the only source of truth for
+ * subscription state. /v1/buckets reads it live each request.
  *
  * Idempotent at the caller level (markOrderPaidIfPending guards against
- * duplicate webhook deliveries). Failures here are logged but NOT thrown,
- * so a transient newapi outage doesn't block the webhook ack — the next
- * dailyCron run will pick the user up by their `users.plan` row anyway.
+ * duplicate webhook deliveries). bind / invalidate failures are logged
+ * but NOT thrown, so a transient newapi outage doesn't block the webhook
+ * ack.
  */
 async function applyPlanToUser(
   userId: string,
@@ -181,44 +180,65 @@ async function applyPlanToUser(
     console.error(`${tag} unknown planId on settled order: ${planId}`);
     return;
   }
-  const cfg = PLANS[planId];
-  const now = Date.now();
-  const startedAt = new Date(now).toISOString();
-  const expiresAt = new Date(now + cfg.durationDays * 86_400_000).toISOString();
-  // First quota reset fires 24h after activation, then every 24h thereafter.
-  const quotaNextResetAt = new Date(now + 86_400_000).toISOString();
-
-  setUserPlan(userId, {
-    plan: planId,
-    subscriptionStartedAt: startedAt,
-    subscriptionExpiresAt: expiresAt,
-    dailyQuotaUsd: cfg.dailyQuotaUsd,
-    quotaNextResetAt,
-  });
 
   const user = await getUser(userId);
   if (!user || user.newapiUserId == null) {
     console.warn(
-      `${tag} user ${userId} has no newapi link — skipping quota push`,
+      `${tag} user ${userId} has no newapi link — skipping subscription bind`,
     );
     return;
   }
 
+  const newapiPlanId = getNewapiPlanId(planId);
+  if (newapiPlanId === null) {
+    console.error(
+      `${tag} NEWAPI_PLAN_ID_${planId.toUpperCase()} not configured — user ${userId} has no upstream subscription; ` +
+        `set the env var and re-bind manually`,
+    );
+    return;
+  }
+
+  // Invalidate any existing active subscriptions BEFORE binding the new
+  // plan. Without this, newapi keeps both records active (e.g., Trial +
+  // Plus) and consumes from them in FIFO order — users see "Trial quota
+  // shrinking while on Plus" which is confusing. Failure here is logged
+  // but not fatal.
   try {
-    await newapi.updateUser({
-      id: user.newapiUserId,
-      // newapi PUT requires username — omitting it has bricked rows in the past.
-      username: newapiUsername(userId),
-      quota: usdToNewapiQuota(cfg.dailyQuotaUsd),
-      group: cfg.group,
+    const existing = await newapi.listUserSubscriptions(user.newapiUserId);
+    for (const sub of existing) {
+      if (sub.status === "active") {
+        try {
+          await newapi.invalidateUserSubscription(sub.id);
+          console.info(
+            `${tag} invalidated stale sub id=${sub.id} (plan_id=${sub.plan_id}) on user ${userId} before binding ${planId}`,
+          );
+        } catch (innerErr) {
+          const innerMsg = innerErr instanceof NewapiError ? innerErr.message : (innerErr as Error).message;
+          console.warn(
+            `${tag} failed to invalidate sub id=${sub.id} on user ${userId}: ${innerMsg}`,
+          );
+        }
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.warn(
+      `${tag} could not list existing subs for ${userId}: ${msg} (proceeding with bind anyway)`,
+    );
+  }
+
+  try {
+    await newapi.bindSubscription({
+      userId: user.newapiUserId,
+      planId: newapiPlanId,
     });
     console.info(
-      `${tag} applied ${planId} to user=${userId}: quota=$${cfg.dailyQuotaUsd}/day group=${cfg.group}`,
+      `${tag} bound ${planId} sub (newapi plan_id=${newapiPlanId}) to user=${userId} (newapi user=${user.newapiUserId})`,
     );
   } catch (err) {
     const msg = err instanceof NewapiError ? err.message : (err as Error).message;
     console.error(
-      `${tag} newapi.updateUser failed for ${userId}: ${msg}`,
+      `${tag} newapi.bindSubscription failed for ${userId}: ${msg}`,
     );
   }
 }

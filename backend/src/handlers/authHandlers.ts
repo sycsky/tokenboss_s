@@ -27,8 +27,8 @@ import type {
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
 import { sendVerificationEmail, sendVerifyLinkEmail } from "../lib/emailService.js";
-import { isNewapiConfigured, newapi, NewapiError, usdToNewapiQuota } from "../lib/newapi.js";
-import { FREE_TIER } from "../lib/plans.js";
+import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
+import { getNewapiPlanId } from "../lib/plans.js";
 import {
   createEmailVerifyToken,
   consumeEmailVerifyToken,
@@ -44,18 +44,6 @@ import {
   saveVerificationCode,
   type UserRecord,
 } from "../lib/store.js";
-
-/**
- * Signup gift in newapi quota units (500,000 ≈ $1). Defaults to the
- * free-tier $10 grant from `lib/plans.ts`. Override via env
- * `NEWAPI_SIGNUP_QUOTA` (raw newapi units) when ops needs to bump it.
- */
-function getSignupQuota(): number {
-  const raw = process.env.NEWAPI_SIGNUP_QUOTA;
-  const n = raw ? Number(raw) : NaN;
-  if (Number.isFinite(n) && n > 0) return Math.floor(n);
-  return usdToNewapiQuota(FREE_TIER.initialQuotaUsd);
-}
 
 // ---------- helpers ----------
 
@@ -101,9 +89,12 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**
  * Build a profile for API responses. When newapi is configured and the user
  * has a provisioned newapi account, `balance` is the live remaining newapi
- * quota (`quota - used_quota`) — newapi is the single source of truth for
- * billing. The SQLite `balance` column is only a fallback for local dev or
- * legacy users provisioned before newapi was wired in.
+ * quota (`quota - used_quota`) — newapi is the single source of truth.
+ *
+ * V3 note: subscription state (current plan, expiry, daily reset) is NOT
+ * surfaced here. Frontends should call `/v1/buckets` for that — it reads
+ * directly from newapi's subscription module so the answer is always live
+ * and TokenBoss has no stale-cache window.
  */
 async function buildUserProfile(
   u: UserRecord,
@@ -126,7 +117,6 @@ async function buildUserProfile(
     displayName: u.displayName,
     emailVerified: u.emailVerified === true,
     balance,
-    freeQuota: getSignupQuota(),
     createdAt: u.createdAt,
   };
 }
@@ -149,8 +139,60 @@ async function issueVerificationLink(
 
 /**
  * (formerly grantTrialBucket — bucket model is gone; the equivalent is
- * `users.plan = 'free'` plus the $10 newapi quota seeded at provisioning.)
+ * `users.plan = 'trial'` plus a 1-day subscription bound on newapi via the
+ * subscription module. See provisionAndBindTrial below.)
  */
+
+/**
+ * Provision a newapi account for a freshly-registered TokenBoss user, then
+ * bind them to the Trial subscription plan. Atomicity is best-effort:
+ *
+ *   • provision failure → throws (caller should 502 the register response)
+ *   • bind failure (network, missing env) → logged loud but swallowed; the
+ *     user still has a working newapi account at the provisioner default
+ *     quota/group, and the cron can attempt re-bind later. Returning a 502
+ *     here would be too aggressive for what is effectively a quota perk.
+ */
+async function provisionAndBindTrial(args: {
+  userId: string;
+  newapiUsername: string;
+  newapiPassword: string;
+  displayName: string;
+  email: string;
+}): Promise<{ newapiUserId: number }> {
+  // Don't pass quota/group — the bind below sets both via the configured
+  // Trial plan in newapi (1 day duration, $10 total, never resets).
+  const provisioned = await newapi.provisionUser({
+    username: args.newapiUsername,
+    password: args.newapiPassword,
+    display_name: args.displayName,
+    email: args.email,
+  });
+
+  const trialPlanId = getNewapiPlanId("trial");
+  if (trialPlanId === null) {
+    console.warn(
+      `[register] NEWAPI_PLAN_ID_TRIAL not configured — skipping trial bind for ${args.userId}; ` +
+        `user will be left in newapi default group with the provisioner's fallback quota`,
+    );
+    return { newapiUserId: provisioned.newapiUserId };
+  }
+
+  try {
+    await newapi.bindSubscription({
+      userId: provisioned.newapiUserId,
+      planId: trialPlanId,
+    });
+  } catch (err) {
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.error(
+      `[register] trial bind failed for ${args.userId} (newapi user=${provisioned.newapiUserId}): ${msg}`,
+    );
+    // Swallow — see comment block above. User still has account.
+  }
+
+  return { newapiUserId: provisioned.newapiUserId };
+}
 
 // ---------- POST /v1/auth/register ----------
 
@@ -200,30 +242,27 @@ export const registerHandler = async (
     displayName,
     passwordHash,
     createdAt: now,
-    plan: "free",
   };
 
-  // When newapi is configured, provision the matching account up front.
-  // In local dev (mock upstream) this block is skipped and the trial bucket
-  // alone backs the new user. Fail-closed if newapi is configured but
-  // returns an error — better a 502 than a TokenBoss user with no upstream.
+  // When newapi is configured, provision the matching account up front and
+  // bind the Trial subscription. V3 ("newapi-as-truth"): TokenBoss does NOT
+  // store the user's plan/expiresAt locally — newapi's subscription module
+  // is the only source of truth. /v1/buckets reads it live each time.
+  // Bind failures are swallowed inside the helper (see its docstring).
   if (isNewapiConfigured()) {
     const newapiUsername = userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
     const newapiPassword = randomBytes(12).toString("base64url");
     try {
-      // newapi enforces a max length on display_name, so fall back to
-      // the newapi username (≤ 20 chars) when the user didn't supply
-      // their own. Using the full email here breaks for any address
-      // longer than newapi's DisplayName cap.
-      const provisioned = await newapi.provisionUser({
-        username: newapiUsername,
-        password: newapiPassword,
-        display_name: displayName ?? newapiUsername,
+      const { newapiUserId } = await provisionAndBindTrial({
+        userId,
+        newapiUsername,
+        newapiPassword,
+        // newapi enforces a max length on display_name, so fall back to the
+        // newapi username (≤ 20 chars) when the user didn't supply their own.
+        displayName: displayName ?? newapiUsername,
         email,
-        quota: getSignupQuota(),
-        group: FREE_TIER.group,
       });
-      user.newapiUserId = provisioned.newapiUserId;
+      user.newapiUserId = newapiUserId;
       user.newapiPassword = newapiPassword;
     } catch (err) {
       const msg = err instanceof NewapiError ? err.message : (err as Error).message;
@@ -452,13 +491,12 @@ export async function verifyCodeHandler(
       const newapiUsername = userId.slice(2);
       newapiPassword = randomBytes(12).toString("base64url");
       try {
-        const provisioned = await newapi.provisionUser({
-          username: newapiUsername,
-          password: newapiPassword,
-          display_name: newapiUsername,
+        const provisioned = await provisionAndBindTrial({
+          userId,
+          newapiUsername,
+          newapiPassword,
+          displayName: newapiUsername,
           email,
-          quota: getSignupQuota(),
-          group: FREE_TIER.group,
         });
         newapiUserId = provisioned.newapiUserId;
 
@@ -496,19 +534,19 @@ export async function verifyCodeHandler(
       }
     }
 
+    const createdAt = new Date().toISOString();
     putUser({
       userId,
       email,
       displayName: undefined,
       phone: undefined,
       passwordHash: undefined,
-      createdAt: new Date().toISOString(),
+      createdAt,
       // The act of consuming the verify-code IS proof the user owns
       // the inbox — mark verified so we don't pester them again.
       emailVerified: true,
       newapiUserId,
       newapiPassword,
-      plan: "free",
     });
     isNew = true;
   }

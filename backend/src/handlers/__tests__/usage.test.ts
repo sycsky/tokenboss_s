@@ -27,7 +27,7 @@ beforeEach(() => {
     userId: 'u_1',
     email: 'a@x.com',
     createdAt: new Date().toISOString(),
-    plan: 'free',
+    plan: 'trial',
     newapiUserId: 42,
   });
   getLogsMock.mockReset();
@@ -102,7 +102,7 @@ describe('usageHandler (newapi-backed)', () => {
       userId: 'u_unlinked',
       email: 'b@x.com',
       createdAt: new Date().toISOString(),
-      plan: 'free',
+      plan: 'trial',
     });
     const res = (await usageHandler(
       makeEvt({}, { 'x-tb-user-id': 'u_unlinked' }),

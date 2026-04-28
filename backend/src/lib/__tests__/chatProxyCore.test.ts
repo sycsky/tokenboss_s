@@ -69,14 +69,14 @@ describe('extractKeyHint', () => {
 // upstream + writer harness; here we only verify that the wiring (store
 // helpers + plan check) returns the data chatProxyCore relies on. ------
 
-describe('free-user plan resolution wiring', () => {
+describe('plan resolution wiring (V3)', () => {
   it('getUserIdByKeyHash resolves a hashed sk-xxx to userId', async () => {
     const { getUserIdByKeyHash, getUser } = await import('../store.js');
     putUser({
       userId: 'u_alice',
       email: 'a@x.com',
       createdAt: new Date().toISOString(),
-      plan: 'free',
+      plan: 'trial',
     });
     putApiKeyIndex({
       userId: 'u_alice',
@@ -87,16 +87,16 @@ describe('free-user plan resolution wiring', () => {
     const uid = getUserIdByKeyHash(sha256('sk-alice'));
     expect(uid).toBe('u_alice');
     const u = await getUser(uid as string);
-    expect(u?.plan).toBe('free');
+    expect(u?.plan).toBe('trial');
   });
 
-  it('paid users have a non-free plan after setUserPlan', async () => {
+  it('paid users have a non-trial plan after setUserPlan', async () => {
     const { getUserIdByKeyHash, getUser } = await import('../store.js');
     putUser({
       userId: 'u_bob',
       email: 'b@x.com',
       createdAt: new Date().toISOString(),
-      plan: 'free',
+      plan: 'trial',
     });
     setUserPlan('u_bob', {
       plan: 'plus',

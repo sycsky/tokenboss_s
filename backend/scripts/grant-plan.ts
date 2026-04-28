@@ -1,22 +1,25 @@
 /**
- * Grant a paid plan to a user — same code path the epusdt webhook takes,
- * minus the order/settlement plumbing. Use to test subscription effects
- * without paying:
+ * Grant a subscription tier to a user — same code path the payment webhook
+ * (or registration) takes, minus the order/auth plumbing. Use to test
+ * subscription effects without actually paying:
  *
  *   npx tsx scripts/grant-plan.ts u_7def434f01700bff31c2 plus
- *   npx tsx scripts/grant-plan.ts u_7def434f01700bff31c2 super --days=7
- *   npx tsx scripts/grant-plan.ts u_7def434f01700bff31c2 free       # downgrade
+ *   npx tsx scripts/grant-plan.ts u_7def434f01700bff31c2 trial
+ *   npx tsx scripts/grant-plan.ts u_7def434f01700bff31c2 default  # downgrade
  *
- * Effects:
- *   - users.plan / subscriptionStartedAt / subscriptionExpiresAt /
- *     dailyQuotaUsd updated
- *   - newapi.updateUser: quota set to dailyQuotaUsd × 500_000, group set
- *     to the plan's group
+ * V3 effects (newapi-as-truth — TokenBoss DB writes nothing):
+ *   - For trial / plus / super / ultra:
+ *       1. List existing active subs on newapi → invalidate each
+ *       2. POST /api/subscription/admin/bind with NEWAPI_PLAN_ID_<tier>
+ *       newapi sets group + quota + reset cadence + expiry on its own.
+ *   - For default:
+ *       1. List + invalidate active subs
+ *       2. PUT /api/user/ {group:"default"}  (defensive — newapi normally
+ *          rolls the group back automatically when a sub is cancelled)
  *
- * After running, refresh /console — hero card should reflect the new plan
- * and balance. Make a chat call with the user's sk-xxx — paid users are
- * NOT model-rewritten, so opus stays opus (newapi will then enforce
- * channel availability per the new group).
+ * After running, refresh /console — the dashboard reads /v1/buckets which
+ * pulls subscription state live from newapi. There's no TokenBoss-side
+ * cache that could lag.
  */
 
 try {
@@ -25,100 +28,104 @@ try {
   /* env may already be set */
 }
 
+import { getUser } from "../src/lib/store.js";
+import { newapi, NewapiError } from "../src/lib/newapi.js";
 import {
-  getUser,
-  setUserPlan,
-} from "../src/lib/store.js";
-import { newapi, usdToNewapiQuota, NewapiError } from "../src/lib/newapi.js";
-import { PLANS, FREE_TIER, isPlanId } from "../src/lib/plans.js";
+  DEFAULT_TIER,
+  getNewapiPlanId,
+  type SubscriptionLabel,
+} from "../src/lib/plans.js";
 
 function newapiUsername(userId: string): string {
   return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
 }
 
-function parseArgs(): { userId: string; planArg: string; days: number | null } {
+type TierArg = SubscriptionLabel | "default";
+const VALID: readonly TierArg[] = ["trial", "plus", "super", "ultra", "default"];
+
+function parseArgs(): { userId: string; tier: TierArg } {
   const args = process.argv.slice(2);
   const positional: string[] = [];
-  let days: number | null = null;
   for (const a of args) {
-    if (a.startsWith("--days=")) days = parseInt(a.slice(7), 10);
-    else if (a === "-h" || a === "--help") {
-      console.log("Usage: tsx scripts/grant-plan.ts <userId> <plus|super|ultra|free> [--days=N]");
+    if (a === "-h" || a === "--help") {
+      console.log("Usage: tsx scripts/grant-plan.ts <userId> <trial|plus|super|ultra|default>");
       process.exit(0);
     } else positional.push(a);
   }
   if (positional.length !== 2) {
-    console.error("Usage: tsx scripts/grant-plan.ts <userId> <plus|super|ultra|free> [--days=N]");
+    console.error("Usage: tsx scripts/grant-plan.ts <userId> <trial|plus|super|ultra|default>");
     process.exit(1);
   }
-  return { userId: positional[0], planArg: positional[1], days };
+  const tier = positional[1] as TierArg;
+  if (!(VALID as readonly string[]).includes(tier)) {
+    console.error(`unknown tier: ${tier} (use ${VALID.join(" | ")})`);
+    process.exit(1);
+  }
+  return { userId: positional[0], tier };
+}
+
+async function invalidateActive(newapiUserId: number): Promise<void> {
+  try {
+    const existing = await newapi.listUserSubscriptions(newapiUserId);
+    for (const sub of existing) {
+      if (sub.status === "active") {
+        await newapi.invalidateUserSubscription(sub.id);
+        console.log(`[grant-plan] invalidated stale sub id=${sub.id} (plan_id=${sub.plan_id})`);
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.warn(`[grant-plan] could not list/invalidate existing subs: ${msg}`);
+  }
 }
 
 async function main() {
-  const { userId, planArg, days } = parseArgs();
+  const { userId, tier } = parseArgs();
   const user = await getUser(userId);
   if (!user) {
     console.error(`[grant-plan] user not found: ${userId}`);
     process.exit(1);
   }
   if (user.newapiUserId == null) {
-    console.error(`[grant-plan] user ${userId} has no newapi link — cannot push quota`);
+    console.error(`[grant-plan] user ${userId} has no newapi link — cannot bind`);
     process.exit(1);
   }
 
-  console.log("[grant-plan] BEFORE:");
-  console.log(`  plan=${user.plan ?? "null"} dailyQuotaUsd=${user.dailyQuotaUsd ?? "null"} expiresAt=${user.subscriptionExpiresAt ?? "null"}`);
   const beforeNewapi = await newapi.getUser(user.newapiUserId);
-  console.log(`  newapi: quota=${beforeNewapi.quota} (${beforeNewapi.quota / 500_000} USD) group=${beforeNewapi.group}`);
+  console.log("[grant-plan] BEFORE:");
+  console.log(
+    `  newapi: quota=${beforeNewapi.quota.toLocaleString()} (~$${(beforeNewapi.quota / 500_000).toFixed(2)}) group=${beforeNewapi.group}`,
+  );
 
-  const username = newapiUsername(userId);
-
-  if (planArg === "free") {
-    setUserPlan(userId, {
-      plan: "free",
-      subscriptionStartedAt: null,
-      subscriptionExpiresAt: null,
-      dailyQuotaUsd: null,
-      quotaNextResetAt: null,
-    });
+  if (tier === "default") {
+    await invalidateActive(user.newapiUserId);
     await newapi.updateUser({
       id: user.newapiUserId,
-      username,
-      quota: usdToNewapiQuota(FREE_TIER.initialQuotaUsd),
-      group: FREE_TIER.group,
+      username: newapiUsername(userId),
+      group: DEFAULT_TIER.group,
     });
-    console.log(`[grant-plan] downgraded ${userId} → free, quota=$${FREE_TIER.initialQuotaUsd} group=${FREE_TIER.group}`);
-  } else if (isPlanId(planArg)) {
-    const cfg = PLANS[planArg];
-    const duration = days ?? cfg.durationDays;
-    const now = Date.now();
-    const startedAt = new Date(now).toISOString();
-    const expiresAt = new Date(now + duration * 86_400_000).toISOString();
-    const quotaNextResetAt = new Date(now + 86_400_000).toISOString();
-    setUserPlan(userId, {
-      plan: planArg,
-      subscriptionStartedAt: startedAt,
-      subscriptionExpiresAt: expiresAt,
-      dailyQuotaUsd: cfg.dailyQuotaUsd,
-      quotaNextResetAt,
-    });
-    await newapi.updateUser({
-      id: user.newapiUserId,
-      username,
-      quota: usdToNewapiQuota(cfg.dailyQuotaUsd),
-      group: cfg.group,
-    });
-    console.log(`[grant-plan] activated ${planArg} for ${userId}: $${cfg.dailyQuotaUsd}/day group=${cfg.group} expires=${expiresAt} nextReset=${quotaNextResetAt}`);
+    console.log(`[grant-plan] cleared subscription for ${userId} (newapi group → default)`);
   } else {
-    console.error(`[grant-plan] unknown plan: ${planArg} (use plus | super | ultra | free)`);
-    process.exit(1);
+    const planId = getNewapiPlanId(tier);
+    if (planId === null) {
+      console.error(
+        `[grant-plan] NEWAPI_PLAN_ID_${tier.toUpperCase()} not set in .env.local — set it to the integer id from newapi 订阅管理`,
+      );
+      process.exit(1);
+    }
+    await invalidateActive(user.newapiUserId);
+    await newapi.bindSubscription({
+      userId: user.newapiUserId,
+      planId,
+    });
+    console.log(`[grant-plan] bound ${tier} (newapi plan_id=${planId}) for ${userId}`);
   }
 
-  const afterUser = await getUser(userId);
   const afterNewapi = await newapi.getUser(user.newapiUserId);
   console.log("[grant-plan] AFTER:");
-  console.log(`  plan=${afterUser?.plan} dailyQuotaUsd=${afterUser?.dailyQuotaUsd ?? "null"} expiresAt=${afterUser?.subscriptionExpiresAt ?? "null"}`);
-  console.log(`  newapi: quota=${afterNewapi.quota} (${afterNewapi.quota / 500_000} USD) group=${afterNewapi.group}`);
+  console.log(
+    `  newapi: quota=${afterNewapi.quota.toLocaleString()} (~$${(afterNewapi.quota / 500_000).toFixed(2)}) group=${afterNewapi.group}`,
+  );
 }
 
 main().catch((err) => {

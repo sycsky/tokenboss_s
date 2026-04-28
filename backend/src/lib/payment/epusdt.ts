@@ -61,19 +61,25 @@ export class EpusdtError extends Error {
 
 export function createEpusdtClient(cfg: EpusdtConfig): PaymentChannelClient {
   const baseUrl = cfg.baseUrl.replace(/\/+$/, "");
-  const currency = cfg.currency ?? "cny";
   const token = cfg.token ?? "usdt";
   const network = cfg.network ?? "tron";
 
   return {
     async createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
+      // V3: TokenBoss prices crypto plans in USD natively (frontend
+      // marketing copy is "$49 USDC / 4 周"). Pass that through to epusdt
+      // as currency=usd; epusdt then converts to USDT at gateway rate.
+      // Fall back to cfg.currency / 'cny' for any unexpected callers.
+      const apiCurrency = input.currency
+        ? input.currency.toLowerCase()
+        : (cfg.currency ?? "cny");
       const body: Record<string, unknown> = {
         pid: cfg.pid,
         order_id: input.orderId,
-        currency,
+        currency: apiCurrency,
         token,
         network,
-        amount: input.amountCNY,
+        amount: input.amount,
         notify_url: input.notifyUrl,
       };
       if (input.redirectUrl) body.redirect_url = input.redirectUrl;

@@ -31,11 +31,12 @@ import {
   listOrdersByUser,
   type OrderRecord,
 } from "../lib/store.js";
-import { isPlanId, getPlanPriceCNY } from "../lib/plans.js";
+import { isPlanId, getPlanPriceCNY, getPlanPriceUSD } from "../lib/plans.js";
 
 // PLAN_PRICE was a frozen snapshot of PLANS[*].priceCNY built at module
-// load — replaced by getPlanPriceCNY(), which reads the env override at
-// call time so PLAN_PRICE_<PLANID>_CNY can flip without a process bounce.
+// load — replaced by getPlanPriceCNY() / getPlanPriceUSD(), which read
+// the env override at call time so PLAN_PRICE_<PLANID>_CNY (or _USD)
+// can flip without a process bounce.
 
 function jsonResponse(
   statusCode: number,
@@ -121,7 +122,8 @@ function shapeOrder(rec: OrderRecord) {
     orderId: rec.orderId,
     planId: rec.planId,
     channel: rec.channel,
-    amountCNY: rec.amountCNY,
+    amount: rec.amount,
+    currency: rec.currency,
     amountActual: rec.amountActual,
     status: rec.status,
     paymentUrl: rec.upstreamPaymentUrl,
@@ -152,7 +154,15 @@ export const createOrderHandler = async (
 
   const planId = body.planId;
   const channel = body.channel;
-  const amountCNY = getPlanPriceCNY(planId);
+  // Channel determines pricing currency:
+  //   epusdt   → USD (USDT-TRC20)
+  //   xunhupay → CNY (Alipay/WeChat fiat gateway, CNY only)
+  // The CNY/USD prices are independent product decisions — both are
+  // editable via env overrides (PLAN_PRICE_<TIER>_CNY/_USD).
+  const currency: "CNY" | "USD" = channel === "epusdt" ? "USD" : "CNY";
+  const amount = currency === "USD"
+    ? getPlanPriceUSD(planId)
+    : getPlanPriceCNY(planId);
 
   const baseUrl = resolvePublicBaseUrl(event);
   if (!baseUrl) {
@@ -196,7 +206,8 @@ export const createOrderHandler = async (
   try {
     result = await client.createOrder({
       orderId,
-      amountCNY,
+      amount,
+      currency,
       planId,
       notifyUrl: `${baseUrl}/v1/billing/webhook/${channel}`,
       redirectUrl: typeof body.redirectUrl === "string"
@@ -218,7 +229,8 @@ export const createOrderHandler = async (
     userId: auth.userId,
     planId,
     channel,
-    amountCNY,
+    amount,
+    currency,
     amountActual: result.amountActual,
     status: "pending",
     upstreamTradeId: result.upstreamTradeId,
@@ -231,7 +243,8 @@ export const createOrderHandler = async (
     orderId,
     planId,
     channel,
-    amountCNY,
+    amount,
+    currency,
     amountActual: result.amountActual,
     paymentUrl: result.paymentUrl,
     qrCodeUrl: result.qrCodeUrl,

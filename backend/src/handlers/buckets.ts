@@ -1,18 +1,18 @@
 /**
- * GET /v1/buckets — synthesize a single bucket-shaped object from
- * `users.plan` + `newapi.getUser`'s remaining quota.
+ * GET /v1/buckets — synthesize bucket-shaped objects from the user's
+ * newapi subscription records.
  *
- * Local `credit_bucket` is gone. The frontend (Dashboard / UsageHistory /
- * Settings) reads bucket-shaped data so we keep the response shape and
- * compute the fields on the fly. Source of truth:
- *   - plan / dailyQuotaUsd / subscriptionExpiresAt → users table
- *   - quota / used_quota                            → newapi.getUser
+ * Source of truth (V3 newapi-as-truth):
+ *   - GET /api/subscription/admin/users/{id}/subscriptions
+ *     returns the user's full subscription history; each record has
+ *     amount_total, amount_used, end_time, next_reset_time, etc.
+ *   - We surface ALL active subscriptions (so e.g. a trial visible
+ *     alongside a paid sub if both exist), as a list of buckets.
+ *   - Trial is a subscription too; it shows as skuType="trial".
  *
  * Returns { buckets: [] } when:
- *   - the user has no plan (newly seeded row), OR
  *   - the user has no newapi link, OR
- *   - newapi.getUser fails (graceful degradation; dashboard renders
- *     "no active credit").
+ *   - newapi call fails (graceful degradation; dashboard renders empty).
  */
 
 import type {
@@ -22,7 +22,8 @@ import type {
 
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { getUser } from "../lib/store.js";
-import { newapi, newapiQuotaToUsd, NewapiError } from "../lib/newapi.js";
+import { newapi, newapiQuotaToUsd, NewapiError, type NewapiSubscription } from "../lib/newapi.js";
+import { getNewapiPlanId } from "../lib/plans.js";
 
 interface SyntheticBucket {
   id: string;
@@ -35,7 +36,9 @@ interface SyntheticBucket {
   expiresAt: string | null;
   modeLock: "auto_eco_only" | null;
   modelPool: "eco_only" | "all";
-  /** ISO of next 24h quota reset; null for free users (no daily reset). */
+  /** ISO of next 24h quota reset, taken from newapi's subscription
+   *  next_reset_time (only set for plans whose quota_reset_period is
+   *  daily/weekly/etc). null for trial (never resets). */
   nextResetAt: string | null;
 }
 
@@ -55,91 +58,104 @@ export async function listBucketsHandler(
   }
 
   const user = await getUser(userId);
-  if (!user || !user.plan || user.newapiUserId == null) {
+  if (!user || user.newapiUserId == null) {
     return jsonResponse(200, { buckets: [] });
   }
 
-  let remainingUsd = 0;
+  let subs: NewapiSubscription[] = [];
   try {
-    const u = await newapi.getUser(user.newapiUserId);
-    // newapi exposes `quota` (remaining) directly. Some forks alias it as
-    // `remain_quota`; getUser returns NewapiUser whose `quota` field is the
-    // remaining balance, NOT the cap.
-    const remainingQuota = (u as unknown as { quota?: number; remain_quota?: number }).quota
-      ?? (u as unknown as { remain_quota?: number }).remain_quota
-      ?? 0;
-    remainingUsd = newapiQuotaToUsd(Number(remainingQuota) || 0);
+    subs = await newapi.listUserSubscriptions(user.newapiUserId);
   } catch (err) {
-    // Don't 500 the dashboard — log and return empty.
     if (err instanceof NewapiError) {
-      console.warn(`[buckets] newapi.getUser failed: ${err.message}`);
+      console.warn(`[buckets] listUserSubscriptions failed: ${err.message}`);
     } else {
-      console.warn(`[buckets] newapi.getUser failed: ${(err as Error).message}`);
+      console.warn(`[buckets] listUserSubscriptions failed: ${(err as Error).message}`);
     }
     return jsonResponse(200, { buckets: [] });
   }
 
-  const bucket = synthesize(user.plan, {
-    userId,
-    dailyQuotaUsd: user.dailyQuotaUsd ?? null,
-    subscriptionStartedAt: user.subscriptionStartedAt ?? null,
-    subscriptionExpiresAt: user.subscriptionExpiresAt ?? null,
-    quotaNextResetAt: user.quotaNextResetAt ?? null,
-    createdAt: user.createdAt,
-    remainingUsd,
-  });
+  const planIdMap = buildPlanIdMap();
+  const buckets = subs
+    .filter((s) => s.status === "active")
+    .map((s) => synthesize(s, userId as string, planIdMap, user.createdAt))
+    .filter((b): b is SyntheticBucket => b !== null);
 
-  return jsonResponse(200, { buckets: [bucket] });
+  return jsonResponse(200, { buckets });
+}
+
+/**
+ * Build a reverse map from newapi plan_id → TokenBoss label so we can
+ * skuType the bucket correctly. NEWAPI_PLAN_ID_<TIER> envs already give
+ * us the forward map; invert at request time (cheap — 4 entries).
+ */
+function buildPlanIdMap(): Map<number, "trial" | "plus" | "super" | "ultra"> {
+  const map = new Map<number, "trial" | "plus" | "super" | "ultra">();
+  for (const tier of ["trial", "plus", "super", "ultra"] as const) {
+    const id = getNewapiPlanId(tier);
+    if (id !== null) map.set(id, tier);
+  }
+  return map;
 }
 
 function synthesize(
-  plan: string,
-  ctx: {
-    userId: string;
-    dailyQuotaUsd: number | null;
-    subscriptionStartedAt: string | null;
-    subscriptionExpiresAt: string | null;
-    quotaNextResetAt: string | null;
-    createdAt: string;
-    remainingUsd: number;
-  },
-): SyntheticBucket {
-  if (plan === "free") {
-    // Free users get $10 one-shot. No daily reset, no expiry countdown.
+  sub: NewapiSubscription,
+  userId: string,
+  planIdMap: Map<number, "trial" | "plus" | "super" | "ultra">,
+  userCreatedAt: string,
+): SyntheticBucket | null {
+  const tier = planIdMap.get(sub.plan_id);
+  if (!tier) return null; // Unknown plan id (shouldn't happen if env is configured).
+
+  const totalUsd = newapiQuotaToUsd(sub.amount_total);
+  const usedUsd = newapiQuotaToUsd(sub.amount_used);
+  const remainingUsd = Math.max(0, totalUsd - usedUsd);
+  const startedAt = sub.start_time
+    ? new Date(sub.start_time * 1000).toISOString()
+    : userCreatedAt;
+  const expiresAt = sub.end_time
+    ? new Date(sub.end_time * 1000).toISOString()
+    : null;
+  const nextResetAt = sub.next_reset_time
+    ? new Date(sub.next_reset_time * 1000).toISOString()
+    : null;
+
+  if (tier === "trial") {
     return {
-      id: `bk_free_${ctx.userId}`,
+      id: `bk_trial_${sub.id}_${userId}`,
       skuType: "trial",
-      amountUsd: 10,
+      amountUsd: totalUsd,
       dailyCapUsd: null,
       dailyRemainingUsd: null,
-      totalRemainingUsd: ctx.remainingUsd,
-      startedAt: ctx.subscriptionStartedAt ?? ctx.createdAt,
-      expiresAt: null,
+      totalRemainingUsd: remainingUsd,
+      startedAt,
+      expiresAt,
       modeLock: "auto_eco_only",
       modelPool: "eco_only",
-      nextResetAt: null,
+      nextResetAt,
     };
   }
 
-  // Paid plans: dailyQuotaUsd is the daily cap; remaining is what newapi
-  // currently shows. Each user has their own 24h reset window.
   const sku =
-    plan === "plus" ? "plan_plus" :
-    plan === "super" ? "plan_super" :
-    plan === "ultra" ? "plan_ultra" :
-    "plan_plus";
+    tier === "plus" ? "plan_plus" :
+    tier === "super" ? "plan_super" :
+    "plan_ultra";
+
+  // For paid plans, totalUsd is the per-period budget (e.g. $30 for Plus
+  // when quota_reset_period=daily). Treat amountTotal as both the cap
+  // and the period budget; remaining is what's left in the current
+  // window (newapi resets it on next_reset_time).
   return {
-    id: `bk_${plan}_${ctx.userId}`,
-    skuType: sku as SyntheticBucket["skuType"],
-    amountUsd: ctx.dailyQuotaUsd ?? 0,
-    dailyCapUsd: ctx.dailyQuotaUsd,
-    dailyRemainingUsd: ctx.remainingUsd,
-    totalRemainingUsd: ctx.remainingUsd,
-    startedAt: ctx.subscriptionStartedAt ?? ctx.createdAt,
-    expiresAt: ctx.subscriptionExpiresAt,
+    id: `bk_${tier}_${sub.id}_${userId}`,
+    skuType: sku,
+    amountUsd: totalUsd,
+    dailyCapUsd: totalUsd,
+    dailyRemainingUsd: remainingUsd,
+    totalRemainingUsd: remainingUsd,
+    startedAt,
+    expiresAt,
     modeLock: null,
     modelPool: "all",
-    nextResetAt: ctx.quotaNextResetAt,
+    nextResetAt,
   };
 }
 

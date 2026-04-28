@@ -19,7 +19,7 @@ async function getCodeForEmail(email: string): Promise<string> {
 }
 
 describe('POST /v1/auth/verify-code', () => {
-  it('first-time email creates a free-tier user', async () => {
+  it('first-time email creates a TokenBoss user (newapi handles subscription)', async () => {
     const code = await getCodeForEmail('new@example.com');
 
     const res = await verifyCodeHandler({ body: JSON.stringify({ email: 'new@example.com', code }) } as any) as APIGatewayProxyStructuredResultV2;
@@ -32,10 +32,15 @@ describe('POST /v1/auth/verify-code', () => {
     const userId = getUserIdByEmail('new@example.com');
     expect(userId).toBeTruthy();
     const u = await getUser(userId!);
-    expect(u?.plan).toBe('free');
+    expect(u).toBeTruthy();
+    // V3 (newapi-as-truth): TokenBoss DB no longer tracks plan. The
+    // active subscription lives in newapi; /v1/buckets reads it live.
+    expect(u?.plan).toBeUndefined();
+    expect(u?.subscriptionStartedAt).toBeUndefined();
+    expect(u?.subscriptionExpiresAt).toBeUndefined();
   });
 
-  it('returning user gets token without flipping plan back', async () => {
+  it('returning user gets a token (no DB plan to flip)', async () => {
     // First signup
     const code1 = await getCodeForEmail('returning@example.com');
     await verifyCodeHandler({ body: JSON.stringify({ email: 'returning@example.com', code: code1 }) } as any);
@@ -47,9 +52,11 @@ describe('POST /v1/auth/verify-code', () => {
     const body = JSON.parse(res.body!);
     expect(body.isNew).toBe(false);
 
-    // plan should still be whatever the user has — never overwritten by login.
+    // V3: there's nothing to flip — login can't accidentally touch
+    // subscription state because it's not on this side anymore.
     const u = await getUser(userId);
-    expect(u?.plan).toBeTruthy();
+    expect(u).toBeTruthy();
+    expect(u?.plan).toBeUndefined();
   });
 
   it('rejects wrong code', async () => {

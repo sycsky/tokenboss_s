@@ -9,6 +9,8 @@ export type PaymentChannel = "epusdt" | "xunhupay";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 
+export type OrderCurrency = "CNY" | "USD";
+
 // PlanId is the source of truth in lib/plans.ts; re-export here so the
 // payment-domain types live in one place.
 export type { PlanId } from "../plans.js";
@@ -19,8 +21,12 @@ export interface OrderRecord {
   userId: string;
   planId: _PlanId;
   channel: PaymentChannel;
-  amountCNY: number;
-  /** USDT amount when channel=epusdt; same as amountCNY for fiat channels. */
+  /** Quoted amount in `currency` (CNY for xunhupay, USD for epusdt). */
+  amount: number;
+  /** Currency the `amount` is denominated in. */
+  currency: OrderCurrency;
+  /** Channel-side actual settled amount (USDT for epusdt, same as
+   *  amount for xunhupay). */
   amountActual?: number;
   status: OrderStatus;
   /** Channel-side trade id (epusdt: trade_id; xunhupay: open_order_id). */
@@ -37,7 +43,9 @@ export interface OrderRecord {
 
 export interface CreateOrderInput {
   orderId: string;
-  amountCNY: number;
+  /** Quoted amount in `currency`. epusdt: USD; xunhupay: CNY. */
+  amount: number;
+  currency: OrderCurrency;
   planId: _PlanId;
   notifyUrl: string;
   redirectUrl?: string;
