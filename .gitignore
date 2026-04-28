@@ -20,7 +20,8 @@ vendor/
 *.png
 !frontend/src/assets/**/*.png
 
-# SQLite WAL/SHM (dev artifacts)
+# SQLite dev DB + WAL/SHM (schema is recreated at startup via store.ts init())
+backend/data/*.db
 *.db-shm
 *.db-wal
 
