@@ -27,7 +27,7 @@ import type {
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
 import { sendVerificationEmail, sendVerifyLinkEmail } from "../lib/emailService.js";
-import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
+import { isNewapiConfigured, newapi, NewapiError, newapiQuotaToUsd } from "../lib/newapi.js";
 import { getNewapiPlanId } from "../lib/plans.js";
 import {
   createEmailVerifyToken,
@@ -87,23 +87,39 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Build a profile for API responses. Identity-only — subscription state
- * (active plan, expiry, period quota) lives in newapi and is exposed
- * via `/v1/buckets`. The previous `balance` field was newapi's
- * `quota - used_quota` which in V3 ends up being the SAME thing the
- * subscription card shows (newapi's user.quota auto-tracks the active
- * sub's remaining), so it was dropped to avoid confusing duplication.
- * If V2-style topup ever returns we'll add it back as a true
- * "wallet outside subscription" field.
+ * Build a profile for API responses. `balance` is the user's total
+ * spendable USD on newapi (`user.quota / 500_000` — newapi stores quota
+ * in raw units where 500,000 = $1). It's an aggregate of subscription
+ * remaining + any wallet top-up.
+ *
+ * Fine-grained subscription state (current plan, expiry, period quota)
+ * is intentionally NOT here — frontends call `/v1/buckets` for that and
+ * compose with `balance` to show "total wallet" vs "today's allowance"
+ * separately. Older versions of this function returned `quota - used`
+ * which double-subtracted (newapi.user.quota is already remaining); fix
+ * for that incident is to simply convert the raw remaining to USD.
  */
 async function buildUserProfile(
   u: UserRecord,
 ): Promise<Record<string, unknown>> {
+  let balance = 0;
+  if (isNewapiConfigured() && u.newapiUserId !== undefined) {
+    try {
+      const nu = await newapi.getUser(u.newapiUserId);
+      balance = newapiQuotaToUsd(Math.max(0, nu.quota));
+    } catch (err) {
+      console.warn(
+        `[userProfile] newapi getUser failed for ${u.userId}:`,
+        (err as Error).message,
+      );
+    }
+  }
   return {
     userId: u.userId,
     email: u.email,
     displayName: u.displayName,
     emailVerified: u.emailVerified === true,
+    balance,
     createdAt: u.createdAt,
   };
 }

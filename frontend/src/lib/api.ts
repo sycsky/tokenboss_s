@@ -125,6 +125,11 @@ export interface UserProfile {
   displayName?: string;
   /** True after the user clicks the verification link sent on register. */
   emailVerified: boolean;
+  /** Total spendable USD on newapi — sum of active subscription remaining
+   *  plus any wallet top-up. Backed by `newapi.user.quota` converted from
+   *  raw units (500,000 = $1). Frontend should display directly with $
+   *  symbol, no further conversion. */
+  balance: number;
   createdAt: string;
 }
 
