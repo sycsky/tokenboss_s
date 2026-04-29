@@ -264,13 +264,15 @@ export interface BillingOrder {
   orderId: string;
   /** New canonical SKU label. Use this in switch statements. */
   skuType: BillingSkuType;
-  /** Convenience: derived from skuType for plan_* orders; undefined on
-   *  topup orders. Kept for back-compat with components that read planId. */
+  /** Convenience field derived from skuType server-side; null/absent for
+   *  topup orders. Mirrors backend shapeOrder. Use skuType for switch
+   *  statements; planId is for direct display in plan-only contexts. */
   planId?: BillingPlanId;
   channel: BillingChannel;
   /** Quoted amount in `currency` (CNY for xunhupay, USD for epusdt). */
   amount: number;
   currency: BillingCurrency;
+  /** Channel-side actual settled amount (USDT count for epusdt). */
   amountActual?: number;
   /** USD equivalent credited on settle. Only set for skuType='topup'. */
   topupAmountUsd?: number;
@@ -286,13 +288,19 @@ export interface BillingOrder {
 export interface CreateOrderResponse {
   orderId: string;
   skuType: BillingSkuType;
+  /** Convenience field derived from skuType server-side; null/absent for
+   *  topup orders. Mirrors backend shapeOrder. Use skuType for switch
+   *  statements; planId is for direct display in plan-only contexts. */
   planId?: BillingPlanId;
   channel: BillingChannel;
   amount: number;
   currency: BillingCurrency;
+  /** Channel-side actual settled amount (USDT count for epusdt). */
   amountActual?: number;
   topupAmountUsd?: number;
   paymentUrl: string;
+  /** Direct QR image URL when channel=xunhupay. Use to render an
+   *  inline QR on PC instead of redirecting to the gateway. */
   qrCodeUrl?: string;
   expiresAt?: number;
   status: BillingStatus;
