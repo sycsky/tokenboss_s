@@ -352,10 +352,12 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Mini progress bar — only when there's a subscription with a
-              meaningful period total. Slim bar (h-2) inside hero replaces
-              the larger standalone "今日额度" card we used to have below. */}
-          {subBucket && periodTotal > 0 && (
+          {/* Mini progress bar — only when there's a sub AND the user has
+              actually called something. Before the first call there's
+              nothing meaningful to visualize (an empty 0% bar overlaps
+              with the "等 Agent 第一笔调用…" placeholder below in saying
+              the same thing). */}
+          {subBucket && periodTotal > 0 && !noActivity && (
             <div className="mt-4 h-2 bg-white/20 border border-white/40 rounded overflow-hidden">
               <div className="h-full bg-white" style={{ width: `${periodPct}%` }} />
             </div>
