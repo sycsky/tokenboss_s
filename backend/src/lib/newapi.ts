@@ -359,6 +359,58 @@ export const newapi = {
     return req<NewapiUser>("PUT", "/api/user/", input);
   },
 
+  // --- Redemption codes (admin) ---
+
+  /**
+   * Mint a one-shot redemption code on newapi's admin side. We use this in
+   * the topup webhook flow: each settled topup order mints a code worth
+   * `quotaUsd × 500_000` quota units, then immediately calls
+   * `redeemCode` on behalf of the user to apply it. Two atomic newapi
+   * operations replace a single read-modify-write `updateUser` that would
+   * race against the user's own API consumption.
+   *
+   * The redemption is permanent (`expired_time=0`). `count` is fixed at 1
+   * since each order mints exactly one code; the upstream limit is 100.
+   *
+   * `name` is what shows up in the newapi admin's redemption list, so pass
+   * something traceable like the orderId. newapi caps it at 20 runes —
+   * we truncate here so callers don't have to.
+   */
+  async createRedemption(input: {
+    name: string;
+    quotaUsd: number;
+  }): Promise<string> {
+    const { baseUrl, token, userId } = getConfig();
+    const name = input.name.slice(0, 20); // newapi cap, see redemption.go:68
+    const quota = Math.round(input.quotaUsd * 500_000);
+    const res = await nfetch(`${baseUrl}/api/redemption`, {
+      method: "POST",
+      headers: {
+        authorization: token,
+        "new-api-user": userId,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        name,
+        count: 1,
+        quota,
+        expired_time: 0,
+      }),
+    });
+    const parsed = await readJsonResponse<{
+      success?: boolean;
+      message?: string;
+      data?: string[];
+    }>(res, "createRedemption");
+    if (!res.ok || !parsed.success || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+      throw new NewapiError(
+        res.status || 500,
+        parsed.message ?? "createRedemption failed",
+      );
+    }
+    return parsed.data[0]!;
+  },
+
   // --- Token management ---
   //
   // Tokens can ONLY be created by the owning user's session — newapi's
