@@ -103,7 +103,7 @@ export function createXunhupayClient(cfg: XunhupayConfig): PaymentChannelClient 
         trade_order_id: input.orderId,
         // total_fee must be a numeric string with at most 2 decimals.
         total_fee: input.amount.toFixed(2),
-        title: defaultTitle,
+        title: `${defaultTitle} ${input.skuLabel}`.trim(),
         time: unixSeconds(),
         nonce_str: nonceStr(),
         notify_url: input.notifyUrl,

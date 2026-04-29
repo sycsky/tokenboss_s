@@ -1,13 +1,12 @@
 /**
- * paymentHandlers — focused on the sold-out gate added in this feature.
- * The full create-order happy path is integration-heavy (needs xunhupay /
- * epusdt running), so this file only covers the synchronous validation
- * branches that don't talk to upstream gateways.
+ * paymentHandlers tests — covers the synchronous validation branches
+ * (sold-out gate, type discriminator, topup amount checks). The full
+ * upstream call paths (xunhupay/epusdt) require a live gateway and live
+ * in scripts/probe-* end-to-end.
  */
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
-// Session signing requires SESSION_SECRET set before authTokens loads.
 process.env.SESSION_SECRET = 'test-secret-32bytes-min-aaaaaaaaaaa';
 
 import { init, putUser } from '../../lib/store.js';
@@ -29,8 +28,6 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  // Make sure the public-base-url branch doesn't error out before the
-  // sold-out check runs. Set env so resolvePublicBaseUrl returns a value.
   process.env.PUBLIC_BASE_URL = 'https://api.test.local';
 });
 
@@ -57,8 +54,6 @@ describe('createOrderHandler — sold-out gate', () => {
   });
 
   it('410 sold-out fires regardless of channel selection', async () => {
-    // Both channels should be blocked equally — sold-out is plan-scoped,
-    // not channel-scoped.
     const epusdt = await run({ planId: 'ultra', channel: 'epusdt' });
     expect(epusdt.statusCode).toBe(410);
     const xunhupay = await run({ planId: 'ultra', channel: 'xunhupay' });
@@ -66,10 +61,6 @@ describe('createOrderHandler — sold-out gate', () => {
   });
 
   it('does NOT 410 for non-sold-out plans (Plus, Super)', async () => {
-    // Plus / Super aren't sold out. They should NOT hit the 410 branch.
-    // We expect 503 instead because no payment gateway is configured in
-    // the test env — that's a separate downstream check, but it confirms
-    // the sold-out gate didn't fire.
     const plus = await run({ planId: 'plus', channel: 'xunhupay' });
     expect(plus.statusCode).not.toBe(410);
     const sup = await run({ planId: 'super', channel: 'epusdt' });
@@ -77,11 +68,69 @@ describe('createOrderHandler — sold-out gate', () => {
   });
 
   it('still validates planId / channel before checking sold-out', async () => {
-    // Bad planId → 400, not 410. Sold-out gate must come AFTER validation.
     const badPlan = await run({ planId: 'fake', channel: 'xunhupay' });
     expect(badPlan.statusCode).toBe(400);
-
     const badChannel = await run({ planId: 'ultra', channel: 'paypal' });
     expect(badChannel.statusCode).toBe(400);
+  });
+});
+
+describe('createOrderHandler — type discriminator', () => {
+  it('defaults to type="plan" when omitted (back-compat)', async () => {
+    // Plus is not sold out → 410 ruled out. Without payment gateway env it
+    // falls through to 503 on the channel client. The point: not 400.
+    const res = await run({ planId: 'plus', channel: 'xunhupay' });
+    expect(res.statusCode).not.toBe(400);
+  });
+
+  it('rejects unknown type value', async () => {
+    const res = await run({ type: 'subscription', planId: 'plus', channel: 'xunhupay' });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('createOrderHandler — type=topup validation', () => {
+  it('400 invalid_amount when amount missing', async () => {
+    const res = await run({ type: 'topup', channel: 'xunhupay' });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body as string);
+    expect(body.error.code).toBe('invalid_amount');
+  });
+
+  it('400 invalid_amount when amount is not an integer', async () => {
+    for (const amount of [1.5, 0, -10, 100000, NaN, '10']) {
+      const res = await run({ type: 'topup', amount, channel: 'xunhupay' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body as string);
+      expect(body.error.code).toBe('invalid_amount');
+    }
+  });
+
+  it('accepts integer amount in valid range and proceeds past validation', async () => {
+    // No payment gateway configured in test env → expect 503 on the
+    // channel client step, NOT 400/410. This proves validation passed.
+    const res = await run({ type: 'topup', amount: 100, channel: 'xunhupay' });
+    expect(res.statusCode).not.toBe(400);
+    expect(res.statusCode).not.toBe(410);
+  });
+
+  it('ignores client-supplied currency (server derives from channel)', async () => {
+    const res = await run({
+      type: 'topup',
+      amount: 100,
+      channel: 'xunhupay',
+      currency: 'USD', // adversarial — should be silently ignored
+    });
+    expect(res.statusCode).not.toBe(400);
+  });
+
+  it('ignores planId on topup orders', async () => {
+    const res = await run({
+      type: 'topup',
+      amount: 100,
+      channel: 'xunhupay',
+      planId: 'ultra', // adversarial — should not trigger sold-out gate
+    });
+    expect(res.statusCode).not.toBe(410);
   });
 });
