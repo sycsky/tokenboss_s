@@ -208,7 +208,7 @@ export default function Plans() {
             ctaHelper={
               sup.soldOut
                 ? undefined
-                : `+ Ultra 抢购优先权 · 每日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 提前 5 分钟独占`
+                : `+ Ultra 抢购优先权 · ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 提前 5 分钟`
             }
             tooltipPanel={
               <TierTooltip
@@ -234,10 +234,10 @@ export default function Plans() {
             soldOutBanner={
               ultra.soldOut
                 ? ultraPhase === 'before'
-                  ? `今日 ${ULTRA_DROP.slotsPerDay} 席即将开放 · Super 用户优先抢购`
+                  ? `今日 ${ULTRA_DROP.slotsPerDay} 席即将开放 · Super 优先`
                   : ultraPhase === 'transitioning'
-                  ? `Super 用户正在抢购今日 ${ULTRA_DROP.slotsPerDay} 席…`
-                  : `今日 ${ULTRA_DROP.slotsPerDay} 席已被 Super 用户抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
+                  ? `Super 正在抢购今日 ${ULTRA_DROP.slotsPerDay} 席…`
+                  : `今日 ${ULTRA_DROP.slotsPerDay} 席已抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
                 : undefined
             }
             ctaHelper={

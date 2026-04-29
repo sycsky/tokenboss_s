@@ -8,6 +8,7 @@ import { CurrencySwitcher } from '../components/CurrencySwitcher';
 import { useAuth } from '../lib/auth';
 import { useCurrency } from '../lib/currency';
 import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
+import { ULTRA_DROP } from '../lib/dropSchedule';
 import { slockBtn } from '../lib/slockBtn';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import hermesIcon from '../assets/agents/hermes.png';
@@ -301,7 +302,11 @@ export default function Landing() {
             ctaText={ultraCta.text}
             onCtaClick={ultraCta.onClick}
             ctaVariant={ultraCta.variant}
-            soldOutBanner={ultraCta.soldOut ? '今日已抢完 · 明日 9:55 再开' : undefined}
+            soldOutBanner={
+              ultraCta.soldOut
+                ? `今日 ${ULTRA_DROP.slotsPerDay} 席已抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
+                : undefined
+            }
           />
         </div>
       </section>
