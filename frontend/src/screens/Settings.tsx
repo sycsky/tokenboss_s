@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { api, type BucketRecord } from '../lib/api';
-import { AppNav } from '../components/AppNav';
+import { AppNav, Breadcrumb } from '../components/AppNav';
 import { SectionHeader } from '../components/SectionHeader';
 import { RedeemCodeModal } from '../components/RedeemCodeModal';
 
@@ -12,13 +12,21 @@ export default function Settings() {
   const [stats, setStats] = useState({ consumed: 0, calls: 0 });
   const [bucket, setBucket] = useState<BucketRecord | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
 
   useEffect(() => {
     api.getUsage({}).then((r) => setStats(r.totals));
     api.getBuckets().then((r) => setBucket((r.buckets || []).find((b) => b.skuType.startsWith('plan_')) ?? null));
-    api.me().then((r) => setCreatedAt(r.user?.createdAt ?? null));
+    api.me().then((r) => {
+      setCreatedAt(r.user?.createdAt ?? null);
+      setUserId(r.user?.userId ?? null);
+    });
   }, []);
+
+  // Strip the internal `u_` prefix on the way to the screen — the bare
+  // suffix is what the user identifies as, the prefix is plumbing.
+  const displayId = userId?.startsWith('u_') ? userId.slice(2) : userId;
 
   const planName =
     bucket?.skuType?.replace('plan_', '').replace(/^./, (c: string) => c.toUpperCase()) ?? '无';
@@ -31,6 +39,8 @@ export default function Settings() {
       <AppNav current="account" />
 
       <main className="max-w-[820px] mx-auto px-5 sm:px-9 pt-6">
+        <Breadcrumb items={[{ label: '控制台', to: '/console' }, { label: '账户' }]} />
+
         <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] mb-2 font-bold">
           ACCOUNT · 账户
         </div>
@@ -46,6 +56,14 @@ export default function Settings() {
             value={
               <span className="font-mono text-[13.5px] font-semibold text-ink break-all">
                 {user?.email}
+              </span>
+            }
+          />
+          <Row
+            label="用户 ID"
+            value={
+              <span className="font-mono text-[13px] font-semibold text-ink break-all">
+                {displayId ?? '—'}
               </span>
             }
           />
