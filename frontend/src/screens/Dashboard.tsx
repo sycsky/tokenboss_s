@@ -86,45 +86,6 @@ function timeAgo(iso: string): string {
   return `${Math.floor(diffSec / 86400)} 天前`;
 }
 
-/**
- * Render the reset-hint copy in the period quota card. Source of truth is
- * the subscription's `next_reset_time` (we surface it as `nextResetAt`).
- * Trial subscriptions don't reset (newapi quota_reset_period=never), so
- * even when a value is present we show "到期不重置" — the field there is
- * just newapi's bookkeeping placeholder.
- *
- * Format adapts to "how soon":
- *   < 1h  → "X 分钟后重置"
- *   < 24h → "今 HH:MM 重置"
- *   < 48h → "明 HH:MM 重置"
- *   else  → "M-D HH:MM 重置"
- */
-function formatResetHint(nextResetAtIso: string | null | undefined, isTrial: boolean): string {
-  if (isTrial) return '到期不重置';
-  if (!nextResetAtIso) return '不重置';
-  const reset = new Date(nextResetAtIso);
-  const now = new Date();
-  const diffMs = reset.getTime() - now.getTime();
-  if (diffMs <= 0) return '即将重置';
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 60) return `${diffMin} 分钟后重置`;
-  const hh = String(reset.getHours()).padStart(2, '0');
-  const mm = String(reset.getMinutes()).padStart(2, '0');
-  const sameDay =
-    reset.getFullYear() === now.getFullYear() &&
-    reset.getMonth() === now.getMonth() &&
-    reset.getDate() === now.getDate();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-  const isTomorrow =
-    reset.getFullYear() === tomorrow.getFullYear() &&
-    reset.getMonth() === tomorrow.getMonth() &&
-    reset.getDate() === tomorrow.getDate();
-  if (sameDay) return `今 ${hh}:${mm} 重置`;
-  if (isTomorrow) return `明 ${hh}:${mm} 重置`;
-  return `${reset.getMonth() + 1}-${reset.getDate()} ${hh}:${mm} 重置`;
-}
-
 export default function Dashboard() {
   const { user } = useAuth();
   const [buckets, setBuckets] = useState<BucketRecord[]>([]);
@@ -178,6 +139,7 @@ export default function Dashboard() {
       b.skuType === 'plan_ultra',
   );
   const trialBucket = buckets.find((b) => b.skuType === 'trial');
+  const topupBucket = buckets.find((b) => b.skuType === 'topup');
   const isTrial = subBucket?.skuType === 'trial';
 
   // Period quota (today's allowance for paid plans, total trial budget
@@ -224,10 +186,6 @@ export default function Dashboard() {
   const subDaysRemaining = subBucket?.expiresAt
     ? Math.max(0, Math.ceil((new Date(subBucket.expiresAt).getTime() - Date.now()) / 86400e3))
     : 0;
-
-  // Trial-only: render the remaining time as HH:MM:SS instead of "X 天",
-  // since 1 day is short enough that hours/minutes carry the urgency.
-  const showBucketList = buckets.length > 1 || buckets.some((b) => b.skuType === 'topup');
 
   // Default-key target for the inline spell. The spell always points at
   // the same default key, so once we've revealed its plaintext on this
@@ -307,118 +265,113 @@ export default function Dashboard() {
 
       <main className="max-w-[1200px] mx-auto px-5 sm:px-9 pt-5 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
         {/* Subscription hero — uniform treatment for any active tier
-              (trial / plus / super / ultra). Differs only in:
-                · trial → TRIAL chip + HH:MM:SS countdown + "试用剩"
-                · paid  → PLUS|SUPER|ULTRA chip + days-remaining + "今日剩"
-              No active subscription → falls back to the wallet balance view. */}
-        <section
-          className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5 flex flex-wrap items-center gap-x-6 gap-y-3"
-        >
-          {subBucket ? (
-            <>
-              <div className="flex items-baseline gap-3 flex-wrap">
-                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                  {isTrial ? '试用剩' : '今日剩'}
-                </span>
-                <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
-                  <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
-                  {periodRemaining.toFixed(4)}
-                  <span className="opacity-60 text-[18px] sm:text-[22px] ml-2">
-                    / ${periodTotal}
+              (trial / plus / super / ultra). All three say "今日剩" since
+              trial is also a 24h day-card. Mini progress bar lives on the
+              hero itself — no separate "今日额度" card below. CTA differs:
+                · trial            → "选个套餐 →"  /pricing (upgrade to paid)
+                · plus/super/ultra → "续费 →"     ContactSalesModal(renew)
+                                      + "充值额度" link → ContactSalesModal(topup)
+                                     v1 has no self-serve upgrade across tiers,
+                                     so within-tier renew + wallet topup are
+                                     the only meaningful actions.
+              No active subscription → "Agent 余额" + "开通套餐 →". */}
+        <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            {subBucket ? (
+              <>
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                    今日剩
                   </span>
-                </span>
-              </div>
+                  <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
+                    <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
+                    {periodRemaining.toFixed(4)}
+                    <span className="opacity-60 text-[18px] sm:text-[22px] ml-2">
+                      / ${periodTotal}
+                    </span>
+                  </span>
+                </div>
 
-              <div className="flex items-center gap-2.5">
-                <span
-                  className={
-                    `font-mono text-[9.5px] tracking-[0.16em] uppercase font-bold px-1.5 py-0.5 ${tierChipClass} border-2 border-ink rounded`
-                  }
-                >
-                  {tierLabel}
-                </span>
-                <span className="font-mono text-[13px] font-bold leading-none">
-                  {isTrial && trialSecRemaining > 0
-                    ? `剩 ${trialClock}`
-                    : isTrial
-                      ? '已到期'
-                      : `本月还 ${subDaysRemaining} 天`}
-                </span>
-              </div>
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className={
+                      `font-mono text-[9.5px] tracking-[0.16em] uppercase font-bold px-1.5 py-0.5 ${tierChipClass} border-2 border-ink rounded`
+                    }
+                  >
+                    {tierLabel}
+                  </span>
+                  <span className="font-mono text-[13px] font-bold leading-none">
+                    {isTrial && trialSecRemaining > 0
+                      ? `剩 ${trialClock}`
+                      : isTrial
+                        ? '已到期'
+                        : `本月还 ${subDaysRemaining} 天`}
+                  </span>
+                </div>
 
-              {/* CTA dispatch by tier:
-                    · trial            → "升级 →"   /pricing  (self-checkout)
-                    · plus / super    → "升级 →"   contact modal (no self-serve upgrade in v1)
-                    · ultra           → "续费 →"   contact modal (no self-serve renew)
-                  Paid plans can't self-checkout because v1 has no
-                  upgrade/renew flow — they'd just create stacked subs. */}
-              {isTrial ? (
-                <Link
-                  to="/pricing"
-                  className={slockBtn('secondary') + ' ml-auto'}
-                >
-                  升级 →
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setContactReason(subBucket.skuType === 'plan_ultra' ? 'renew' : 'upgrade')}
-                  className={slockBtn('secondary') + ' ml-auto'}
-                >
-                  {subBucket.skuType === 'plan_ultra' ? '续费 →' : '升级 →'}
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="flex items-baseline gap-3 flex-wrap">
-                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                  Agent 余额
-                </span>
-                <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
-                  <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
-                  {balanceUsd.toFixed(4)}
-                </span>
-              </div>
+                {isTrial ? (
+                  <Link
+                    to="/pricing"
+                    className={slockBtn('secondary') + ' ml-auto'}
+                  >
+                    选个套餐 →
+                  </Link>
+                ) : (
+                  <div className="ml-auto flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setContactReason('topup')}
+                      className="font-mono text-[12px] text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors"
+                    >
+                      充值额度
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContactReason('renew')}
+                      className={slockBtn('secondary')}
+                    >
+                      续费 →
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                    Agent 余额
+                  </span>
+                  <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
+                    <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
+                    {balanceUsd.toFixed(4)}
+                  </span>
+                </div>
 
-              <Link to="/pricing" className={slockBtn('secondary') + ' ml-auto'}>开通 →</Link>
-            </>
+                <Link to="/pricing" className={slockBtn('secondary') + ' ml-auto'}>开通套餐 →</Link>
+              </>
+            )}
+          </div>
+
+          {/* Mini progress bar — only when there's a subscription with a
+              meaningful period total. Slim bar (h-2) inside hero replaces
+              the larger standalone "今日额度" card we used to have below. */}
+          {subBucket && periodTotal > 0 && (
+            <div className="mt-4 h-2 bg-white/20 border border-white/40 rounded overflow-hidden">
+              <div className="h-full bg-white" style={{ width: `${periodPct}%` }} />
+            </div>
           )}
         </section>
 
         {/* MAIN COL */}
         <div className="space-y-5">
-          {/* Period quota progress — for ANY active subscription (trial or
-              paid). Trial: total $10 used over 24h. Paid: today's $X auto-
-              reset. Same UI; only labels and reset hint differ. */}
-          {subBucket && periodTotal > 0 && (
-            <section className={`${card} p-5`}>
-              <div className="flex justify-between items-baseline mb-3">
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold">
-                  {isTrial ? '试用额度' : '今日额度'}
-                </span>
-                <span className="font-mono text-[13px] font-bold text-ink">
-                  ${periodUsed.toFixed(4)}
-                  <span className="text-[#A89A8D] mx-1">/</span>
-                  <span className="text-[#A89A8D]">${periodTotal}</span>
-                </span>
-              </div>
-              <div className="h-3 bg-bg border-2 border-ink rounded overflow-hidden mb-2">
-                <div className="h-full bg-accent" style={{ width: `${periodPct}%` }} />
-              </div>
-              <div className="flex justify-between font-mono text-[11px] text-[#A89A8D]">
-                <span>剩 <span className="text-ink font-semibold">${periodRemaining.toFixed(4)}</span></span>
-                <span>{formatResetHint(subBucket?.nextResetAt, isTrial)}</span>
-              </div>
-            </section>
-          )}
-
-          {/* Total balance — newapi.user.quota in USD. For most users
-              this overlaps with the period quota above (sub remaining
-              IS user.quota when there's no extra topup); shown as a
-              small line so the actual "Agent 余额" number is visible
-              when the user has been topped up beyond their sub. */}
-          {subBucket && (
+          {/* Total balance — only shown when the user has BOTH a sub AND
+              wallet topup. In that case the hero shows today's allowance
+              (sub-bound) but the user also has accrued topup that won't
+              expire — this card surfaces the "your total walking-around
+              money" so they don't think today's number is everything.
+              For sub-only users, balance ≈ today's allowance, so this
+              card would just be a confusing duplicate. */}
+          {subBucket && topupBucket && (
             <section className={`${card} p-4 flex items-center gap-3 flex-wrap`}>
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold flex-shrink-0">
                 Agent 余额
@@ -452,49 +405,6 @@ export default function Dashboard() {
             </section>
           )}
 
-          {/* Active buckets — only show when there's something the hero
-              can't already say (paid topup / plan, or multiple buckets).
-              For a fresh trial-only user this would be a verbatim repeat. */}
-          {showBucketList && (
-          <section>
-            <SectionLabel>活跃额度池</SectionLabel>
-            <div className="space-y-2.5">
-              {buckets.map((b) => (
-                <div key={b.id} className={`${card} p-4`}>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-[14px] font-bold text-ink">
-                      {b.skuType === 'topup' ? '充值余额'
-                        : b.skuType === 'trial' ? 'TRIAL · 试用套餐'
-                        : `${b.skuType.replace('plan_', '').toUpperCase()} 月度套餐`}
-                    </span>
-                    <BucketTag skuType={b.skuType} />
-                  </div>
-                  {b.dailyCapUsd != null && (
-                    <Row label="每日 cap" value={`$${b.dailyCapUsd}`} />
-                  )}
-                  {(b.skuType === 'topup' || b.skuType === 'trial') && (
-                    <Row label="剩余" value={`$${(b.totalRemainingUsd ?? 0).toFixed(4)}`} />
-                  )}
-                  {b.skuType === 'trial' && b.expiresAt && (
-                    <Row
-                      label="到期"
-                      value={new Date(b.expiresAt).toLocaleString('zh-CN', {
-                        month: 'numeric',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                      })}
-                    />
-                  )}
-                </div>
-              ))}
-              {buckets.length === 0 && (
-                <div className={`${card} p-6 text-center text-[#A89A8D] text-sm`}>暂无活跃额度</div>
-              )}
-            </div>
-          </section>
-          )}
-
           {/* Today stats — full numbers only after the first call has
               landed. Before that, an empty 0 / $0 grid feels like a
               sterile sandbox; the waiting card carries the story. */}
@@ -514,15 +424,25 @@ export default function Dashboard() {
               </div>
             </section>
           ) : (
-            <section className="grid grid-cols-2 gap-2.5">
-              <div className={`${card} p-4`}>
-                <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
-                <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
-                <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
+            <section>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className={`${card} p-4`}>
+                  <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
+                  <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
+                  <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
+                </div>
+                <div className={`${card} p-4`}>
+                  <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
+                  <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
+                </div>
               </div>
-              <div className={`${card} p-4`}>
-                <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
-                <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
+              <div className="text-right mt-2">
+                <Link
+                  to="/console/history"
+                  className="font-mono text-[11.5px] text-accent font-bold tracking-wider hover:text-accent-deep underline underline-offset-4 decoration-2"
+                >
+                  查看完整用量 →
+                </Link>
               </div>
             </section>
           )}
@@ -665,27 +585,3 @@ export default function Dashboard() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="font-mono text-[11.5px] flex justify-between text-[#6B5E52] py-0.5">
-      <span>{label}</span>
-      <span className="text-ink font-bold">{value}</span>
-    </div>
-  );
-}
-
-function BucketTag({ skuType }: { skuType: BucketRecord['skuType'] }) {
-  const map: Record<BucketRecord['skuType'], { label: string; cls: string }> = {
-    trial:       { label: '试用',   cls: 'bg-yellow-stamp text-yellow-stamp-ink' },
-    topup:       { label: '不过期', cls: 'bg-lime-stamp text-lime-stamp-ink' },
-    plan_plus:   { label: 'Plus',   cls: 'bg-cyan-stamp text-cyan-stamp-ink' },
-    plan_super:  { label: 'Super',  cls: 'bg-lavender text-lavender-ink' },
-    plan_ultra:  { label: 'Ultra',  cls: 'bg-accent text-white' },
-  };
-  const t = map[skuType];
-  return (
-    <span className={`font-mono text-[9.5px] font-bold tracking-wider uppercase border-2 border-ink px-1.5 py-px rounded ${t.cls}`}>
-      {t.label}
-    </span>
-  );
-}
