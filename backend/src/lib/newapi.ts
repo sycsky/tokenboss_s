@@ -565,6 +565,43 @@ export const newapi = {
   },
 
   /**
+   * Redeem a code (兑换码) on behalf of the user. Wraps newapi's
+   * `POST /api/user/topup` which validates the code, applies it to the
+   * user's quota, and returns the quota delta added.
+   *
+   * On invalid / expired / consumed code, newapi returns `success=false`
+   * with `message="..."` (i18n key `MsgRedeemFailed`). Caller-friendly
+   * mapping: `RedeemError` with the upstream message preserved.
+   */
+  async redeemCode(session: {
+    cookie: string;
+    userId: number;
+  }, code: string): Promise<{ quotaAdded: number }> {
+    const { baseUrl } = getConfig();
+    const res = await nfetch(`${baseUrl}/api/user/topup`, {
+      method: "POST",
+      headers: {
+        cookie: session.cookie,
+        "new-api-user": String(session.userId),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ key: code }),
+    });
+    const body = await readJsonResponse<{
+      success?: boolean;
+      message?: string;
+      data?: number;
+    }>(res, "redeemCode");
+    if (!res.ok || !body.success || typeof body.data !== "number") {
+      throw new NewapiError(
+        res.status || 500,
+        body.message ?? "redeem failed",
+      );
+    }
+    return { quotaAdded: body.data };
+  },
+
+  /**
    * Reveal the raw `sk-xxx` key for a token the session owns. newapi only
    * returns plaintext via this endpoint (not in listings), so the dashboard
    * must call it on demand — we don't cache.

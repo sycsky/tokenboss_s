@@ -414,4 +414,15 @@ export const api = {
   listOrders(): Promise<{ orders: BillingOrder[] }> {
     return request<{ orders: BillingOrder[] }>("/v1/billing/orders");
   },
+  /**
+   * Apply a redemption code (兑换码) to the caller's quota. Returns the
+   * USD value added on success; throws ApiError with `error.code = 'invalid_code'`
+   * (HTTP 422) when newapi rejects the code (expired / consumed / typo).
+   */
+  redeemCode(code: string): Promise<{ quotaAdded: number; usdAdded: number }> {
+    return request<{ quotaAdded: number; usdAdded: number }>(
+      "/v1/billing/redeem",
+      { method: "POST", body: { code } },
+    );
+  },
 };

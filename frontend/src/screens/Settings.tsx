@@ -3,6 +3,7 @@ import { useAuth } from '../lib/auth';
 import { api, type BucketRecord } from '../lib/api';
 import { AppNav } from '../components/AppNav';
 import { SectionHeader } from '../components/SectionHeader';
+import { RedeemCodeModal } from '../components/RedeemCodeModal';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -11,6 +12,7 @@ export default function Settings() {
   const [stats, setStats] = useState({ consumed: 0, calls: 0 });
   const [bucket, setBucket] = useState<BucketRecord | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
+  const [redeemOpen, setRedeemOpen] = useState(false);
 
   useEffect(() => {
     api.getUsage({}).then((r) => setStats(r.totals));
@@ -120,6 +122,11 @@ export default function Settings() {
         <SectionHeader num="03" cn="操作" en="Actions" size="lg" className="mb-4" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-12">
           <ActionCard
+            title="使用兑换码"
+            hint="朋友 / 渠道给你的码，直接到账"
+            onClick={() => setRedeemOpen(true)}
+          />
+          <ActionCard
             title="联系客服"
             hint="微信 / 工单 · 工作日 9-21"
           />
@@ -131,6 +138,11 @@ export default function Settings() {
           />
         </div>
       </main>
+
+      <RedeemCodeModal
+        open={redeemOpen}
+        onClose={() => setRedeemOpen(false)}
+      />
     </div>
   );
 }
