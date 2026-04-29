@@ -1,7 +1,7 @@
 import { useCurrency, type Currency } from '../lib/currency';
 
 /**
- * Two-segment Slock-pixel pill: ¥ RMB · $ USDC. Active segment is
+ * Two-segment Slock-pixel pill: ¥ RMB · $ USD. Active segment is
  * ink-filled; inactive is bg-bg with hover depress. Lives in the
  * top-right of pricing sections (Plans hero, Landing 套餐 SectionHeader,
  * /billing/pay header) — never in global nav, since currency is a
@@ -27,9 +27,9 @@ export function CurrencySwitcher({ className = '' }: { className?: string }) {
       />
       <span aria-hidden="true" className="w-[2px] bg-ink self-stretch" />
       <Segment
-        value="usdc"
-        active={currency === 'usdc'}
-        label="$ USDC"
+        value="usd"
+        active={currency === 'usd'}
+        label="$ USD"
         onSelect={setCurrency}
       />
     </div>

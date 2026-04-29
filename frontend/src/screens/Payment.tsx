@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AppNav } from '../components/AppNav';
+import { AppNav, Breadcrumb } from '../components/AppNav';
 import { TIERS, tierPrice } from '../lib/pricing';
 import { ULTRA_DROP, useDailyCountdown } from '../lib/dropSchedule';
 import { api, type BillingChannel, type BillingPlanId, type BucketRecord } from '../lib/api';
@@ -148,7 +148,7 @@ export default function Payment() {
   // user's currency-switcher preference. xunhupay is CNY-only; epusdt
   // quotes in USD. The actual amount charged to the gateway matches
   // what's shown here.
-  const displayCurrency = channel === 'epusdt' ? 'usdc' : 'rmb';
+  const displayCurrency = channel === 'epusdt' ? 'usd' : 'rmb';
   const price = tierPrice(plan, displayCurrency);
 
   // Direct-nav guard for sold-out tiers — Plans.tsx hides the CTA, but a
@@ -210,13 +210,13 @@ export default function Payment() {
 
       <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-6">
         {/* Crumbs */}
-        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">下单</span>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: '控制台', to: '/console' },
+            { label: '套餐', to: '/pricing' },
+            { label: '下单' },
+          ]}
+        />
 
         {/* Eyebrow */}
         <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
@@ -270,8 +270,8 @@ export default function Payment() {
             <ChannelOption
               active={channel === 'epusdt'}
               onClick={() => setChannel('epusdt')}
-              title="USDT-TRC20"
-              subtitle="区块链稳定币 · TRON"
+              title="稳定币"
+              subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
           </div>
@@ -404,13 +404,13 @@ export function UltraSoldOutPage({
       <AppNav current="console" />
       <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-6">
         {/* Crumbs */}
-        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">Ultra · 满血档</span>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: '控制台', to: '/console' },
+            { label: '套餐', to: '/pricing' },
+            { label: 'Ultra · 满血档' },
+          ]}
+        />
 
         <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
           ULTRA · 每日 {ULTRA_DROP.preemptHourCST}:{ULTRA_DROP.preemptMinuteCST} 开放 {ULTRA_DROP.slotsPerDay} 席

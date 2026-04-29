@@ -118,7 +118,7 @@ export default function Plans() {
           一份钱，多个 Agent 共用。
         </h1>
         <p className="text-[15px] text-text-secondary mb-10 max-w-[560px] leading-relaxed">
-          {currency === 'usdc' ? 'USDC' : '人民币'} 付款，按调用额度计费。
+          {currency === 'usd' ? '美元' : '人民币'} 付款，按调用额度计费。
         </p>
 
         {/* 01 Standard — Slock-pixel pay-as-you-go */}
