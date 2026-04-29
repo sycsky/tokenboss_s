@@ -1,185 +1,227 @@
 ---
 name: tokenboss
-version: 0.4.0
-description: TokenBoss — one API key gives access to OpenAI (Responses API), Anthropic Claude (native messages API), and Google Gemini models. Configures OpenClaw with three providers (`tokenboss-gpt`, `tokenboss-claude`, `tokenboss-gemini`) under `models.providers.*`.
+version: 0.6.0
+description: TokenBoss — one API key, one OpenAI-compatible endpoint, six models (three GPT, three Claude). Configure as a custom provider on OpenClaw, Hermes Agent, or any other agent that speaks OpenAI Chat Completions. Use when setting up TokenBoss, switching LLM provider, or configuring AI routing.
 homepage: https://tokenboss.co
-api_endpoint: https://api.tokenboss.co
-config_file: ~/.openclaw/openclaw.json
-last_updated: 2026-04-27
+api_endpoint: https://api.tokenboss.co/v1
+last_updated: 2026-04-29
 metadata:
+  api_key:
+    required: true
+    env_var: TOKENBOSS_API_KEY
+    placeholder: TOKENBOSS_API_KEY
+    prompt: "Paste your TokenBoss API key (from https://tokenboss.co/console)"
   openclaw:
-    emoji: 🪙
-    requires:
-      config:
-        - models.providers.tokenboss-claude
-        - models.providers.tokenboss-gpt
-        - models.providers.tokenboss-gemini
-        - agents.defaults.model.primary
-        - gateway
-    api_key:
-      required: true
-      prompt: "Paste your TokenBoss API key (from https://tokenboss.co/console)"
-      placeholder: "TOKENBOSS_API_KEY"
+    config_file: ~/.openclaw/openclaw.json
+    provider_key: tokenboss
+  hermes:
+    config_file: ~/.hermes/config.yaml
+    env_file: ~/.hermes/.env
 ---
 
-# TokenBoss for OpenClaw
+# TokenBoss
 
-Adds TokenBoss as three OpenClaw providers — `tokenboss-gpt` (OpenAI Responses API), `tokenboss-claude` (Anthropic native messages), `tokenboss-gemini` (OpenAI Chat Completions surface for Gemini). One TokenBoss API key authenticates all three.
+One API key, one OpenAI-compatible endpoint, six models. Configure TokenBoss as a custom provider on **OpenClaw**, **Hermes Agent**, or any other agent that speaks OpenAI Chat Completions.
 
-## Install
+- API base URL: `https://api.tokenboss.co/v1`
+- Auth: `Authorization: Bearer ${TOKENBOSS_API_KEY}`
+- Protocol: OpenAI Chat Completions (`/v1/chat/completions`)
+- Get your key: <https://tokenboss.co/console>
 
-In OpenClaw, run:
+## The spell
+
+The user pastes a two-line spell — copied from <https://tokenboss.co/console>:
 
 ```
 set up tokenboss.co/skill.md
+TOKENBOSS_API_KEY=sk-XXXXXXXX
 ```
 
-OpenClaw will:
-1. Fetch this skill
-2. Prompt for `TOKENBOSS_API_KEY`
-3. Merge the JSON below into `~/.openclaw/openclaw.json`
-4. Set `agents.defaults.model.primary` to `tokenboss-gpt/gpt-5.5` (override anytime)
-5. **Restart the gateway** so the new providers and gateway config take effect:
-   ```bash
-   openclaw gateway restart
-   ```
-   If your OpenClaw version auto-restarts the gateway after `set up`, this step is a no-op. Otherwise run it manually.
+- **Line 1** — `set up <skill-url>`. OpenClaw treats this as native grammar and runs the fetch + merge automatically. For agents that don't recognise the `set up` keyword (Hermes, Cherry, Codex, Claude Code, etc.), interpret Line 1 as: *fetch this URL and apply the section that matches me*.
+- **Line 2** — `KEY=VALUE` shell-style assignment. The value after `=` is the user's TokenBoss API key. Use it as the bearer credential for every merge below. **Do not ask the user again.**
 
-## Configuration to merge into `~/.openclaw/openclaw.json`
+If the user pasted only Line 1 (no key on Line 2), prompt them once for their key.
 
-**Never blanket-overwrite the file.** Update only the `agents`, `models`, and `gateway` nodes per the rules below. Leave any other top-level keys (`skills`, `wizard`, etc.) and any user-set fields you don't recognise alone. Replace `${TOKENBOSS_API_KEY}` with the value supplied during `set up`.
+For agents that only accept a natural-language prompt, the equivalent trigger is:
+
+> Fetch https://tokenboss.co/skill.md and follow the section for the agent I'm using. The user has pasted `TOKENBOSS_API_KEY=...` along with this prompt — use that value, don't ask again.
+
+## Persisting the key
+
+The key from Line 2 needs to live somewhere the runtime can read it on every call:
+
+```bash
+# Hermes
+echo 'TOKENBOSS_API_KEY=<key>' >> ~/.hermes/.env
+
+# OpenClaw — append to the shell profile so the gateway picks it up on launch
+echo 'export TOKENBOSS_API_KEY=<key>' >> ~/.zshrc   # or ~/.bashrc
+```
+
+Never log the key value. If `~/.hermes/.env` is git-tracked, abort and ask the user to add `.env` to `.gitignore` first.
+
+## Supported models
+
+| Model ID | Family | Context |
+|---|---|---|
+| `gpt-5.5` | OpenAI | 200K |
+| `gpt-5.4` | OpenAI | 200K |
+| `gpt-5.4-mini` | OpenAI | 128K |
+| `claude-opus-4-7` | Anthropic | 200K |
+| `claude-opus-4-6` | Anthropic | 200K |
+| `claude-sonnet-4-6` | Anthropic | 200K |
+
+All six are reachable through the same OpenAI Chat Completions endpoint — pick by the `model` field in the request body.
+
+---
+
+## For OpenClaw
+
+Merge into `~/.openclaw/openclaw.json`. **Never blanket-overwrite the file.** Update only the keys called out below — preserve every other top-level key (`skills`, `wizard`, etc.) and every other entry already inside `models.providers`.
+
+### Provider block
+
+In `models.providers`, add or overwrite the key `"tokenboss"`:
 
 ```json
-{
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "tokenboss-gpt/gpt-5.5"
-      }
-    }
-  },
-  "gateway": {
-    "mode": "local",
-    "port": 18789,
-    "bind": "loopback"
-  },
-  "models": {
-    "providers": {
-      "tokenboss-claude": {
-        "baseUrl": "https://api.tokenboss.co/anthropic",
-        "apiKey": "${TOKENBOSS_API_KEY}",
-        "api": "anthropic-messages",
-        "models": [
-          { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6" },
-          { "id": "claude-opus-4-7", "name": "Claude Opus 4.7" },
-          { "id": "claude-opus-4-5-20251101", "name": "Claude Opus 4.5" },
-          { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5" }
-        ]
-      },
-      "tokenboss-gpt": {
-        "baseUrl": "https://api.tokenboss.co/openai",
-        "apiKey": "${TOKENBOSS_API_KEY}",
-        "api": "openai-responses",
-        "models": [
-          { "id": "gpt-5.5", "name": "GPT-5.5" },
-          { "id": "gpt-5.4", "name": "GPT-5.4" },
-          { "id": "gpt-5.3-codex", "name": "GPT-5.3 Codex" },
-          { "id": "gpt-5.1-codex-max", "name": "GPT-5.1 Codex Max" }
-        ]
-      },
-      "tokenboss-gemini": {
-        "baseUrl": "https://api.tokenboss.co/openai/v1",
-        "apiKey": "${TOKENBOSS_API_KEY}",
-        "api": "openai-completions",
-        "models": [
-          { "id": "gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro" },
-          { "id": "gemini-3-flash-preview", "name": "Gemini 3 Flash" }
-        ]
-      }
-    }
-  }
+"tokenboss": {
+  "baseUrl": "https://api.tokenboss.co/v1",
+  "api": "openai-completions",
+  "apiKey": "${TOKENBOSS_API_KEY}",
+  "models": [
+    { "id": "gpt-5.5",            "name": "GPT 5.5",            "contextWindow": 200000 },
+    { "id": "gpt-5.4",            "name": "GPT 5.4",            "contextWindow": 200000 },
+    { "id": "gpt-5.4-mini",       "name": "GPT 5.4 Mini",       "contextWindow": 128000 },
+    { "id": "claude-opus-4-7",    "name": "Claude Opus 4.7",    "contextWindow": 200000 },
+    { "id": "claude-opus-4-6",    "name": "Claude Opus 4.6",    "contextWindow": 200000 },
+    { "id": "claude-sonnet-4-6",  "name": "Claude Sonnet 4.6",  "contextWindow": 200000 }
+  ]
 }
 ```
 
-## Merge rules (for the agent applying this skill)
+### Default model + fallback chain
 
-**Golden rule:** if OpenClaw is already configured, do **not** blanket-overwrite. Update only the three nodes below.
+In `agents.defaults.model`, merge:
 
-- If `~/.openclaw/openclaw.json` does not exist → create it with the JSON above (with `${TOKENBOSS_API_KEY}` substituted).
-- If it exists → deep-merge per node:
-  - `models.providers.tokenboss-claude` / `tokenboss-gpt` / `tokenboss-gemini` — **overwrite** these three keys (skill-owned; declared in `metadata.openclaw.requires.config`). Other entries already inside `models.providers.*` (e.g. user's existing providers) — preserve.
-  - `agents.defaults.model.primary` — set to `tokenboss-gpt/gpt-5.5` only if absent or user confirms; do **not** silently change a user's existing primary model. Other `agents.defaults.*` fields (`maxConcurrent`, `subagents`, `compaction`, `workspace`, etc.) — preserve.
-  - `gateway` — if absent, write `{ "mode": "local", "port": 18789, "bind": "loopback" }`. If present, leave it alone unless any field is missing; only fill in missing fields. Never overwrite a user's `port` or `bind` without confirmation.
-  - All other top-level keys (`skills`, `wizard`, anything you don't recognise) — preserve verbatim.
-- Do not log the API key. Do not echo it to stdout. Store it only in the `apiKey` fields of the three providers.
-- After merge:
-  - **Always run `openclaw gateway restart`** so provider and gateway changes take effect (unless OpenClaw auto-restarts on `set up`).
-  - `agents.defaults` may also require a fresh OpenClaw session.
+```json
+"model": {
+  "primary": "tokenboss/gpt-5.5",
+  "fallbacks": [
+    "tokenboss/gpt-5.4",
+    "tokenboss/gpt-5.4-mini",
+    "tokenboss/claude-opus-4-7",
+    "tokenboss/claude-opus-4-6",
+    "tokenboss/claude-sonnet-4-6"
+  ]
+}
+```
 
-## Available models
+Merge rules:
+- Set `primary` only if absent — do **not** silently change a user's existing primary model.
+- Append missing fallback entries; do not remove ones the user already has.
+- Other `agents.defaults.*` fields (`maxConcurrent`, `compaction`, `workspace`, etc.) — preserve verbatim.
 
-| Provider key | Protocol (`api`) | Base URL | Model IDs |
-|---|---|---|---|
-| `tokenboss-gpt` | `openai-responses` | `https://api.tokenboss.co/openai` | `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.1-codex-max` |
-| `tokenboss-claude` | `anthropic-messages` | `https://api.tokenboss.co/anthropic` | `claude-sonnet-4-6`, `claude-opus-4-7`, `claude-opus-4-5-20251101`, `claude-haiku-4-5-20251001` |
-| `tokenboss-gemini` | `openai-completions` | `https://api.tokenboss.co/openai/v1` | `gemini-3.1-pro-preview`, `gemini-3-flash-preview` |
+If `primary` returns 4xx/5xx, OpenClaw walks the fallbacks in order. Models the user's key isn't entitled to are auto-skipped.
 
-Reference any model as `<provider-key>/<model-id>`, e.g. `tokenboss-claude/claude-sonnet-4-6`.
+### Apply
 
-## Apply changes
-
-Configuration writes alone are not enough — OpenClaw must reload the gateway to pick up new providers and any `gateway.*` field changes:
+OpenClaw watches `~/.openclaw/openclaw.json` and reloads provider config automatically. If your version doesn't, restart the gateway:
 
 ```bash
 openclaw gateway restart
 ```
 
-If `set up` did this for you automatically, calling it again is harmless.
+Verify:
+
+```bash
+openclaw models list
+```
+
+---
+
+## For Hermes Agent
+
+Edit `~/.hermes/config.yaml` (top-level keys) and write `TOKENBOSS_API_KEY` to `~/.hermes/.env`. Hermes picks up `model:` changes on the next session — no daemon to restart.
+
+### Config block
+
+In `~/.hermes/config.yaml`, set the top-level `model:` and `fallback_model:` blocks. **If the user already has a non-default `model:`, ask before replacing it.** Other top-level keys (`providers`, `toolsets`, `agent`, etc.) — leave alone.
+
+```yaml
+model:
+  default: gpt-5.5
+  provider: custom
+  base_url: https://api.tokenboss.co/v1
+  api_mode: chat_completions
+  key_env: TOKENBOSS_API_KEY
+
+fallback_model:
+  provider: custom
+  model: gpt-5.4
+  base_url: https://api.tokenboss.co/v1
+  key_env: TOKENBOSS_API_KEY
+```
+
+> Hermes supports exactly **one** `fallback_model` per session. `gpt-5.4` keeps primary + fallback on the same endpoint. Pick a different model id (e.g. `claude-sonnet-4-6`) if you'd rather fall back across families.
+
+### Env
+
+```bash
+echo 'TOKENBOSS_API_KEY=<key>' >> ~/.hermes/.env
+```
+
+If `~/.hermes/.env` is git-tracked, abort and ask the user to add `.env` to `.gitignore` first.
+
+### Switch model mid-session
+
+```
+/model custom:gpt-5.4
+/model custom:gpt-5.4-mini
+/model custom:claude-opus-4-7
+/model custom:claude-sonnet-4-6
+```
+
+Verify:
+
+```bash
+hermes model
+```
+
+---
+
+## For any other agent
+
+If the agent supports an **OpenAI-compatible custom endpoint** (Cherry Studio, Chatbox, LobeChat, NextChat, OpenAI SDK, etc.), point it at:
+
+| Field | Value |
+|---|---|
+| Base URL | `https://api.tokenboss.co/v1` |
+| API key | the user's TokenBoss key |
+| Model IDs | `gpt-5.5` · `gpt-5.4` · `gpt-5.4-mini` · `claude-opus-4-7` · `claude-opus-4-6` · `claude-sonnet-4-6` |
+| Auth header | `Authorization: Bearer <key>` |
+
+The same Bearer token works for every model.
+
+---
 
 ## Quick verification
 
-After install + restart:
-
 ```bash
-# Confirm gateway came back up
-openclaw gateway status
-
-# Show current config
-openclaw config show models.providers.tokenboss-gpt
-
-# Switch primary model
-openclaw models set tokenboss-claude/claude-sonnet-4-6
-
-# Smoke test
-openclaw chat "Say hello"
+curl -s https://api.tokenboss.co/v1/chat/completions \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.5","messages":[{"role":"user","content":"ping"}]}'
 ```
+
+A 200 with a chat completion in the body means the endpoint, key, and model are all good.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `401 Unauthorized` | Missing or wrong key | Re-run `set up tokenboss.co/skill.md` to refresh, or `openclaw config set models.providers.tokenboss-gpt.apiKey <KEY>` (repeat for all three providers) |
-| `Unknown model id` | Wrong namespace | Use `tokenboss-gpt/...`, `tokenboss-claude/...`, or `tokenboss-gemini/...` |
-| `Provider not found` | Skill applied partially | Re-run `set up`; check `~/.openclaw/openclaw.json` has all three provider keys |
-| `4xx on /anthropic endpoint` | Wrong `api` field | `tokenboss-claude` must use `api: "anthropic-messages"` |
-| `4xx on /openai endpoint` | Wrong `api` field | `tokenboss-gpt` uses `api: "openai-responses"`; `tokenboss-gemini` uses `api: "openai-completions"` |
-
-## Agent Discovery Metadata
-
-```json
-{
-  "service": "TokenBoss",
-  "providers": [
-    {"key": "tokenboss-gpt",     "base_url": "https://api.tokenboss.co/openai",    "api": "openai-responses"},
-    {"key": "tokenboss-claude",  "base_url": "https://api.tokenboss.co/anthropic", "api": "anthropic-messages"},
-    {"key": "tokenboss-gemini",  "base_url": "https://api.tokenboss.co/openai/v1", "api": "openai-completions"}
-  ],
-  "auth": "single Bearer token across all three providers",
-  "config_file": "~/.openclaw/openclaw.json",
-  "install": "set up tokenboss.co/skill.md",
-  "get_key": "https://tokenboss.co/console"
-}
-```
+| `401 Unauthorized` | Missing or wrong key | Reissue at <https://tokenboss.co/console>; update `~/.hermes/.env` (Hermes) or re-export `TOKENBOSS_API_KEY` and restart the gateway (OpenClaw) |
+| `Unknown model` / `model not found` | Wrong namespace | OpenClaw uses `tokenboss/<model-id>`. Hermes uses `custom:<model-id>`. Other agents use the bare model id (`gpt-5.5`, `claude-opus-4-7`, …) |
+| `404 /v1/v1/...` | Base URL has trailing `/v1` and the agent appended its own | Base URL **must** end with `/v1`. For clients that auto-append `/v1`, drop the trailing `/v1` |
 
 ---
 
