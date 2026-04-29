@@ -16,6 +16,7 @@ import Payment from './screens/Payment';
 import OrderStatus from './screens/OrderStatus';
 import ManualConfigPC from './screens/ManualConfigPC';
 import Skill from './screens/Skill';
+import Topup from './screens/Topup';
 import { RequireAuth } from './components/RequireAuth';
 import { CurrencyProvider } from './lib/currency';
 
@@ -40,6 +41,7 @@ export default function App() {
       <Route path="/pricing" element={<Plans />} />
       <Route path="/primitive" element={<Primitive />} />
       <Route path="/billing/pay" element={<RequireAuth><Payment /></RequireAuth>} />
+      <Route path="/billing/topup" element={<RequireAuth><Topup /></RequireAuth>} />
       <Route path="/billing/orders/:id" element={<RequireAuth><OrderStatus /></RequireAuth>} />
       <Route path="/billing/success" element={<RequireAuth><OrderStatus /></RequireAuth>} />
 
