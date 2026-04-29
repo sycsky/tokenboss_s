@@ -102,6 +102,42 @@ describe('POST /v1/auth/verify-code', () => {
     expect(u?.emailVerified).toBe(true); // unchanged
   });
 
+  it('response carries full user profile incl. emailVerified for new user', async () => {
+    // Frontend's loginWithCode reads res.user.emailVerified directly into
+    // its auth state. If the response only ships {userId, email}, the UI
+    // falls back to undefined → "邮箱待验证" banner flashes until /v1/me
+    // re-fetches on the next mount. Response shape MUST mirror the other
+    // auth handlers (register / login / verifyEmail) which all use
+    // buildUserProfile.
+    const code = await getCodeForEmail('newshape@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'newshape@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body!);
+    expect(body.user.emailVerified).toBe(true);
+    expect(body.user.userId).toBeTruthy();
+    expect(body.user.email).toBe('newshape@example.com');
+    expect(typeof body.user.balance).toBe('number');
+  });
+
+  it('response carries emailVerified=true for existing user OTP login', async () => {
+    putUser({
+      userId: 'u_shape_existing',
+      email: 'shape-existing@example.com',
+      createdAt: new Date().toISOString(),
+      emailVerified: false,
+    });
+    const code = await getCodeForEmail('shape-existing@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'shape-existing@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+    const body = JSON.parse(res.body!);
+    // markEmailVerified ran (previous fix), AND the response now reflects it
+    // — frontend gets emailVerified=true on the same payload, no flash.
+    expect(body.user.emailVerified).toBe(true);
+  });
+
   it('rejects wrong code', async () => {
     await getCodeForEmail('a@b.com');
     const res = await verifyCodeHandler({ body: JSON.stringify({ email: 'a@b.com', code: '000000' }) } as any) as APIGatewayProxyStructuredResultV2;

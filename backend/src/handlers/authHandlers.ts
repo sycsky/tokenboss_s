@@ -563,6 +563,20 @@ export async function verifyCodeHandler(
     }
   }
 
+  // Re-fetch the (possibly just-created or just-verified) user so the
+  // response carries the same UserProfile shape as register / login /
+  // verifyEmail. Without this the frontend's loginWithCode lands a partial
+  // user (emailVerified=undefined) and "邮箱待验证" banner flashes until
+  // the next /v1/me hydration.
+  const finalUser = await getUser(userId);
+  if (!finalUser) {
+    return jsonResponse(500, { error: "user_missing_after_verify" });
+  }
+
   const token = signSession(userId);
-  return jsonResponse(200, { token, user: { userId, email }, isNew });
+  return jsonResponse(200, {
+    token,
+    user: await buildUserProfile(finalUser),
+    isNew,
+  });
 }
