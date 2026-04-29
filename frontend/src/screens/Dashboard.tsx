@@ -21,49 +21,6 @@ import { getCachedKey, setCachedKey } from '../lib/keyCache';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
-interface AgentStat {
-  source: string;          // raw source identifier ("openclaw" / "hermes" / etc.)
-  label: string;           // pretty display name
-  initials: string;        // 2-letter avatar block
-  color: string;           // tailwind classes for the avatar block
-  callCount: number;
-  totalSpent: number;
-  lastUsedAt: string;      // ISO
-}
-
-const AGENT_REGISTRY: Record<string, { label: string; initials: string; color: string }> = {
-  openclaw:    { label: 'OpenClaw',      initials: 'OC', color: 'bg-accent text-white' },
-  hermes:      { label: 'Hermes Agent',  initials: 'HA', color: 'bg-lavender text-lavender-ink' },
-};
-
-function describeAgent(source: string): { label: string; initials: string; color: string } {
-  const k = source.toLowerCase().trim();
-  if (AGENT_REGISTRY[k]) return AGENT_REGISTRY[k];
-  return {
-    label: source,
-    initials: source.slice(0, 2).toUpperCase(),
-    color: 'bg-bg-alt text-ink',
-  };
-}
-
-function shapeAgents(groups: UsageAggregateGroup[]): AgentStat[] {
-  return groups
-    .filter((g) => g.groupKey != null && g.groupKey.length > 0)
-    .map((g) => {
-      const source = g.groupKey as string;
-      const meta = describeAgent(source);
-      return {
-        source,
-        label: meta.label,
-        initials: meta.initials,
-        color: meta.color,
-        callCount: g.callCount,
-        totalSpent: g.totalConsumedUsd,
-        lastUsedAt: g.lastUsedAt,
-      };
-    });
-}
-
 function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
   const m = new Map<string, KeyStats>();
   for (const g of groups) {
@@ -78,19 +35,10 @@ function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
   return m;
 }
 
-function timeAgo(iso: string): string {
-  const diffSec = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (diffSec < 60) return `${diffSec} 秒前`;
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} 分钟前`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} 小时前`;
-  return `${Math.floor(diffSec / 86400)} 天前`;
-}
-
 export default function Dashboard() {
   const { user } = useAuth();
   const [buckets, setBuckets] = useState<BucketRecord[]>([]);
   const [usage, setUsage] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
-  const [agentGroups, setAgentGroups] = useState<UsageAggregateGroup[]>([]);
   const [keyHintGroups, setKeyHintGroups] = useState<UsageAggregateGroup[]>([]);
   const [keys, setKeys] = useState<ProxyKeySummary[]>([]);
   const [keysError, setKeysError] = useState<string | null>(null);
@@ -111,15 +59,12 @@ export default function Dashboard() {
       api.getBuckets().then((r) => setBuckets(r.buckets || [])),
       // Recent-call list + balance hero totals — keep small.
       api.getUsage({ limit: 4 }).then((r) => setUsage(r)),
-      // AGENTS panel — server-side GROUP BY source.
-      api.getUsageAggregate('source').then((r) => setAgentGroups(r.groups)),
       // Per-key stats — server-side GROUP BY keyHint.
       api.getUsageAggregate('keyHint').then((r) => setKeyHintGroups(r.groups)),
       reloadKeys(),
     ]).finally(() => setLoading(false));
   }, []);
 
-  const agents = useMemo(() => shapeAgents(agentGroups), [agentGroups]);
   const keyStats = useMemo(() => shapeKeyStats(keyHintGroups), [keyHintGroups]);
   const noActivity = (usage.totals?.calls ?? 0) === 0;
 
@@ -507,35 +452,6 @@ export default function Dashboard() {
             >
               手动配置文档 →
             </Link>
-
-            {/* divider */}
-            <div className="my-4 border-t-2 border-ink/10" />
-
-            {/* AGENTS sub-section */}
-            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-2">
-              AGENTS
-            </div>
-            {agents.length === 0 ? (
-              <div className="bg-bg border-2 border-dashed border-ink/30 rounded p-3 mb-3 text-center font-mono text-[11px] text-[#A89A8D]">
-                还没有 Agent 调用过 · 接入后会自动出现
-              </div>
-            ) : (
-              <div className="space-y-1.5 mb-3">
-                {agents.map((a) => (
-                  <div key={a.source} className="bg-bg border-2 border-ink rounded p-2.5 flex items-center gap-2.5">
-                    <div className={`w-7 h-7 ${a.color} border-2 border-ink rounded font-mono text-[10px] font-bold flex items-center justify-center flex-shrink-0`}>
-                      {a.initials}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[12.5px] font-bold text-ink truncate">{a.label}</div>
-                      <div className="font-mono text-[10px] text-[#A89A8D] truncate">
-                        {timeAgo(a.lastUsedAt)} · {a.callCount} 次 · ${a.totalSpent.toFixed(6)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* divider */}
             <div className="my-4 border-t-2 border-ink/10" />
