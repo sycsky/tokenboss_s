@@ -3,8 +3,9 @@ import type { BillingChannel, CreateOrderResponse } from './api';
 
 /**
  * Distinguish "phone" from "PC". `pointer: coarse` matches touch-primary
- * devices, the most reliable signal on real Android/iOS phones. Width
- * fallback covers DevTools "device toolbar" testing.
+ * devices, which on real Android/iOS phones is the most reliable signal —
+ * UA sniffing alone misses tablets-with-keyboard and Chinese in-app
+ * webviews. Width fallback covers DevTools "device toolbar" testing.
  */
 export function isMobileLike(): boolean {
   if (typeof window === 'undefined') return false;
@@ -23,13 +24,17 @@ export function isMobileLike(): boolean {
  *
  * The same routine works for both plan and topup orders — the only
  * difference upstream is order shape, not navigation behaviour.
+ *
+ * Fire-and-forget: returns void, never throws. Caller need not reset
+ * submitting state — the navigation that follows will unmount the form.
  */
 export function dispatchCheckout(
   res: CreateOrderResponse,
   channel: BillingChannel,
   navigate: NavigateFunction,
+  detectMobile: () => boolean = isMobileLike,
 ) {
-  const mobile = isMobileLike();
+  const mobile = detectMobile();
 
   if (channel === 'xunhupay' && mobile) {
     // Mobile + 支付宝: same-window navigation, popups blocked / deeplinks
