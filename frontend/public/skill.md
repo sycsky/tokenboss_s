@@ -23,54 +23,37 @@ metadata:
 
 One API key, one OpenAI-compatible endpoint, six curated models. Configure TokenBoss as a custom provider on **OpenClaw**, **Hermes Agent**, or any other agent that speaks OpenAI Chat Completions.
 
-- API base URL: `https://api.tokenboss.co/v1`
-- Auth: `Authorization: Bearer ${TOKENBOSS_API_KEY}`
-- Protocol: **OpenAI Chat Completions only** (`/v1/chat/completions`)
-- Get your key: <https://tokenboss.co/console>
-
-> **Protocol note** — TokenBoss exposes the OpenAI Chat Completions
-> protocol only. The Anthropic-native `/v1/messages` endpoint is **not**
-> available. Claude models (`claude-*`) are reached through
-> `/v1/chat/completions` like any OpenAI model. Native Anthropic SDK and
-> Claude Code's default direct mode are therefore not supported — point
-> any OpenAI-compatible client at the base URL above instead. See
-> [Claude Code users](#claude-code-users) below for a workaround.
+> **Protocol** — OpenAI Chat Completions only (`/v1/chat/completions`). The Anthropic-native `/v1/messages` endpoint is **not** available; Claude models (`claude-*`) are reached through `/v1/chat/completions` like any OpenAI model. See [Claude Code users](#claude-code-users) for a workaround.
 
 ## The spell
 
-The user pastes a two-line spell — copied from <https://tokenboss.co/console>:
+The user pastes two lines — copied from <https://tokenboss.co/console>:
 
 ```
 set up tokenboss.co/skill.md
 TOKENBOSS_API_KEY=sk-XXXXXXXX
 ```
 
-- **Line 1** — `set up <skill-url>`. OpenClaw treats this as native grammar and runs the fetch + merge automatically. For agents that don't recognise the `set up` keyword (Hermes, Cherry Studio, Codex, Cursor, Continue, etc.), interpret Line 1 as: *fetch this URL and apply the section that matches me*.
-- **Line 2** — `KEY=VALUE` shell-style assignment. The value after `=` is the user's TokenBoss API key. Use it as the bearer credential for every merge below. **Do not ask the user again.**
+- Line 1 = "fetch this URL and apply the section that matches me."
+- Line 2 = the user's API key in `KEY=VALUE` form; use it as the bearer credential and **do not ask the user again**.
 
-If the user pasted only Line 1 (no key on Line 2), prompt them once for their key.
-
-For agents that only accept a natural-language prompt, the equivalent trigger is:
-
-> Fetch https://tokenboss.co/skill.md and follow the section for the agent I'm using. The user has pasted `TOKENBOSS_API_KEY=...` along with this prompt — use that value, don't ask again.
+If only Line 1 was pasted, prompt once for the key.
 
 ## Persisting the key
 
-The key from Line 2 needs to live somewhere the runtime can read it on every call. **Do not echo or pipe the key on a shell command line** — that writes the value to shell history. Instead, open the target file in an editor (or use your agent's file-edit tool) and add the line directly:
+Edit the target file directly — never `echo >>`, which leaks the value into shell history.
 
 ```
-# Add to ~/.hermes/.env
+# ~/.hermes/.env
 TOKENBOSS_API_KEY=<key>
 ```
 
 ```
-# Add to ~/.zshrc or ~/.bashrc (for OpenClaw)
+# ~/.zshrc or ~/.bashrc (for OpenClaw)
 export TOKENBOSS_API_KEY=<key>
 ```
 
-If the target file is git-tracked (`~/.hermes/.env` in a repo, `.envrc`, etc.), abort and ask the user to add it to `.gitignore` first.
-
-Never log, print, or copy the key value into chat output.
+If the target file is git-tracked, abort and ask the user to `.gitignore` it first. Never log, print, or copy the key value into chat output.
 
 ## Supported models
 
@@ -82,8 +65,6 @@ Never log, print, or copy the key value into chat output.
 | `claude-sonnet-4-6` | Anthropic | |
 | `claude-opus-4-6` | Anthropic | Runs in thinking mode by default — the response `model` field reports `claude-opus-4-6-thinking` and reasoning tokens are billed |
 | `claude-opus-4-7` | Anthropic | Newest Anthropic tier; if you receive `503 No available channel`, the model is being provisioned for your group — check the console or fall through to `claude-opus-4-6` |
-
-All six are reachable through the same OpenAI Chat Completions endpoint — pick by the `model` field in the request body. Context window for each model follows what the upstream provider publishes; check `/v1/models` for the live list and the provider's docs for exact limits.
 
 ### Model discovery
 
@@ -196,18 +177,6 @@ fallback_model:
 
 > Hermes supports exactly **one** `fallback_model` per session. The example falls back from GPT to Claude so a primary outage on either family still leaves the user with something to talk to. Swap to `gpt-5.4` if you'd rather keep both on the same family.
 
-### Env
-
-Open `~/.hermes/.env` in your editor and add the line:
-
-```
-TOKENBOSS_API_KEY=<key>
-```
-
-(Avoid `echo '...' >> ~/.hermes/.env` — the key value lands in shell history.)
-
-If `~/.hermes/.env` is git-tracked, abort and ask the user to add `.env` to `.gitignore` first.
-
 ### Switch model mid-session
 
 Use the slash command shape Hermes documents for custom providers — typical forms:
@@ -233,31 +202,25 @@ If the agent supports an **OpenAI-compatible custom endpoint** (Cherry Studio, C
 | Auth header | `Authorization: Bearer <key>` |
 | Model IDs | `gpt-5.5` · `gpt-5.4` · `gpt-5.4-mini` · `claude-sonnet-4-6` · `claude-opus-4-6` · `claude-opus-4-7` |
 
-The same Bearer token works for every model.
-
 ### Claude Code users
 
-Claude Code defaults to Anthropic-native `/v1/messages`, which TokenBoss does not currently expose. To use TokenBoss from Claude Code, run an OpenAI ↔ Anthropic protocol shim locally (community tools such as `claude-code-router` translate `/v1/messages` calls into `/v1/chat/completions`) and point Claude Code at the shim. We're tracking native `/v1/messages` support; check the homepage for status.
+Claude Code defaults to Anthropic-native `/v1/messages`, which TokenBoss does not expose. To use TokenBoss from Claude Code, run an OpenAI ↔ Anthropic protocol shim locally (e.g. `claude-code-router`) and point Claude Code at the shim.
 
 ---
 
 ## Quick verification
 
-**1. Catalog reachable + key valid**
 ```bash
+# 1. Catalog reachable + key valid
 curl -s https://api.tokenboss.co/v1/models \
   -H "Authorization: Bearer $TOKENBOSS_API_KEY" | jq '.data[].id'
-```
-A non-empty list means the endpoint, key, and TLS path are all good. `401` means the key is wrong.
 
-**2. End-to-end chat completion**
-```bash
+# 2. End-to-end chat completion
 curl -s https://api.tokenboss.co/v1/chat/completions \
   -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-5.5","messages":[{"role":"user","content":"ping"}]}'
 ```
-A 200 with a chat completion in the body means the model is provisioned for your group and the upstream is healthy.
 
 ## Troubleshooting
 
@@ -270,14 +233,3 @@ A 200 with a chat completion in the body means the model is provisioned for your
 | `200` with empty `choices[].message.content` | Model returned an empty completion (often `max_tokens` too low or model-specific quirk) | Raise `max_tokens`, give a more direct prompt, or switch to a different model |
 | `404 /v1/v1/...` | Base URL has trailing `/v1` and the agent appended its own | Base URL **must** end with `/v1`. For clients that auto-append `/v1`, drop the trailing `/v1` |
 | `404 POST /v1/messages` | Client is using Anthropic-native protocol | TokenBoss exposes OpenAI Chat Completions only — see [Claude Code users](#claude-code-users) for the shim approach |
-
----
-
-## Changelog
-
-- **0.7.0** (2026-04-29) — Clarified protocol scope (OpenAI-only, no `/v1/messages`); added `claude-opus-4-7` and feature-compatibility section; added Claude Code shim guidance; added `/v1/models` discovery + 503/429/empty-completion troubleshooting; removed unverified `contextWindow` claims; tightened key-persistence guidance to avoid shell-history leaks.
-- **0.6.0** — Initial six-model lineup, OpenClaw + Hermes recipes.
-
----
-
-Get your key: <https://tokenboss.co/console>
