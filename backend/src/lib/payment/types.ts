@@ -74,8 +74,12 @@ export interface CreateOrderInput {
   /** Quoted amount in `currency`. epusdt: USD; xunhupay: CNY. */
   amount: number;
   currency: OrderCurrency;
-  /** SKU label mostly for upstream subject / order title. Plan orders pass
-   *  the plan id; topup orders pass the literal "topup". */
+  /** SKU label used as the upstream order subject/title (xunhupay shows
+   *  this on the 支付宝 H5 checkout page). MUST be ASCII-only and ≤20 chars
+   *  — non-ASCII or longer strings can trigger gateway-side content filters
+   *  (xunhupay's 支付宝 channel returns errcode=500 for some Chinese strings).
+   *  Plan orders pass the plan id ('plus'|'super'|'ultra'); topup orders
+   *  pass the literal 'topup'. Adding new SKU labels: keep them ASCII. */
   skuLabel: string;
   notifyUrl: string;
   redirectUrl?: string;

@@ -32,6 +32,7 @@ import {
 } from "../lib/store.js";
 import type { OrderRecord, OrderSkuType } from "../lib/payment/types.js";
 import { PLANS, isPlanId, getPlanPriceCNY, getPlanPriceUSD, skuTypeToPlanId } from "../lib/plans.js";
+import type { PlanId } from "../lib/plans.js";
 
 // PLAN_PRICE was a frozen snapshot of PLANS[*].priceCNY built at module
 // load — replaced by getPlanPriceCNY() / getPlanPriceUSD(), which read
@@ -178,11 +179,12 @@ export const createOrderHandler = async (
   let amount: number;
   let topupAmountUsd: number | undefined;
   let skuLabel: string;
+  let planId: PlanId | undefined;
 
   if (type === 'plan') {
     if (!isPlanId(body.planId))
       return jsonError(400, "invalid_request_error", "planId must be plus|super|ultra.");
-    const planId = body.planId;
+    planId = body.planId;
     if (PLANS[planId].soldOut) {
       return jsonError(
         410,
@@ -296,9 +298,8 @@ export const createOrderHandler = async (
 
   return jsonResponse(201, {
     orderId,
-    type,
     skuType,
-    planId: type === 'plan' ? body.planId : undefined,
+    planId: type === 'plan' ? planId : undefined,
     channel,
     amount,
     currency,
