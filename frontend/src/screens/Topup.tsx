@@ -11,6 +11,10 @@ const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C191
 const PRESETS = [50, 100, 500] as const;
 const MIN_AMOUNT = 1;
 const MAX_AMOUNT = 99999;
+/** Must match backend USD_TO_CREDIT_RATE in paymentHandlers.ts.
+ *  USDT 渠道下付 $1 → 到账 $7 等价额度（按汇率把美金折算回人民币等价，
+ *  再用 ¥1 = $1 baseline 转额度）。RMB 渠道 1:1 不动。 */
+const USD_TO_CREDIT_RATE = 7;
 
 type Preset = (typeof PRESETS)[number] | 'custom';
 
@@ -99,8 +103,8 @@ export default function Topup() {
             <ChannelOption
               active={channel === 'epusdt'}
               onClick={() => setChannel('epusdt')}
-              title="USDT-TRC20"
-              subtitle="区块链稳定币 · TRON"
+              title="稳定币"
+              subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
           </div>
@@ -162,7 +166,10 @@ export default function Topup() {
 
           {amount != null && (
             <div className="font-mono text-[12px] text-text-secondary">
-              → 到账 ${amount} 美金{channel === 'epusdt' ? '（按 USDT 等额结算）' : ''}
+              → 到账 ${channel === 'epusdt' ? amount * USD_TO_CREDIT_RATE : amount} 美金
+              {channel === 'epusdt' && (
+                <span className="text-ink-3"> · $1 USDT ≈ $7 额度（按汇率折算）</span>
+              )}
             </div>
           )}
         </section>

@@ -233,8 +233,8 @@ export default function Payment() {
             <ChannelOption
               active={channel === 'epusdt'}
               onClick={() => setChannel('epusdt')}
-              title="USDT-TRC20"
-              subtitle="区块链稳定币 · TRON"
+              title="稳定币"
+              subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
           </div>

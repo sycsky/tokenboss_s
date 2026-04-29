@@ -142,6 +142,11 @@ function shapeOrder(rec: OrderRecord) {
 // ---------- POST /v1/billing/orders ----------
 
 const MAX_TOPUP_AMOUNT = 99999;
+/** USD-paying channels (epusdt) credit FX-converted USD额度 to the user.
+ *  ¥1 = $1 baseline still holds for RMB; USD payments effectively pay
+ *  the spot CNY/USD rate and get credited at the same baseline.
+ *  Hardcoded for v1; bump on noticeable FX drift. */
+const USD_TO_CREDIT_RATE = 7;
 
 function isOrderType(v: unknown): v is 'plan' | 'topup' {
   return v === 'plan' || v === 'topup';
@@ -217,9 +222,10 @@ export const createOrderHandler = async (
     }
     skuType = 'topup';
     amount = rawAmount;
-    // ¥1 = $1 baseline (spec credits-economy § 4). Stored independently of
-    // amount/currency so settle is decoupled from FX drift.
-    topupAmountUsd = rawAmount;
+    // ¥1 = $1 baseline (spec credits-economy § 4) for RMB; USD pays spot
+    // FX so $1 USDT → $7 credited. Stored independently of amount/currency
+    // so settle is decoupled from FX drift between order and webhook.
+    topupAmountUsd = currency === 'USD' ? rawAmount * USD_TO_CREDIT_RATE : rawAmount;
     skuLabel = 'topup';
   }
 
