@@ -1,0 +1,14 @@
+# Zeabur Netlify-style headers file. Applied at deploy time to override
+# the upstream nginx Content-Type for matching paths.
+#
+# Why we need this — `tokenboss.co/skill.md` is served as a static asset
+# from `frontend/public/skill.md`. Default nginx mime.types has no entry
+# for `.md`, so it falls back to `application/octet-stream`, which makes
+# every browser force-download the file instead of rendering it inline.
+# Forcing `text/plain` makes the browser display the raw markdown source
+# as readable text (no download). Agents fetching the file via curl /
+# `Accept: */*` are unaffected — they consume bytes regardless of MIME.
+
+/*.md
+  Content-Type: text/plain; charset=utf-8
+  X-Content-Type-Options: nosniff
