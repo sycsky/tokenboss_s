@@ -381,8 +381,8 @@ export const newapi = {
     quotaUsd: number;
   }): Promise<string> {
     const { baseUrl, token, userId } = getConfig();
-    const name = input.name.slice(0, 20); // newapi cap, see redemption.go:68
-    const quota = Math.round(input.quotaUsd * 500_000);
+    const name = [...input.name].slice(0, 20).join(""); // rune-correct, matches Go's utf8.RuneCountInString cap (see redemption.go:68)
+    const quota = usdToNewapiQuota(input.quotaUsd);
     const res = await nfetch(`${baseUrl}/api/redemption`, {
       method: "POST",
       headers: {

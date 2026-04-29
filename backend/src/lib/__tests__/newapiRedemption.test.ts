@@ -76,4 +76,23 @@ describe('newapi.createRedemption', () => {
     const body = JSON.parse(init.body);
     expect(body.name.length).toBe(20);
   });
+
+  it('truncates by rune for CJK names (not by UTF-16 unit)', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () =>
+        JSON.stringify({ success: true, message: '', data: ['code-cjk'] }),
+    } as unknown as Response);
+
+    await newapi.createRedemption({
+      name: '中'.repeat(40),
+      quotaUsd: 1,
+    });
+    const init = fetchMock.mock.calls[0][1];
+    const body = JSON.parse(init.body);
+    // 20 runes, not 60 — rune-correct truncation matches Go's cap
+    expect([...body.name].length).toBe(20);
+  });
 });
