@@ -552,6 +552,15 @@ export async function verifyCodeHandler(
       newapiPassword,
     });
     isNew = true;
+  } else {
+    // Existing user re-logging via OTP. The act of consuming the code is
+    // proof of inbox ownership (same justification as the new-user branch
+    // above), so flip emailVerified if it isn't already set. Skip the
+    // UPDATE when it's a no-op to avoid a write per login.
+    const existing = await getUser(userId);
+    if (existing && !existing.emailVerified) {
+      markEmailVerified(userId);
+    }
   }
 
   const token = signSession(userId);

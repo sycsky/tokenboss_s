@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { sendCodeHandler, verifyCodeHandler } from '../authHandlers.js';
-import { init, getUser, getUserIdByEmail } from '../../lib/store.js';
+import { init, getUser, getUserIdByEmail, putUser } from '../../lib/store.js';
 import * as emailService from '../../lib/emailService.js';
 
 beforeEach(() => {
@@ -57,6 +57,49 @@ describe('POST /v1/auth/verify-code', () => {
     const u = await getUser(userId);
     expect(u).toBeTruthy();
     expect(u?.plan).toBeUndefined();
+  });
+
+  it('flips emailVerified=true for existing unverified user (OTP proves inbox ownership)', async () => {
+    // Pre-existing user (e.g. registered via password) who never clicked
+    // the verify-link. emailVerified starts false.
+    putUser({
+      userId: 'u_unverified_otp',
+      email: 'unverified-otp@example.com',
+      createdAt: new Date().toISOString(),
+      emailVerified: false,
+    });
+
+    // Log in via verify-code — receiving + entering the OTP at this email
+    // is proof the user owns the inbox, same as the new-user branch which
+    // sets emailVerified: true at creation time.
+    const code = await getCodeForEmail('unverified-otp@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'unverified-otp@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body!);
+    expect(body.isNew).toBe(false);
+
+    const u = await getUser('u_unverified_otp');
+    expect(u?.emailVerified).toBe(true);
+  });
+
+  it('does not write when existing user is already verified (idempotency)', async () => {
+    putUser({
+      userId: 'u_already_verified',
+      email: 'verified@example.com',
+      createdAt: new Date().toISOString(),
+      emailVerified: true,
+    });
+
+    const code = await getCodeForEmail('verified@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'verified@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+
+    const u = await getUser('u_already_verified');
+    expect(u?.emailVerified).toBe(true); // unchanged
   });
 
   it('rejects wrong code', async () => {
