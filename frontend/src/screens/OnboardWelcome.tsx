@@ -23,7 +23,7 @@ export default function OnboardWelcome() {
           tag="推荐 · RECOMMENDED"
           title="我是 Agent"
           en="I'M AN AGENT"
-          footnote="已支持 OpenClaw · Hermes Agent · Claude Code"
+          footnote="已支持 OpenClaw · Hermes Agent"
           onClick={() => nav('/onboard/install')}
         />
         <ChoiceCard

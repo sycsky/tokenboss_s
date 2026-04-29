@@ -33,7 +33,7 @@ export default function Settings() {
           ACCOUNT · 账户
         </div>
         <h1 className="text-[40px] md:text-[48px] font-bold tracking-tight leading-none mb-10">
-          你的钱包，你的设置。
+          你的 Agent，你的余额。
         </h1>
 
         {/* 01 Account */}

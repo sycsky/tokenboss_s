@@ -32,10 +32,8 @@ interface AgentStat {
 }
 
 const AGENT_REGISTRY: Record<string, { label: string; initials: string; color: string }> = {
-  openclaw:    { label: 'OpenClaw',     initials: 'OC', color: 'bg-accent text-white' },
-  hermes:      { label: 'Hermes',       initials: 'HR', color: 'bg-lavender text-lavender-ink' },
-  'claude-code': { label: 'Claude Code', initials: 'CC', color: 'bg-cyan-stamp text-cyan-stamp-ink' },
-  codex:       { label: 'Codex CLI',    initials: 'CX', color: 'bg-lime-stamp text-lime-stamp-ink' },
+  openclaw:    { label: 'OpenClaw',      initials: 'OC', color: 'bg-accent text-white' },
+  hermes:      { label: 'Hermes Agent',  initials: 'HA', color: 'bg-lavender text-lavender-ink' },
 };
 
 function describeAgent(source: string): { label: string; initials: string; color: string } {
@@ -375,7 +373,7 @@ export default function Dashboard() {
             <>
               <div className="flex items-baseline gap-3 flex-wrap">
                 <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                  钱包余额
+                  Agent 余额
                 </span>
                 <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
                   <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
@@ -418,12 +416,12 @@ export default function Dashboard() {
           {/* Total balance — newapi.user.quota in USD. For most users
               this overlaps with the period quota above (sub remaining
               IS user.quota when there's no extra topup); shown as a
-              small line so the actual "钱包" number is visible when
-              the user has been topped up beyond their sub. */}
+              small line so the actual "Agent 余额" number is visible
+              when the user has been topped up beyond their sub. */}
           {subBucket && (
             <section className={`${card} p-4 flex items-center gap-3 flex-wrap`}>
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold flex-shrink-0">
-                钱包余额
+                Agent 余额
               </span>
               <span className="font-mono text-[16px] font-bold text-ink">
                 ${balanceUsd.toFixed(4)}

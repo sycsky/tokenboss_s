@@ -84,8 +84,7 @@ export default function OnboardInstall() {
 
       <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-9">
         已支持 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
-        <span className="text-ink font-semibold">Hermes Agent</span> ·{' '}
-        <span className="text-ink font-semibold">Claude Code</span>
+        <span className="text-ink font-semibold">Hermes Agent</span>
       </p>
 
       {waiting ? (

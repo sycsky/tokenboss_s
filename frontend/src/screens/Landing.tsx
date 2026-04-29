@@ -243,13 +243,13 @@ export default function Landing() {
           <FeatureCard
             tag="01"
             title="开局立刻用得起好模型"
-            body="$10 免费额度直接到账。Claude Opus / GPT-5 / Codex 顶级模型随便调，不用懂 API key。"
+            body="$10 免费额度直接到账。Claude Opus / GPT-5 等顶级模型给你的 Agent 随便调，不用懂 API key。"
             accentBg="bg-[#FFF4E6]"
           />
           <FeatureCard
             tag="02"
             title="换 Agent 不用换钱包"
-            body="今天 Hermes 写文案，明天 OpenClaw 跑研究 — 用同一份额度。换工具不重新开通。"
+            body="今天 Hermes Agent 写文案，明天 OpenClaw 跑研究 — 用同一份额度。换 Agent 不重新开通。"
             accentBg="bg-[#F0EBE3]"
           />
           <FeatureCard

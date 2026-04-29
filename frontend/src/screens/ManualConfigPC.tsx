@@ -46,35 +46,23 @@ interface AgentRecipe {
 
 const RECIPES: AgentRecipe[] = [
   {
-    id: 'cursor',
-    name: 'Cursor',
-    where: 'Settings → Models → OpenAI API Key + Override OpenAI Base URL',
-    snippet: `OpenAI API Key:    <你的 TokenBoss key>
-Base URL:          https://api.tokenboss.co/v1`,
+    id: 'openclaw',
+    name: 'OpenClaw',
+    where: '设置 → 模型供应商 → 自定义 OpenAI 兼容',
+    snippet: `Base URL:    https://api.tokenboss.co/v1
+API Key:     <你的 TokenBoss key>
+Model:       gpt-5.5`,
   },
   {
-    id: 'claude-code',
-    name: 'Claude Code',
+    id: 'hermes',
+    name: 'Hermes Agent',
     where: '环境变量（在 shell rc 里 export，或一次性放在前面）',
-    snippet: `export ANTHROPIC_BASE_URL=https://api.tokenboss.co/v1
-export ANTHROPIC_API_KEY=<你的 TokenBoss key>`,
+    snippet: `export OPENAI_BASE_URL=https://api.tokenboss.co/v1
+export OPENAI_API_KEY=<你的 TokenBoss key>`,
     language: 'shell',
   },
   {
-    id: 'continue',
-    name: 'Continue (VS Code)',
-    where: '~/.continue/config.json 的 models 数组',
-    snippet: `{
-  "title": "TokenBoss",
-  "provider": "openai",
-  "model": "gpt-5.5",
-  "apiBase": "https://api.tokenboss.co/v1",
-  "apiKey": "<你的 TokenBoss key>"
-}`,
-    language: 'json',
-  },
-  {
-    id: 'sdk',
+    id: 'sdk-python',
     name: 'OpenAI SDK (Python)',
     where: '初始化 client 时传 base_url + api_key',
     snippet: `from openai import OpenAI
@@ -84,6 +72,18 @@ client = OpenAI(
     api_key="<你的 TokenBoss key>",
 )`,
     language: 'python',
+  },
+  {
+    id: 'sdk-node',
+    name: 'OpenAI SDK (Node.js)',
+    where: '初始化 client 时传 baseURL + apiKey',
+    snippet: `import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'https://api.tokenboss.co/v1',
+  apiKey: '<你的 TokenBoss key>',
+});`,
+    language: 'json',
   },
 ];
 
@@ -161,7 +161,7 @@ export default function ManualConfigPC() {
                   <p>所有支持 OpenAI 兼容协议的 Agent 都通过这个地址走我们：</p>
                   <div className={codeBlock}>https://api.tokenboss.co/v1</div>
                   <p className="font-mono text-[11px] text-[#A89A8D]">
-                    Cursor / Claude Code / Continue / Aider / OpenAI SDK 等都能用——下面有具体 Agent 的填写位置和模板。
+                    OpenClaw / Hermes Agent / OpenAI SDK 任何 Agent 都能接——下面有按 Agent 的填写位置和模板。
                   </p>
                 </div>
               }
