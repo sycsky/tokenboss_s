@@ -261,8 +261,9 @@ async function applyPlanToUser(
  * updateUser, which would race against the user's own consumption.
  *
  * Idempotency: caller (markOrderPaidIfPending) already guarantees one
- * call per order. We additionally short-circuit if `settleStatus` is
- * already 'settled' — defensive against future code paths.
+ * call per order via SQL conditional UPDATE — duplicate webhooks become
+ * no-ops at the order layer, so we never enter this function twice for
+ * the same order.
  *
  * Failure mode: webhook still acks 200 (the order IS paid), but
  * settleStatus is set to 'failed' and a structured error log lets ops
@@ -274,11 +275,6 @@ async function applyTopupToUser(
   channel: string,
 ): Promise<void> {
   const tag = `[webhook/${channel}]`;
-
-  if (order.settleStatus === 'settled') {
-    console.info(`${tag} topup already settled, skipping`, { orderId: order.orderId });
-    return;
-  }
 
   const usd = order.topupAmountUsd;
   if (!usd || usd <= 0) {
@@ -339,7 +335,7 @@ async function applyTopupToUser(
       topupAmountUsd: usd,
       errorMessage: msg,
       channel,
-      mintedCode: code, // include so ops can manually re-redeem if needed
+      mintedCodeTail: code.slice(-4), // last 4 chars only — ops looks up the full code in newapi admin by name=orderId
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
   }
