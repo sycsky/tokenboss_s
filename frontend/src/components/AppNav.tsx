@@ -21,18 +21,36 @@ export type AppNavCurrent = 'console' | 'history' | 'account';
  * visual highlight.
  */
 export function AppNav({ current: _current }: { current?: AppNavCurrent } = {}) {
-  // Hide the "升级" pill when the user is already on /pricing — promoting
-  // the page you're currently viewing reads as broken chrome.
-  //
-  // No standalone "← 控制台" affordance: the BrandPlate logo itself
-  // links back to /console (Stripe / Vercel / Linear convention — logo
-  // is home). Anonymous TopNav still points the same logo at `/`.
+  // - "升级" pill is hidden on /pricing — promoting a page you're already
+  //   on reads as broken chrome.
+  // - "← 控制台" link only renders when the user is NOT on /console. The
+  //   BrandPlate logo also links home (Stripe / Vercel / Linear "logo is
+  //   home" convention) but our audience skews non-developer, so an
+  //   explicit text link matters — many users don't know to click a
+  //   brand mark for navigation.
   const { pathname } = useLocation();
   const onPricing = pathname.startsWith('/pricing');
+  const onConsoleHome = pathname === '/console';
 
   return (
     <nav className="px-5 sm:px-9 py-5 flex items-center justify-between max-w-[1340px] mx-auto gap-3">
-      <BrandPlate to="/console" />
+      <div className="flex items-center gap-4 min-w-0">
+        <BrandPlate to="/console" />
+        {!onConsoleHome && (
+          <Link
+            to="/console"
+            className={
+              'inline-flex items-center gap-1 font-mono text-[12px] ' +
+              'text-text-secondary hover:text-ink transition-colors ' +
+              // Slightly larger touch target without changing visual weight.
+              'py-1 -my-1'
+            }
+          >
+            <span aria-hidden="true">←</span>
+            <span>控制台</span>
+          </Link>
+        )}
+      </div>
       <div className="flex items-center gap-3">
         {!onPricing && (
           <Link
