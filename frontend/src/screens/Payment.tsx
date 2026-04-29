@@ -5,6 +5,8 @@ import { TIERS, tierPrice } from '../lib/pricing';
 import { ULTRA_DROP, useDailyCountdown } from '../lib/dropSchedule';
 import { api, type BillingChannel, type BillingPlanId, type BucketRecord } from '../lib/api';
 import { ContactSalesModal } from '../components/ContactSalesModal';
+import { ChannelOption } from '../components/ChannelOption';
+import { dispatchCheckout } from '../lib/checkoutFlow';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -20,20 +22,6 @@ function asPlanId(v: string | null): BillingPlanId | null {
 function planByIdSafe(id: BillingPlanId): PlanInfo {
   // TIERS uses display-cased names (Plus/Super/Ultra) — match case-insensitively.
   return TIERS.find((t) => t.name.toLowerCase() === id) ?? TIERS[0];
-}
-
-/**
- * Distinguish "phone" from "PC". `pointer: coarse` matches touch-primary
- * devices, which on real Android/iOS phones is the most reliable signal —
- * UA sniffing alone misses tablets-with-keyboard and Chinese in-app
- * webviews. Width fallback covers DevTools "device toolbar" testing.
- */
-function isMobileLike(): boolean {
-  if (typeof window === 'undefined') return false;
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-  const narrow = window.innerWidth < 768;
-  const ua = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  return coarse || narrow || ua;
 }
 
 export default function Payment() {
@@ -165,39 +153,8 @@ export default function Payment() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await api.createOrder({ planId, channel });
-      const mobile = isMobileLike();
-
-      if (channel === 'xunhupay' && mobile) {
-        // Mobile + 支付宝: deeplink to Alipay via xunhupay's H5 page.
-        // Same-window navigation is required — popups are blocked /
-        // deeplinks must run in the user's primary browser context.
-        // After payment, gateway redirects to /billing/success?orderId=...
-        // (our return_url default), which is the OrderStatus page.
-        window.location.href = res.paymentUrl;
-        return;
-      }
-
-      if (channel === 'xunhupay' && !mobile && res.qrCodeUrl) {
-        // PC + 支付宝: render the QR inline on the status page so the user
-        // never leaves our app. Pass the QR URL via navigation state — it's
-        // not stored server-side and would be lost on a hard refresh, in
-        // which case OrderStatus falls back to a "重新打开支付页" link
-        // built from `paymentUrl` returned by getOrder.
-        navigate(`/billing/orders/${encodeURIComponent(res.orderId)}`, {
-          state: { qrCodeUrl: res.qrCodeUrl, paymentUrl: res.paymentUrl },
-        });
-        return;
-      }
-
-      // epusdt (区块链): epusdt's hosted checkout page handles QR/copy
-      // address itself. Open in a new tab on PC; same-window on mobile.
-      // Mobile + xunhupay without qrCodeUrl falls through here too.
-      if (res.paymentUrl) {
-        if (mobile) window.location.href = res.paymentUrl;
-        else window.open(res.paymentUrl, '_blank', 'noopener,noreferrer');
-      }
-      navigate(`/billing/orders/${encodeURIComponent(res.orderId)}`);
+      const res = await api.createOrder({ type: 'plan', planId, channel });
+      dispatchCheckout(res, channel, navigate);
     } catch (err) {
       setError((err as Error).message || '下单失败，稍后再试');
       setSubmitting(false);
@@ -327,51 +284,6 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       </dt>
       <dd className="text-right text-ink">{children}</dd>
     </div>
-  );
-}
-
-function ChannelOption({
-  active,
-  onClick,
-  title,
-  subtitle,
-  tag,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  subtitle: string;
-  tag: string;
-}) {
-  const base =
-    'block w-full text-left p-5 border-2 border-ink rounded-md transition-all';
-  const onState = active
-    ? 'bg-ink text-bg shadow-[3px_3px_0_0_#1C1917]'
-    : 'bg-white text-ink shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#1C1917]';
-
-  return (
-    <button onClick={onClick} className={`${base} ${onState}`} type="button">
-      <div className="flex items-start justify-between gap-2 mb-1.5">
-        <span className="text-[16px] font-bold">{title}</span>
-        <span
-          className={
-            'font-mono text-[10px] tracking-[0.08em] px-1.5 py-0.5 rounded border-2 ' +
-            (active
-              ? 'border-bg text-bg'
-              : 'border-ink text-ink-2')
-          }
-        >
-          {tag}
-        </span>
-      </div>
-      <div
-        className={
-          'text-[12.5px] ' + (active ? 'text-bg/80' : 'text-text-secondary')
-        }
-      >
-        {subtitle}
-      </div>
-    </button>
   );
 }
 
