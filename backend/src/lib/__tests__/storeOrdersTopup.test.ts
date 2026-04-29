@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 process.env.SESSION_SECRET = 'test-secret-32bytes-min-aaaaaaaaaaa';
 process.env.SQLITE_PATH = ':memory:';
 
-import { init, db, createOrder, getOrder, type OrderRecord } from '../store.js';
+import { init, db, createOrder, getOrder, markOrderSettleStatus, type OrderRecord } from '../store.js';
 
 beforeAll(() => {
   init();
@@ -78,5 +78,39 @@ describe('orders table — backfill migration', () => {
     const back = await getOrder('explicit_topup');
     expect(back?.skuType).toBe('topup');
     expect(back?.topupAmountUsd).toBe(50);
+  });
+});
+
+describe('markOrderSettleStatus', () => {
+  it('flips settleStatus only on topup orders', async () => {
+    const now = new Date().toISOString();
+    await createOrder({
+      orderId: 'tb_ord_settle_a',
+      userId: 'u_test',
+      skuType: 'topup',
+      channel: 'xunhupay',
+      amount: 50,
+      currency: 'CNY',
+      topupAmountUsd: 50,
+      status: 'paid',
+      createdAt: now,
+      paidAt: now,
+    });
+
+    const ok = await markOrderSettleStatus({
+      orderId: 'tb_ord_settle_a',
+      settleStatus: 'settled',
+    });
+    expect(ok).toBe(true);
+    const back = await getOrder('tb_ord_settle_a');
+    expect(back?.settleStatus).toBe('settled');
+  });
+
+  it('returns false when the order does not exist', async () => {
+    const ok = await markOrderSettleStatus({
+      orderId: 'tb_ord_does_not_exist',
+      settleStatus: 'failed',
+    });
+    expect(ok).toBe(false);
   });
 });

@@ -711,3 +711,16 @@ export async function markOrderStatus(args: {
   `).run(args);
   return result.changes > 0;
 }
+
+/** Patch the settleStatus column. Used by paymentWebhook after attempting
+ *  to credit a topup order's $ to newapi. Returns false if no row matched
+ *  (orderId unknown). Idempotent — re-marking the same status is a no-op. */
+export async function markOrderSettleStatus(args: {
+  orderId: string;
+  settleStatus: 'settled' | 'failed';
+}): Promise<boolean> {
+  const result = db.prepare(`
+    UPDATE orders SET settleStatus = @settleStatus WHERE orderId = @orderId
+  `).run({ orderId: args.orderId, settleStatus: args.settleStatus });
+  return result.changes > 0;
+}
