@@ -22,8 +22,11 @@ const AGENTS: AgentMark[] = [
 ];
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
+// inline-block + whitespace-nowrap so a chip stays one unbroken token —
+// `break-all` (the previous setting) split short tokens like `apiKey` mid-
+// word and rendered the chip's border across two lines, looking broken.
 const codeChip =
-  'font-mono text-[12px] text-ink bg-bg border-2 border-ink rounded px-2 py-0.5 break-all';
+  'inline-block align-baseline font-mono text-[12px] text-ink bg-bg border-2 border-ink rounded px-2 py-0.5 whitespace-nowrap';
 const codeBlock =
   'font-mono text-[12.5px] text-ink bg-bg border-2 border-ink rounded p-3 ' +
   // `whitespace-pre-wrap` keeps newlines + leading indent in multi-line
@@ -38,6 +41,9 @@ const codeBlock =
  * even installed the tool can follow it end-to-end. All snippets reference
  * the OpenAI-Chat-Completions endpoint at /v1/chat/completions — the only
  * one the backend actually serves.
+ *
+ * Key format: TokenBoss keys are `sk-` prefix + 48 chars (total ~51), see
+ * `backend/src/lib/newapi.ts` where `sk-` is force-prepended on reveal.
  */
 interface RecipeStep {
   /** "1. 安装" / "2. 编辑配置" — visually a numbered milestone. */
@@ -381,7 +387,7 @@ export default function ManualConfigPC() {
                         到 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 右栏 API KEY 标签旁的 <span className="font-semibold text-ink">+</span>。
                         弹窗里直接 <span className="font-semibold text-ink">复制 API Key</span>；之后回 default 那行点复制图标也能再拿。
                         <span className="block mt-1.5 font-mono text-[11px] text-[#A89A8D]">
-                          Key 是 48 位无前缀字符，形如 <span className={codeChip}>AVtI…aCvC</span>
+                          Key 以 <span className={codeChip}>sk-</span> 开头，形如 <span className={codeChip}>sk-ADrM…aCvC</span>
                         </span>
                       </span>
                     }
