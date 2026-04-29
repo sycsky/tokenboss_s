@@ -122,9 +122,9 @@ export function RedeemCodeModal({ open, onClose, onSuccess }: RedeemCodeModalPro
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={onKeyDownInput}
-              placeholder="例如  TBOSS-XXXX-XXXX"
+              placeholder="例如  fd64f3baedda4e0898fd324a73ebbb21"
               spellCheck={false}
-              autoCapitalize="characters"
+              autoCapitalize="none"
               autoComplete="off"
               className={
                 'w-full px-3 py-2.5 bg-bg border-2 border-ink rounded-md ' +

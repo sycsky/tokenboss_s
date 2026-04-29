@@ -173,3 +173,15 @@ export function getNewapiPlanId(label: SubscriptionLabel): number | null {
   const v = parseInt(raw, 10);
   return Number.isFinite(v) && v > 0 ? v : null;
 }
+
+/**
+ * Map an OrderRecord skuType (e.g. "plan_plus") back to the PlanId used
+ * by the rest of the plan-only surface (pricing, bindSubscription).
+ * Returns null for non-plan skuTypes (e.g. "topup"), letting callers
+ * distinguish in their dispatch.
+ */
+export function skuTypeToPlanId(skuType: string): PlanId | null {
+  if (!skuType.startsWith('plan_')) return null;
+  const tail = skuType.slice('plan_'.length);
+  return isPlanId(tail) ? tail : null;
+}

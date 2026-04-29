@@ -17,6 +17,16 @@ const PLAN_LABEL: Record<string, string> = {
   ultra: 'Ultra',
 };
 
+function skuLabel(order: BillingOrder): string {
+  if (order.skuType === 'topup') return '充值';
+  if (order.planId) return PLAN_LABEL[order.planId] ?? order.planId;
+  return order.skuType;
+}
+
+function isTopup(order: BillingOrder): boolean {
+  return order.skuType === 'topup';
+}
+
 // Channel labels are intentionally generic — the epusdt hosted page lets
 // the user pick token (USDT / USDC) and chain themselves, so locking the
 // label to "USDT-TRC20" misrepresents the actual options.
@@ -148,7 +158,7 @@ export default function OrderStatus() {
         BILLING · 订单状态
       </div>
 
-      <StatusHero status={order.status} hasQr={!!navState.qrCodeUrl} />
+      <StatusHero status={order.status} hasQr={!!navState.qrCodeUrl} order={order} />
 
       {/* Order summary */}
       <section className={`${card} p-6 mb-6`}>
@@ -159,12 +169,17 @@ export default function OrderStatus() {
           <Row label="订单号">
             <span className="font-mono text-[12px] break-all">{order.orderId}</span>
           </Row>
-          <Row label="套餐">
-            <span className="font-bold">{PLAN_LABEL[order.planId] ?? order.planId}</span>
+          <Row label={isTopup(order) ? '名称' : '套餐'}>
+            <span className="font-bold">{skuLabel(order)}</span>
           </Row>
           <Row label="渠道">
             <span>{CHANNEL_LABEL[order.channel] ?? order.channel}</span>
           </Row>
+          {isTopup(order) && order.topupAmountUsd != null && (
+            <Row label="到账">
+              <span className="font-mono">${order.topupAmountUsd.toFixed(2)}</span>
+            </Row>
+          )}
           <Row label="金额">
             <span className="font-mono">
               {order.currency === 'USD' ? '$' : '¥'}{order.amount.toFixed(2)}
@@ -199,7 +214,9 @@ export default function OrderStatus() {
         />
       )}
       {order.status === 'paid' && <PaidActions />}
-      {(order.status === 'expired' || order.status === 'failed') && <FailedActions />}
+      {(order.status === 'expired' || order.status === 'failed') && (
+        <FailedActions isTopup={isTopup(order)} />
+      )}
 
       <div className="mt-8 flex items-center justify-between flex-wrap gap-3">
         <Link
@@ -209,10 +226,10 @@ export default function OrderStatus() {
           ← 返回控制台
         </Link>
         <Link
-          to="/pricing"
+          to={isTopup(order) ? '/billing/topup' : '/pricing'}
           className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
         >
-          重新选套餐 →
+          {isTopup(order) ? '再充一笔 →' : '重新选套餐 →'}
         </Link>
       </div>
     </Shell>
@@ -241,7 +258,15 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function StatusHero({ status, hasQr }: { status: BillingStatus; hasQr: boolean }) {
+function StatusHero({
+  status,
+  hasQr,
+  order,
+}: {
+  status: BillingStatus;
+  hasQr: boolean;
+  order: BillingOrder;
+}) {
   if (status === 'pending') {
     return (
       <>
@@ -258,6 +283,10 @@ function StatusHero({ status, hasQr }: { status: BillingStatus; hasQr: boolean }
     );
   }
   if (status === 'paid') {
+    const copy =
+      order.skuType === 'topup'
+        ? `$${order.topupAmountUsd?.toFixed(2) ?? '?'} 已加到余额，${Math.round(AUTO_REDIRECT_AFTER_PAID_MS / 1000)} 秒后自动跳回控制台。`
+        : `套餐已激活，${Math.round(AUTO_REDIRECT_AFTER_PAID_MS / 1000)} 秒后自动跳回控制台。`;
     return (
       <>
         <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3 flex items-center gap-3">
@@ -267,7 +296,7 @@ function StatusHero({ status, hasQr }: { status: BillingStatus; hasQr: boolean }
           支付成功
         </h1>
         <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
-          套餐已激活，{Math.round(AUTO_REDIRECT_AFTER_PAID_MS / 1000)} 秒后自动跳回控制台。
+          {copy}
         </p>
       </>
     );
@@ -383,11 +412,13 @@ function PaidActions() {
   );
 }
 
-function FailedActions() {
+function FailedActions({ isTopup }: { isTopup: boolean }) {
+  const to = isTopup ? '/billing/topup' : '/pricing';
+  const text = isTopup ? '重新充值 →' : '重新下单 →';
   return (
     <div className="flex items-center gap-3 mb-2">
       <Link
-        to="/pricing"
+        to={to}
         className={
           'inline-block px-5 py-2.5 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold ' +
           'shadow-[3px_3px_0_0_#1C1917] ' +
@@ -396,7 +427,7 @@ function FailedActions() {
           'transition-all'
         }
       >
-        重新下单 →
+        {text}
       </Link>
     </div>
   );

@@ -87,7 +87,7 @@ order.skuType === "topup"        → applyTopupToUser (新增)
 
 **幂等：** `markOrderPaidIfPending` 是条件 UPDATE，重复 webhook 投递只有第一次成功 → `applyTopupToUser` 至多触发一次，钱不会重复加。
 
-**失败兜底：** webhook 仍 200 ack（订单已 paid，不能让网关无限重投），但 `settleStatus=failed` 且 `console.error` 写出 `{ orderId, userId, topupAmountUsd, errorMessage, channel }`，运维 / 人工能用 orderId grep 出来。v1 阶段人工巡检 + grant-bucket 类脚本兜底；v1.1 再考虑加自动 retry cron。
+**失败兜底：** webhook 仍 200 ack（订单已 paid，不能让网关无限重投），但 `settleStatus=failed` 且 `console.error` 写出 `{ orderId, userId, topupAmountUsd, errorMessage, channel }`，运维 / 人工能用 orderId grep 出来。v1 阶段人工巡检 + `npx tsx backend/scripts/grant-topup.ts <email> <amountUsd>` 兜底（调用与 applyTopupToUser webhook 相同的 mint+redeem 流程，不依赖 deprecated credit_bucket 表）；v1.1 再考虑加自动 retry cron。
 
 ### 5. 前端 Topup 页
 
@@ -203,7 +203,7 @@ Sub    永不过期 · 解锁全模型 · ¥1 = $1
 ## Risk & rollback
 
 - **xunhupay 网关 min > ¥1**：UI 起充自动调高，现有订单不受影响。
-- **newapi 兑换 endpoint 字段变化（newapi 升级）**：mint 失败 → `settleStatus=failed`，钱已收但额度未到 → 走人工兜底脚本 (`grant-bucket.sh`)。
+- **newapi 兑换 endpoint 字段变化（newapi 升级）**：mint 失败 → `settleStatus=failed`，钱已收但额度未到 → 走人工兜底脚本 (`npx tsx backend/scripts/grant-topup.ts <email> <amountUsd>`，调用与 applyTopupToUser webhook 相同的 mint+redeem 流程，不依赖 deprecated credit_bucket 表)。
 - **充值后 quota 立即被用户耗尽**：spec credits-economy § 6 的扣费优先级（套餐先扣 → 充值后扣）已规划，无新增风险。
 - **rollback 路径**：`type` 字段缺省默认 `'plan'`，删掉前端 Topup 入口 + 服务端拒 `type=topup` 即可回到当前状态；`OrderRecord` 新字段都可空，老订单不受影响。
 

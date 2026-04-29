@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useCurrency } from '../lib/currency';
 import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
@@ -90,8 +90,10 @@ export default function Plans() {
     }
     return { text: '立即开通 →', onClick: () => goPay(plan) };
   };
-  const standardCta = isLoggedIn
-    ? { text: '联系客服充值', onClick: () => setContactReason('topup') }
+  const standardCta:
+    | { text: string; onClick: () => void; href?: undefined }
+    | { text: string; href: string; onClick?: undefined } = isLoggedIn
+    ? { text: '立即充值 →', href: '/billing/topup' }
     : { text: '免费开始 →', onClick: goRegister };
 
   const std = STANDARD_RATE[currency];
@@ -142,24 +144,33 @@ export default function Plans() {
               {std.minTopup}
             </div>
           </div>
-          {standardCta.onClick ? (
+          {standardCta.href ? (
+            <Link
+              to={standardCta.href}
+              className={
+                'px-5 py-2.5 bg-bg border-2 border-ink rounded-md text-[14px] font-bold text-ink ' +
+                'shadow-[3px_3px_0_0_#1C1917] ' +
+                'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+                'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+                'transition-all whitespace-nowrap'
+              }
+            >
+              {standardCta.text}
+            </Link>
+          ) : standardCta.onClick ? (
             <button
               onClick={standardCta.onClick}
               className={
                 'px-5 py-2.5 bg-bg border-2 border-ink rounded-md text-[14px] font-bold text-ink ' +
-                'shadow-[3px_3px_0_0_#1C1917] whitespace-nowrap ' +
+                'shadow-[3px_3px_0_0_#1C1917] ' +
                 'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
                 'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-                'transition-all'
+                'transition-all whitespace-nowrap'
               }
             >
               {standardCta.text}
             </button>
-          ) : (
-            <span className="px-5 py-2.5 bg-bg border-2 border-ink rounded-md text-[14px] font-bold text-ink-3 whitespace-nowrap shadow-[3px_3px_0_0_#1C1917]">
-              {standardCta.text}
-            </span>
-          )}
+          ) : null}
         </div>
 
         {/* 02 Membership */}

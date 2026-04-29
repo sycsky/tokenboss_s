@@ -59,37 +59,26 @@ export interface UserRecord {
 
 export type UserPlan = "trial" | "plus" | "super" | "ultra";
 
-export type OrderStatus = "pending" | "paid" | "expired" | "failed";
-export type PaymentChannel = "epusdt" | "xunhupay";
-export type OrderCurrency = "CNY" | "USD";
-export type { PlanId } from "./plans.js";
-import type { PlanId } from "./plans.js";
+// ---------- Order types (re-export from payment/types) ----------
 
-export interface OrderRecord {
-  orderId: string;
-  userId: string;
-  planId: PlanId;
-  channel: PaymentChannel;
-  /** Quoted amount in the order's `currency`. epusdt orders use USD,
-   *  xunhupay orders use CNY. (Stored in the DB column historically
-   *  named `amountCNY` — column kept for back-compat; the mapper
-   *  exposes it as `amount` regardless of currency.) */
-  amount: number;
-  /** Currency the `amount` is denominated in. Defaults to CNY for
-   *  legacy V2 rows that pre-date crypto-USD pricing. */
-  currency: OrderCurrency;
-  /** Channel-side actual settled amount. epusdt: USDT count after FX
-   *  (often differs slightly from amount due to exchange-rate spread).
-   *  xunhupay: same as amount in CNY. */
-  amountActual?: number;
-  status: OrderStatus;
-  upstreamTradeId?: string;
-  upstreamPaymentUrl?: string;
-  blockTxId?: string;
-  receiveAddress?: string;
-  createdAt: string;
-  paidAt?: string;
-}
+export type {
+  OrderRecord,
+  OrderStatus,
+  PaymentChannel,
+  OrderCurrency,
+  OrderSkuType,
+  OrderSettleStatus,
+  PlanId,
+} from "./payment/types.js";
+
+// Type-only imports kept locally so `as PaymentChannel` casts in
+// rowToOrder still compile.
+import type {
+  OrderCurrency,
+  OrderRecord,
+  OrderStatus,
+  PaymentChannel,
+} from "./payment/types.js";
 
 // ---------- Database singleton ----------
 
@@ -109,19 +98,29 @@ function ensureDir(filePath: string) {
  * Reads SQLITE_PATH (test override) or DATABASE_PATH (production) from env.
  * Safe to call multiple times — closes any existing connection first.
  */
+// Track the path of the currently open connection so re-init on the same
+// path (common in tests that call init() to trigger migrations) skips
+// close+reopen and instead runs migrations on the existing connection.
+let _currentDbPath: string | null = null;
+
 export function init(): void {
   const dbPath =
     process.env.SQLITE_PATH ?? process.env.DATABASE_PATH ?? "data/tokenboss.db";
 
-  if (db) {
-    db.close();
-  }
+  if (db && _currentDbPath === dbPath) {
+    // Same path already open — just re-run schema/migrations below.
+  } else {
+    if (db) {
+      db.close();
+    }
 
-  if (dbPath !== ":memory:") {
-    ensureDir(dbPath);
-  }
+    if (dbPath !== ":memory:") {
+      ensureDir(dbPath);
+    }
 
-  db = new Database(dbPath);
+    db = new Database(dbPath);
+    _currentDbPath = dbPath;
+  }
 
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
@@ -243,7 +242,10 @@ export function init(): void {
     CREATE TABLE IF NOT EXISTS orders (
       orderId            TEXT PRIMARY KEY,
       userId             TEXT NOT NULL,
-      planId             TEXT NOT NULL,
+      planId             TEXT,                      -- legacy; nullable now (back-compat for rollback)
+      skuType            TEXT,                      -- 'plan_plus'|'plan_super'|'plan_ultra'|'topup'
+      topupAmountUsd     REAL,                      -- only set for skuType='topup'
+      settleStatus       TEXT,                      -- 'settled'|'failed' for topup; null otherwise
       channel            TEXT NOT NULL,
       amountCNY          REAL NOT NULL,
       amountActual       REAL,
@@ -261,14 +263,13 @@ export function init(): void {
   `);
 
   // Idempotent migration for pre-V3 dev DBs that don't have the column.
-  try {
-    db.exec(`ALTER TABLE orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'`);
-  } catch {
-    // Column already exists — fine.
-  }
+  try { db.exec(`ALTER TABLE orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN skuType TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN topupAmountUsd REAL`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN settleStatus TEXT`); } catch {}
 
-  // Rename legacy plan ids → new tier names. Idempotent — once data is
-  // migrated the CASE expression is a no-op for fresh rows.
+  // Rename legacy plan ids → new tier names FIRST, so the backfill below
+  // only ever sees canonical planId values ('plus'|'super'|'ultra').
   db.exec(`
     UPDATE orders SET planId = CASE planId
       WHEN 'basic'    THEN 'plus'
@@ -277,6 +278,19 @@ export function init(): void {
       ELSE planId
     END
   `);
+
+  // Backfill skuType from legacy planId for any existing rows.
+  // Idempotent: only overwrites NULL skuType, leaves explicit values alone.
+  db.exec(`
+    UPDATE orders
+       SET skuType = CASE planId
+         WHEN 'plus'  THEN 'plan_plus'
+         WHEN 'super' THEN 'plan_super'
+         WHEN 'ultra' THEN 'plan_ultra'
+         ELSE skuType
+       END
+     WHERE skuType IS NULL AND planId IS NOT NULL
+  `);
 }
 
 // Initialise on module load (production default path).
@@ -284,6 +298,21 @@ export function init(): void {
 init();
 
 // ---------- Row → Record mappers ----------
+
+const VALID_SKU_TYPES = ['plan_plus', 'plan_super', 'plan_ultra', 'topup'] as const;
+type ValidSkuType = (typeof VALID_SKU_TYPES)[number];
+
+function deriveSkuType(skuType: string | undefined, planId: string | undefined): ValidSkuType {
+  if (skuType && (VALID_SKU_TYPES as readonly string[]).includes(skuType)) {
+    return skuType as ValidSkuType;
+  }
+  if (planId === 'plus') return 'plan_plus';
+  if (planId === 'super') return 'plan_super';
+  if (planId === 'ultra') return 'plan_ultra';
+  // Last-resort default: any other state means migration didn't fully run.
+  // 'plan_plus' is the safest fallback (lowest privilege paid tier).
+  return 'plan_plus';
+}
 
 function rowToUser(row: Record<string, unknown>): UserRecord {
   return {
@@ -308,14 +337,15 @@ function rowToOrder(row: Record<string, unknown>): OrderRecord {
   return {
     orderId: row.orderId as string,
     userId: row.userId as string,
-    planId: row.planId as PlanId,
+    skuType: deriveSkuType(row.skuType as string | undefined, row.planId as string | undefined),
     channel: row.channel as PaymentChannel,
-    // DB column historically named `amountCNY` for legacy reasons; the
-    // value's actual currency is in the `currency` column. Old rows
-    // default to CNY (set by the migration).
+    // DB column historically named `amountCNY` for legacy reasons.
     amount: row.amountCNY as number,
     currency: ((row.currency as string) ?? "CNY") as OrderCurrency,
     amountActual: (row.amountActual as number) ?? undefined,
+    topupAmountUsd: (row.topupAmountUsd as number) ?? undefined,
+    settleStatus:
+      (row.settleStatus as OrderRecord['settleStatus']) ?? undefined,
     status: row.status as OrderStatus,
     upstreamTradeId: (row.upstreamTradeId as string) ?? undefined,
     upstreamPaymentUrl: (row.upstreamPaymentUrl as string) ?? undefined,
@@ -573,19 +603,29 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
 // ---------- Public API — Orders ----------
 
 export async function createOrder(rec: OrderRecord): Promise<void> {
+  // planId column is kept for back-compat / rollback. Derive from skuType
+  // when the order is a plan_* SKU; null for topup.
+  const legacyPlanId = rec.skuType.startsWith('plan_')
+    ? rec.skuType.replace(/^plan_/, '')
+    : null;
   db.prepare(`
     INSERT INTO orders
-      (orderId, userId, planId, channel, amountCNY, currency, amountActual, status,
+      (orderId, userId, planId, skuType, topupAmountUsd, settleStatus,
+       channel, amountCNY, currency, amountActual, status,
        upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
        createdAt, paidAt)
     VALUES
-      (@orderId, @userId, @planId, @channel, @amount, @currency, @amountActual, @status,
+      (@orderId, @userId, @planId, @skuType, @topupAmountUsd, @settleStatus,
+       @channel, @amount, @currency, @amountActual, @status,
        @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
        @createdAt, @paidAt)
   `).run({
     orderId: rec.orderId,
     userId: rec.userId,
-    planId: rec.planId,
+    planId: legacyPlanId,
+    skuType: rec.skuType,
+    topupAmountUsd: rec.topupAmountUsd ?? null,
+    settleStatus: rec.settleStatus ?? null,
     channel: rec.channel,
     amount: rec.amount,
     currency: rec.currency,
@@ -669,5 +709,18 @@ export async function markOrderStatus(args: {
        SET status = @status
      WHERE orderId = @orderId AND status = 'pending'
   `).run(args);
+  return result.changes > 0;
+}
+
+/** Patch the settleStatus column. Used by paymentWebhook after attempting
+ *  to credit a topup order's $ to newapi. Returns false if no row matched
+ *  (orderId unknown). Idempotent — re-marking the same status is a no-op. */
+export async function markOrderSettleStatus(args: {
+  orderId: string;
+  settleStatus: 'settled' | 'failed';
+}): Promise<boolean> {
+  const result = db.prepare(`
+    UPDATE orders SET settleStatus = @settleStatus WHERE orderId = @orderId
+  `).run({ orderId: args.orderId, settleStatus: args.settleStatus });
   return result.changes > 0;
 }

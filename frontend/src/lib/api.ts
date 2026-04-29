@@ -257,17 +257,28 @@ export type BillingPlanId = "plus" | "super" | "ultra";
 export type BillingChannel = "epusdt" | "xunhupay";
 export type BillingStatus = "pending" | "paid" | "expired" | "failed";
 export type BillingCurrency = "CNY" | "USD";
+export type BillingSkuType = "plan_plus" | "plan_super" | "plan_ultra" | "topup";
+export type BillingSettleStatus = "settled" | "failed";
 
 export interface BillingOrder {
   orderId: string;
-  planId: BillingPlanId;
+  /** New canonical SKU label. Use this in switch statements. */
+  skuType: BillingSkuType;
+  /** Convenience field derived from skuType server-side; null/absent for
+   *  topup orders. Mirrors backend shapeOrder. Use skuType for switch
+   *  statements; planId is for direct display in plan-only contexts. */
+  planId?: BillingPlanId;
   channel: BillingChannel;
   /** Quoted amount in `currency` (CNY for xunhupay, USD for epusdt). */
   amount: number;
   currency: BillingCurrency;
   /** Channel-side actual settled amount (USDT count for epusdt). */
   amountActual?: number;
+  /** USD equivalent credited on settle. Only set for skuType='topup'. */
+  topupAmountUsd?: number;
   status: BillingStatus;
+  /** Set after the webhook attempts to apply credits (topup only). */
+  settleStatus?: BillingSettleStatus;
   paymentUrl?: string;
   blockTxId?: string;
   createdAt: string;
@@ -276,11 +287,17 @@ export interface BillingOrder {
 
 export interface CreateOrderResponse {
   orderId: string;
-  planId: BillingPlanId;
+  skuType: BillingSkuType;
+  /** Convenience field derived from skuType server-side; null/absent for
+   *  topup orders. Mirrors backend shapeOrder. Use skuType for switch
+   *  statements; planId is for direct display in plan-only contexts. */
+  planId?: BillingPlanId;
   channel: BillingChannel;
   amount: number;
   currency: BillingCurrency;
+  /** Channel-side actual settled amount (USDT count for epusdt). */
   amountActual?: number;
+  topupAmountUsd?: number;
   paymentUrl: string;
   /** Direct QR image URL when channel=xunhupay. Use to render an
    *  inline QR on PC instead of redirecting to the gateway. */
@@ -288,6 +305,23 @@ export interface CreateOrderResponse {
   expiresAt?: number;
   status: BillingStatus;
 }
+
+/** Body for POST /v1/billing/orders. Plan and topup are discriminated
+ *  via the `type` field; backend defaults to 'plan' if omitted, but
+ *  client should always send it explicitly. */
+export type CreateOrderInput =
+  | {
+      type: 'plan';
+      planId: BillingPlanId;
+      channel: BillingChannel;
+      redirectUrl?: string;
+    }
+  | {
+      type: 'topup';
+      amount: number; // integer 1-99999
+      channel: BillingChannel;
+      redirectUrl?: string;
+    };
 
 // ---------- public API ----------
 
@@ -394,13 +428,7 @@ export const api = {
   },
 
   // billing
-  createOrder(input: {
-    planId: BillingPlanId;
-    channel: BillingChannel;
-    /** Optional: where to send the user back after the gateway. Defaults
-     *  to backend-side `${PUBLIC_BASE_URL}/billing/success?orderId=...`. */
-    redirectUrl?: string;
-  }): Promise<CreateOrderResponse> {
+  createOrder(input: CreateOrderInput): Promise<CreateOrderResponse> {
     return request<CreateOrderResponse>("/v1/billing/orders", {
       method: "POST",
       body: input,

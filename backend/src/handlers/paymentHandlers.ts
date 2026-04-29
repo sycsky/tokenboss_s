@@ -29,9 +29,10 @@ import {
   createOrder,
   getOrder,
   listOrdersByUser,
-  type OrderRecord,
 } from "../lib/store.js";
-import { PLANS, isPlanId, getPlanPriceCNY, getPlanPriceUSD } from "../lib/plans.js";
+import type { OrderRecord, OrderSkuType } from "../lib/payment/types.js";
+import { PLANS, isPlanId, getPlanPriceCNY, getPlanPriceUSD, skuTypeToPlanId } from "../lib/plans.js";
+import type { PlanId } from "../lib/plans.js";
 
 // PLAN_PRICE was a frozen snapshot of PLANS[*].priceCNY built at module
 // load — replaced by getPlanPriceCNY() / getPlanPriceUSD(), which read
@@ -120,12 +121,17 @@ function newOrderId(): string {
 function shapeOrder(rec: OrderRecord) {
   return {
     orderId: rec.orderId,
-    planId: rec.planId,
+    skuType: rec.skuType,
+    // Convenience: derive planId for plan_* orders so the existing
+    // OrderStatus UI keeps working without a code change.
+    planId: skuTypeToPlanId(rec.skuType) ?? undefined,
     channel: rec.channel,
     amount: rec.amount,
     currency: rec.currency,
     amountActual: rec.amountActual,
+    topupAmountUsd: rec.topupAmountUsd,
     status: rec.status,
+    settleStatus: rec.settleStatus,
     paymentUrl: rec.upstreamPaymentUrl,
     blockTxId: rec.blockTxId,
     createdAt: rec.createdAt,
@@ -134,6 +140,17 @@ function shapeOrder(rec: OrderRecord) {
 }
 
 // ---------- POST /v1/billing/orders ----------
+
+const MAX_TOPUP_AMOUNT = 99999;
+/** USD-paying channels (epusdt) credit FX-converted USD额度 to the user.
+ *  ¥1 = $1 baseline still holds for RMB; USD payments effectively pay
+ *  the spot CNY/USD rate and get credited at the same baseline.
+ *  Hardcoded for v1; bump on noticeable FX drift. */
+const USD_TO_CREDIT_RATE = 7;
+
+function isOrderType(v: unknown): v is 'plan' | 'topup' {
+  return v === 'plan' || v === 'topup';
+}
 
 export const createOrderHandler = async (
   event: APIGatewayProxyEventV2,
@@ -147,33 +164,70 @@ export const createOrderHandler = async (
   if (!body)
     return jsonError(400, "invalid_request_error", "Body must be valid JSON.");
 
-  if (!isPlanId(body.planId))
-    return jsonError(400, "invalid_request_error", "planId must be basic|standard|pro.");
+  // type: 'plan' (default for back-compat) | 'topup'
+  const rawType = body.type ?? 'plan';
+  if (!isOrderType(rawType))
+    return jsonError(400, "invalid_request_error", "type must be plan|topup.");
+  const type = rawType;
+
   if (!isChannel(body.channel))
     return jsonError(400, "invalid_request_error", "channel must be epusdt|xunhupay.");
-
-  const planId = body.planId;
   const channel = body.channel;
-  // Block sold-out tiers at the API edge — UI hides the CTA, but we don't
-  // trust the client. 410 Gone is the right semantic: the resource (plan)
-  // exists historically but is no longer available for new orders.
-  if (PLANS[planId].soldOut) {
-    return jsonError(
-      410,
-      "plan_unavailable",
-      `${PLANS[planId].displayName} 当前售罄，暂时无法下单。`,
-      "plan_sold_out",
-    );
-  }
+
   // Channel determines pricing currency:
   //   epusdt   → USD (USDT-TRC20)
   //   xunhupay → CNY (Alipay/WeChat fiat gateway, CNY only)
-  // The CNY/USD prices are independent product decisions — both are
-  // editable via env overrides (PLAN_PRICE_<TIER>_CNY/_USD).
+  // Server-derived; client-supplied currency is ignored.
   const currency: "CNY" | "USD" = channel === "epusdt" ? "USD" : "CNY";
-  const amount = currency === "USD"
-    ? getPlanPriceUSD(planId)
-    : getPlanPriceCNY(planId);
+
+  let skuType: OrderSkuType;
+  let amount: number;
+  let topupAmountUsd: number | undefined;
+  let skuLabel: string;
+  let planId: PlanId | undefined;
+
+  if (type === 'plan') {
+    if (!isPlanId(body.planId))
+      return jsonError(400, "invalid_request_error", "planId must be plus|super|ultra.");
+    planId = body.planId;
+    if (PLANS[planId].soldOut) {
+      return jsonError(
+        410,
+        "plan_unavailable",
+        `${PLANS[planId].displayName} 当前售罄，暂时无法下单。`,
+        "plan_sold_out",
+      );
+    }
+    skuType = `plan_${planId}` as const;
+    amount = currency === "USD"
+      ? getPlanPriceUSD(planId)
+      : getPlanPriceCNY(planId);
+    skuLabel = planId;
+  } else {
+    // type === 'topup'
+    const rawAmount = body.amount;
+    if (
+      typeof rawAmount !== 'number' ||
+      !Number.isFinite(rawAmount) ||
+      !Number.isInteger(rawAmount) ||
+      rawAmount < 1 ||
+      rawAmount > MAX_TOPUP_AMOUNT
+    ) {
+      return jsonError(
+        400,
+        "invalid_request_error",
+        `amount must be an integer between 1 and ${MAX_TOPUP_AMOUNT}.`,
+        "invalid_amount",
+      );
+    }
+    skuType = 'topup';
+    amount = rawAmount;
+    // ¥1 = $1 baseline (spec credits-economy § 4) for RMB; USD pays spot
+    // FX so $1 USDT → $7 credited. Stored independently of amount/currency
+    // so settle is decoupled from FX drift between order and webhook.
+    topupAmountUsd = currency === 'USD' ? rawAmount * USD_TO_CREDIT_RATE : rawAmount;
+    skuLabel = 'topup';
+  }
 
   const baseUrl = resolvePublicBaseUrl(event);
   if (!baseUrl) {
@@ -210,16 +264,13 @@ export const createOrderHandler = async (
   const orderId = newOrderId();
   const now = new Date().toISOString();
 
-  // Call upstream FIRST. If it fails we don't want a phantom pending row
-  // in our DB — the user's order list would fill with garbage. The orderId
-  // is generated server-side so client retries don't collide on it.
   let result;
   try {
     result = await client.createOrder({
       orderId,
       amount,
       currency,
-      planId,
+      skuLabel,
       notifyUrl: `${baseUrl}/v1/billing/webhook/${channel}`,
       redirectUrl: typeof body.redirectUrl === "string"
         ? body.redirectUrl
@@ -238,11 +289,12 @@ export const createOrderHandler = async (
   const order: OrderRecord = {
     orderId,
     userId: auth.userId,
-    planId,
+    skuType,
     channel,
     amount,
     currency,
     amountActual: result.amountActual,
+    topupAmountUsd,
     status: "pending",
     upstreamTradeId: result.upstreamTradeId,
     upstreamPaymentUrl: result.paymentUrl,
@@ -252,11 +304,13 @@ export const createOrderHandler = async (
 
   return jsonResponse(201, {
     orderId,
-    planId,
+    skuType,
+    planId: type === 'plan' ? planId : undefined,
     channel,
     amount,
     currency,
     amountActual: result.amountActual,
+    topupAmountUsd,
     paymentUrl: result.paymentUrl,
     qrCodeUrl: result.qrCodeUrl,
     expiresAt: result.expiresAt,
