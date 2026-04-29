@@ -386,7 +386,7 @@ function ChannelOption({
  *
  * Plus a live countdown so habit-forming return visits make sense.
  */
-function UltraSoldOutPage({
+export function UltraSoldOutPage({
   price,
 }: {
   price: { price: string; period: string };
