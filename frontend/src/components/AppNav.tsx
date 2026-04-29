@@ -167,6 +167,48 @@ function AvatarMenu() {
 }
 
 /**
+ * Slim mono breadcrumb shared by all secondary pages. Items render in
+ * order; the last one (current page) is plain text, earlier ones are
+ * clickable Links. Pass `{ label, to }` for clickable, `{ label }` only
+ * for the trailing current-page label.
+ *
+ *   <Breadcrumb items={[
+ *     { label: '控制台', to: '/console' },
+ *     { label: '用量' },
+ *   ]} />
+ *
+ * Centralizing this here means changing the divider color or font tracking
+ * once propagates to every secondary page automatically.
+ */
+export interface BreadcrumbItem {
+  label: string;
+  /** When omitted, item renders as the current-page label (non-clickable). */
+  to?: string;
+}
+
+export function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
+  return (
+    <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
+      {items.map((item, i) => {
+        const isLast = i === items.length - 1;
+        return (
+          <span key={i}>
+            {item.to ? (
+              <Link to={item.to} className="hover:text-ink transition-colors">
+                {item.label}
+              </Link>
+            ) : (
+              <span className="text-ink-2">{item.label}</span>
+            )}
+            {!isLast && <span className="mx-2 text-[#D9CEC2]">/</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Mono uppercase section label with a short ink prefix line. Used across
  * Dashboard / UsageHistory / Settings as a lightweight section divider that
  * doesn't compete with the cards under it.

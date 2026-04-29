@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AppNav } from '../components/AppNav';
+import { AppNav, Breadcrumb } from '../components/AppNav';
 import { api, type BillingOrder, type BillingStatus } from '../lib/api';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
@@ -17,9 +17,12 @@ const PLAN_LABEL: Record<string, string> = {
   ultra: 'Ultra',
 };
 
+// Channel labels are intentionally generic — the epusdt hosted page lets
+// the user pick token (USDT / USDC) and chain themselves, so locking the
+// label to "USDT-TRC20" misrepresents the actual options.
 const CHANNEL_LABEL: Record<string, string> = {
   xunhupay: '支付宝',
-  epusdt: 'USDT-TRC20',
+  epusdt: '稳定币',
 };
 
 export default function OrderStatus() {
@@ -225,13 +228,13 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-bg pb-12">
       <AppNav current="console" />
       <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-6">
-        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">订单</span>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: '控制台', to: '/console' },
+            { label: '套餐', to: '/pricing' },
+            { label: '订单' },
+          ]}
+        />
         {children}
       </main>
     </div>

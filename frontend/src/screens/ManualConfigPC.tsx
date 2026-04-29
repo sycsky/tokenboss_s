@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { TerminalBlock } from '../components/TerminalBlock';
-import { AppNav } from '../components/AppNav';
+import { AppNav, Breadcrumb } from '../components/AppNav';
 import { CompatRow, type AgentMark } from '../components/CompatRow';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import hermesIcon from '../assets/agents/hermes.png';
@@ -296,11 +296,7 @@ export default function ManualConfigPC() {
             phrase. Users land here because the spell didn't auto-install,
             so the page leads with "manual" framing — the spell falls to
             the bottom as a fallback they can still grab. */}
-        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
-          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
-          <span className="mx-2 text-[#D9CEC2]">/</span>
-          <span className="text-ink-2">手动接入</span>
-        </div>
+        <Breadcrumb items={[{ label: '控制台', to: '/console' }, { label: '手动接入' }]} />
         <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] mb-2 font-bold">
           MANUAL SETUP · 按步骤接通
         </div>

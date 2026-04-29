@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type UsageDetailResponse } from '../lib/api';
-import { AppNav, SectionLabel } from '../components/AppNav';
+import { AppNav, Breadcrumb, SectionLabel } from '../components/AppNav';
 import { BalancePill } from '../components/BalancePill';
 import { ConsumeChart24h, type HourBucket } from '../components/ConsumeChart24h';
 import { UsageRow } from '../components/UsageRow';
@@ -47,6 +47,8 @@ export default function UsageHistory() {
       <AppNav current="history" />
 
       <main className="max-w-[1340px] mx-auto px-5 sm:px-9 pt-6">
+        <Breadcrumb items={[{ label: '控制台', to: '/console' }, { label: '使用历史' }]} />
+
         {/* Hero row — h1 left, BalancePill right */}
         <div className="flex items-end justify-between mb-9 flex-wrap gap-4">
           <div>
