@@ -328,16 +328,12 @@ export default function Dashboard() {
                   // primary, 充值额度 as a small link to its right (single row,
                   // no wasted horizontal space). Desktop: revert to inline.
                   <div className="w-full flex items-center justify-end gap-4 sm:w-auto sm:ml-auto">
-                    <button
-                      type="button"
-                      onClick={() => setContactReason('topup')}
-                      // py-2 px-1 expands the click area to ~44px tall on
-                      // touch without changing visual weight (text stays
-                      // 12px). Apple HIG minimum tap target.
+                    <Link
+                      to="/billing/topup"
                       className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
                     >
                       充值额度
-                    </button>
+                    </Link>
                     <button
                       type="button"
                       onClick={() => setContactReason('renew')}
@@ -360,15 +356,23 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <Link
-                  to="/pricing"
-                  className={
-                    slockBtn('secondary') +
-                    ' w-full text-center sm:w-auto sm:ml-auto'
-                  }
-                >
-                  开通套餐 →
-                </Link>
+                <div className="w-full flex flex-col items-stretch sm:flex-row sm:items-center sm:w-auto sm:ml-auto gap-2 sm:gap-4">
+                  <Link
+                    to="/billing/topup"
+                    className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0 text-center sm:text-left"
+                  >
+                    充值额度
+                  </Link>
+                  <Link
+                    to="/pricing"
+                    className={
+                      slockBtn('secondary') +
+                      ' w-full text-center sm:w-auto'
+                    }
+                  >
+                    开通套餐 →
+                  </Link>
+                </div>
               </>
             )}
           </div>

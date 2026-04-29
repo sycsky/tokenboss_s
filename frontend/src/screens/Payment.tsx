@@ -115,6 +115,12 @@ export default function Payment() {
               联系客服 →
             </button>
             <Link
+              to="/billing/topup"
+              className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
+            >
+              + 加买充值额度
+            </Link>
+            <Link
               to="/console"
               className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
             >
