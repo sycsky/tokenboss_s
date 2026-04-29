@@ -3,14 +3,12 @@
  *
  * The caller's `Authorization: Bearer sk-xxx` header is passed through to
  * newapi verbatim; newapi owns key verification, quota enforcement, and
- * usage logging.
+ * usage logging. All callers (trial, default, plus/super/ultra, anonymous)
+ * are treated identically here — newapi's per-group quota gates the rest.
  *
- * The only product-level decision TokenBoss makes here is: if the caller's
- * key belongs to a free-tier user (via the `api_key_index` lookup), we
- * silently rewrite any non-eco model to an eco one before forwarding.
- * Paid / unknown callers pass through unchanged.
- *
- * The other reshaping we do is:
+ * The reshaping we do is:
+ *   - Resolve TokenBoss virtual profiles (auto / eco / premium / agentic)
+ *     into concrete model ids via `router/resolve`
  *   - Strip ClawRouter's `provider/` model prefix for flat-namespace
  *     aggregators (unless `UPSTREAM_PRESERVE_MODEL_PREFIX=1`)
  *   - Synthesize a fake response when `MOCK_UPSTREAM=1` (local dev)
@@ -18,12 +16,9 @@
 
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { Agent } from "undici";
-import { createHash } from "node:crypto";
 
 import { isMockMode } from "./upstream.js";
 import { detectVirtualProfile, resolveVirtualModel } from "../router/resolve.js";
-import { getUser, getUserIdByKeyHash } from "./store.js";
-import { newapi } from "./newapi.js";
 
 /**
  * Dedicated undici dispatcher for upstream calls.
@@ -90,85 +85,6 @@ export function extractKeyHint(authHeader: string | undefined): string | null {
   return token.slice(-8);
 }
 
-/** Pull the raw bearer token from `Authorization` (case-insensitive). */
-function extractBearer(authHeader: string | undefined): string | null {
-  if (!authHeader) return null;
-  const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
-  return m ? m[1].trim() : authHeader.trim();
-}
-
-/**
- * Resolve the calling user's effective tier via the api_key_index reverse
- * lookup, then read the live group from newapi. V3 ("newapi-as-truth"):
- * we don't trust TokenBoss DB plan because newapi auto-rolls expired
- * subscriptions back to `default` and we have no cron syncing the local
- * cache. Each chat call adds one extra `newapi.getUser` to be safe.
- *
- * Returns:
- *   - `{ known: false }` — the key isn't in api_key_index (anonymous /
- *     direct-to-newapi caller). chatProxyCore passes through unmodified.
- *   - `{ known: true, group: 'trial' }` — trial subscriber. Eco-rewrite.
- *   - `{ known: true, group: 'plus'|'super'|'ultra' }` — paid. No rewrite.
- *   - `{ known: true, group: 'default' }` — known user, no active sub
- *     (newapi rolled them back). Eco-rewrite.
- *   - `{ known: true, group: null }` — newapi lookup failed; fall back to
- *     pass-through to avoid blocking the user on a transient newapi blip.
- */
-async function resolveCallerPlan(
-  authHeader: string | undefined,
-): Promise<{ known: boolean; group: string | null }> {
-  const token = extractBearer(authHeader);
-  if (!token) return { known: false, group: null };
-  try {
-    const hash = createHash("sha256").update(token).digest("hex");
-    const userId = getUserIdByKeyHash(hash);
-    if (!userId) return { known: false, group: null };
-    const user = await getUser(userId);
-    if (!user || user.newapiUserId == null) {
-      return { known: true, group: null };
-    }
-    try {
-      const nu = await newapi.getUser(user.newapiUserId);
-      return { known: true, group: nu.group ?? null };
-    } catch (err) {
-      console.warn(`[chatProxy] newapi.getUser failed for ${userId}: ${(err as Error).message}`);
-      return { known: true, group: null };
-    }
-  } catch (err) {
-    console.warn(`[chatProxy] resolveCallerPlan failed: ${(err as Error).message}`);
-    return { known: false, group: null };
-  }
-}
-
-/**
- * Free-tier model rewrite. Mutates `body.model` in place when needed.
- *
- * Whenever the request resolves to a non-eco tier we hand it off to the
- * `eco` virtual profile, which `resolveVirtualModel` then resolves via
- * `config/router-tiers.json` `ecoTiers`. This keeps the eco model catalog
- * in ONE place (the router config) instead of TokenBoss picking a model
- * out of thin air.
- *
- * Cases:
- *   - Already eco virtual or eco-tier concrete model → no change
- *   - Non-eco virtual (`auto` / `premium` / `agentic`) → "eco"
- *   - Non-eco concrete model (opus / sonnet / o-series / gpt-5)  → "eco"
- *
- * This is silent on purpose — the user's product spec says free users
- * always get eco, regardless of what their tool requested.
- */
-function rewriteForFreeUser(body: Record<string, unknown>): void {
-  if (typeof body.model !== "string") return;
-  const original = body.model;
-
-  const profile = detectVirtualProfile(original);
-  if (profile === "eco") return;
-  if (!profile && inferTierFromModelId(original) === "eco") return;
-
-  body.model = "eco";
-  console.log(`[free-rewrite] ${original} → eco`);
-}
-
 function getNewapiBase(): string | null {
   const raw = process.env.NEWAPI_BASE_URL?.trim().replace(/\/+$/, "");
   return raw && raw.length > 0 ? raw : null;
@@ -197,16 +113,6 @@ export async function streamChatCore(
       `Could not parse JSON body: ${String(err)}`,
     );
     return;
-  }
-
-  // ---------- Trial-tier model rewrite (silent) ----------
-  // Look up the caller's live newapi group. Known users in trial / default
-  // groups get any non-eco model rewritten down to eco. Paid groups
-  // (plus/super/ultra) pass through. Unknown callers pass through too —
-  // newapi gates them by remain_quota.
-  const caller = await resolveCallerPlan(authHeader);
-  if (caller.known && (caller.group === "trial" || caller.group === "default")) {
-    rewriteForFreeUser(body);
   }
 
   // Resolve virtual models (auto/eco/premium/agentic) — before any prefix
