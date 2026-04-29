@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AppNav } from '../components/AppNav';
 import { ChannelOption } from '../components/ChannelOption';
@@ -38,6 +38,11 @@ export default function Topup() {
     return n;
   }
   const amount = resolveAmount();
+
+  // Clear stale submit error as soon as the user edits any input.
+  useEffect(() => {
+    setError(null);
+  }, [channel, preset, customAmountStr]);
 
   async function submit() {
     if (amount == null) {
@@ -124,10 +129,14 @@ export default function Topup() {
 
           {preset === 'custom' && (
             <div className={`${card} p-4 mb-3`}>
-              <label className="block font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
+              <label
+                htmlFor="topup-amount"
+                className="block font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2"
+              >
                 金额（{symbol}，{MIN_AMOUNT}-{MAX_AMOUNT} 的整数）
               </label>
               <input
+                id="topup-amount"
                 type="number"
                 inputMode="numeric"
                 step={1}
@@ -135,9 +144,19 @@ export default function Topup() {
                 max={MAX_AMOUNT}
                 value={customAmountStr}
                 onChange={(e) => setCustomAmountStr(e.target.value)}
+                aria-invalid={customAmountStr.trim() !== '' && amount == null}
+                aria-describedby={customAmountStr.trim() !== '' && amount == null ? 'topup-amount-error' : undefined}
                 className="w-full font-mono text-[18px] font-bold p-2 border-2 border-ink rounded bg-white"
                 placeholder={`${MIN_AMOUNT}`}
               />
+              {customAmountStr.trim() !== '' && amount == null && (
+                <div
+                  id="topup-amount-error"
+                  className="mt-2 font-mono text-[11px] text-red-700"
+                >
+                  金额必须是 {MIN_AMOUNT}-{MAX_AMOUNT} 之间的整数
+                </div>
+              )}
             </div>
           )}
 
@@ -178,8 +197,10 @@ export default function Topup() {
           >
             {submitting
               ? '生成订单中…'
-              : amount == null
+              : preset === 'custom' && customAmountStr.trim() === ''
               ? '请输入金额'
+              : amount == null
+              ? '金额无效'
               : `去付款 · ${symbol}${amount}`}
           </button>
         </div>
