@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppNav } from '../components/AppNav';
 import { TIERS, tierPrice } from '../lib/pricing';
+import { ULTRA_DROP, useDailyCountdown } from '../lib/dropSchedule';
 import { api, type BillingChannel, type BillingPlanId, type BucketRecord } from '../lib/api';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 
@@ -149,6 +150,15 @@ export default function Payment() {
   // what's shown here.
   const displayCurrency = channel === 'epusdt' ? 'usdc' : 'rmb';
   const price = tierPrice(plan, displayCurrency);
+
+  // Direct-nav guard for sold-out tiers — Plans.tsx hides the CTA, but a
+  // bookmarked or shared /billing/pay?plan=ultra URL would otherwise still
+  // POST to the API. Backend also returns 410; this page is the marketing
+  // surface that explains *why* the tier is gated and gives users a
+  // reason to come back tomorrow.
+  if (plan.soldOut) {
+    return <UltraSoldOutPage price={price} />;
+  }
 
   async function submit() {
     if (!planId) return;
@@ -362,5 +372,175 @@ function ChannelOption({
         {subtitle}
       </div>
     </button>
+  );
+}
+
+/**
+ * Sold-out / scheduled-drop landing page for Ultra. Built on three moves:
+ *   1. WHO (personal) — name the verticals where this tier actually pays
+ *      off (research, finance, regulated domains). A reader from those
+ *      fields sees themselves; everyone else gets a clear "skip me".
+ *   2. WHAT (purpose) — both Ultra differentiators: GPT-5.5 Pro full-power
+ *      Codex AND Anthropic native API direct (Claude without translation).
+ *   3. WHY GATED (trust) — the real cost economics behind 8 slots/day.
+ *
+ * Plus a live countdown so habit-forming return visits make sense.
+ */
+function UltraSoldOutPage({
+  price,
+}: {
+  price: { price: string; period: string };
+}) {
+  // 3-phase live state — before / transitioning / passed. Auto-rolls
+  // every second; no manual refresh needed. The brief 2-5s transition
+  // window keeps the daily flip from feeling scripted.
+  const { countdown, phase } = useDailyCountdown(
+    ULTRA_DROP.preemptHourCST,
+    ULTRA_DROP.preemptMinuteCST,
+  );
+
+  return (
+    <div className="min-h-screen bg-bg pb-12">
+      <AppNav current="console" />
+      <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-6">
+        {/* Crumbs */}
+        <div className="font-mono text-[11px] tracking-[0.06em] text-[#A89A8D] mb-4">
+          <Link to="/console" className="hover:text-ink transition-colors">控制台</Link>
+          <span className="mx-2 text-[#D9CEC2]">/</span>
+          <Link to="/pricing" className="hover:text-ink transition-colors">套餐</Link>
+          <span className="mx-2 text-[#D9CEC2]">/</span>
+          <span className="text-ink-2">Ultra · 满血档</span>
+        </div>
+
+        <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
+          ULTRA · 每日 {ULTRA_DROP.preemptHourCST}:{ULTRA_DROP.preemptMinuteCST} 开放 {ULTRA_DROP.slotsPerDay} 席
+        </div>
+        <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-4">
+          给你的 Agent，<br />配一档满血模型。
+        </h1>
+        <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
+          {price.price} <span className="text-ink-3">{price.period}</span> ·
+          {phase === 'before'
+            ? ` Super 用户即将抢购今日 ${ULTRA_DROP.slotsPerDay} 席。`
+            : phase === 'transitioning'
+            ? ` Super 用户正在抢购今日 ${ULTRA_DROP.slotsPerDay} 席…`
+            : ` 今日 ${ULTRA_DROP.slotsPerDay} 席已被 Super 用户抢完。`}
+        </p>
+
+        {/* Live state — countdown ticks except during the 2-5s transition
+            window, where digits are replaced by an animated "抢购中…" text.
+            All three phase states drive the same DOM, so React doesn't need
+            a manual refresh to swap them. */}
+        <section className="bg-surface border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] p-6 mb-3">
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
+            {phase === 'transitioning'
+              ? 'SUPER 抢购中'
+              : phase === 'passed'
+              ? '距离明日开放'
+              : '距离今日开放'}
+          </div>
+          {phase === 'transitioning' ? (
+            <div className="font-mono text-[28px] md:text-[34px] font-bold tracking-tight text-accent leading-none animate-pulse">
+              抢购中…
+            </div>
+          ) : (
+            <div className="font-mono text-[36px] md:text-[44px] font-bold tracking-tight text-ink tabular-nums leading-none">
+              {countdown}
+            </div>
+          )}
+          <div className="mt-3 font-mono text-[11.5px] text-ink-3 leading-relaxed">
+            每日 {ULTRA_DROP.preemptHourCST}:{ULTRA_DROP.preemptMinuteCST}（北京时间）准点开放 ·
+            通常 1 分钟内抢完 · 建议设个闹钟
+          </div>
+        </section>
+
+        {/* Super-tier upgrade priority — strategic hook to push Plus users
+            toward Super (Super becomes the obvious step toward Ultra). */}
+        <section className="bg-lime-stamp border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] p-4 mb-8">
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-lime-stamp-ink font-bold mb-1">
+            SUPER 用户专属
+          </div>
+          <div className="text-[13.5px] text-ink leading-relaxed">
+            <strong className="font-semibold">每日 {ULTRA_DROP.preemptHourCST}:{ULTRA_DROP.preemptMinuteCST} 提前 5 分钟独占抢购窗口。</strong>
+            {ULTRA_DROP.hourCST}:00 后剩余名额才对所有人开放 ——
+            <span className="text-ink-2">从 Super 升 Ultra，比从 Plus 升要顺手很多。</span>
+          </div>
+        </section>
+
+        {/* WHO — speak to specific verticals so the reader sees themselves */}
+        <section className="mb-8">
+          <h2 className="text-[20px] font-bold tracking-tight mb-3">
+            谁真的需要 Ultra
+          </h2>
+          <p className="text-[14px] text-text-secondary leading-relaxed mb-3 max-w-[560px]">
+            如果你的 Agent 在做下面这些事 —— Ultra 才值得抢：
+          </p>
+          <ul className="text-[14px] text-text-secondary leading-relaxed mb-4 max-w-[560px] space-y-1.5">
+            <li>· <strong className="text-ink font-semibold">科研 Agent</strong> 跑文献综述 / 跨论文推理 / 实验方案对比</li>
+            <li>· <strong className="text-ink font-semibold">金融 Agent</strong> 跑策略回测 / 合规审计 / 风险建模</li>
+            <li>· <strong className="text-ink font-semibold">法律 / 医疗 / 工程 Agent</strong>，输出错一行就是事故</li>
+            <li>· 任何不能容忍模型质量降级的生产工作流</li>
+          </ul>
+          <p className="text-[13.5px] text-ink-3 leading-relaxed max-w-[560px]">
+            如果你只是日常 chat / 写脚本，Plus 或 Super 已经够用 —— 不要为 Ultra 多花钱。
+          </p>
+        </section>
+
+        {/* WHAT — the two real differentiators (model + channel) */}
+        <section className="mb-8">
+          <h2 className="text-[20px] font-bold tracking-tight mb-3">
+            Ultra 给你的两件事
+          </h2>
+          <div className="space-y-4 max-w-[560px]">
+            <div>
+              <div className="font-mono font-bold text-[14px] text-ink mb-1">
+                GPT-5.5 Pro · OpenAI 满血 Codex 推理引擎
+              </div>
+              <p className="text-[13.5px] text-text-secondary leading-relaxed">
+                其他档位最多到 GPT-5.5。长链路任务、多步推理收敛能力，
+                差就差在 Pro 这一档。
+              </p>
+            </div>
+            <div>
+              <div className="font-mono font-bold text-[14px] text-ink mb-1">
+                Anthropic 官方 API 直连 · Claude 不经过转接
+              </div>
+              <p className="text-[13.5px] text-text-secondary leading-relaxed">
+                其他档位走 Antigravity / Azure 转接渠道，对生产工作流来说
+                是不可控的尾部风险 —— Ultra 的 Claude 调用直达原厂。
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-[14px] text-ink leading-relaxed max-w-[560px]">
+            你的 Agent 调用什么模型，跑出来就是原版那一个 —— 不会被我们悄悄换成性价比变种。
+          </p>
+        </section>
+
+        {/* WHY GATED — economic transparency builds trust */}
+        <section className="mb-10">
+          <h2 className="text-[20px] font-bold tracking-tight mb-3">
+            为什么我们每天只放 {ULTRA_DROP.slotsPerDay} 席
+          </h2>
+          <p className="text-[14px] text-text-secondary leading-relaxed max-w-[560px]">
+            两条线都贵 —— GPT-5.5 Pro 推理成本是性价比款的 3 - 8 倍，
+            Anthropic 官方 API 是转接渠道的 3 倍以上。少量 Ultra 用户的全额成本我们能扛，
+            但放开闸只剩两条路：涨价，或者偷偷换成性价比变种。那就违背了「原版」这两个字 ——
+            所以名额卡死在每天 {ULTRA_DROP.slotsPerDay} 个。
+          </p>
+        </section>
+
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <Link
+            to="/pricing"
+            className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
+          >
+            ← 先看 Plus / Super
+          </Link>
+          <span className="font-mono text-[11.5px] text-ink-3">
+            {phase === 'transitioning' ? 'SUPER 抢购中…' : `下次开放：${countdown}`}
+          </span>
+        </div>
+      </main>
+    </div>
   );
 }

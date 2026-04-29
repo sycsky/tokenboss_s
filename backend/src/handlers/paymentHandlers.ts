@@ -31,7 +31,7 @@ import {
   listOrdersByUser,
   type OrderRecord,
 } from "../lib/store.js";
-import { isPlanId, getPlanPriceCNY, getPlanPriceUSD } from "../lib/plans.js";
+import { PLANS, isPlanId, getPlanPriceCNY, getPlanPriceUSD } from "../lib/plans.js";
 
 // PLAN_PRICE was a frozen snapshot of PLANS[*].priceCNY built at module
 // load — replaced by getPlanPriceCNY() / getPlanPriceUSD(), which read
@@ -154,6 +154,17 @@ export const createOrderHandler = async (
 
   const planId = body.planId;
   const channel = body.channel;
+  // Block sold-out tiers at the API edge — UI hides the CTA, but we don't
+  // trust the client. 410 Gone is the right semantic: the resource (plan)
+  // exists historically but is no longer available for new orders.
+  if (PLANS[planId].soldOut) {
+    return jsonError(
+      410,
+      "plan_unavailable",
+      `${PLANS[planId].displayName} 当前售罄，暂时无法下单。`,
+      "plan_sold_out",
+    );
+  }
   // Channel determines pricing currency:
   //   epusdt   → USD (USDT-TRC20)
   //   xunhupay → CNY (Alipay/WeChat fiat gateway, CNY only)

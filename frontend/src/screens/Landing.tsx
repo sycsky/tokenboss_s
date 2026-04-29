@@ -278,7 +278,6 @@ export default function Landing() {
             ctaText={tierCta.text}
             onCtaClick={tierCta.onClick}
             ctaVariant="secondary"
-            tooltipExtras={plusTier.tooltipExtras}
           />
           <TierCard
             name={superTier.name}
@@ -291,7 +290,6 @@ export default function Landing() {
             onCtaClick={tierCta.onClick}
             ctaVariant="primary"
             featured
-            tooltipExtras={superTier.tooltipExtras}
           />
           <TierCard
             name={ultraTier.name}
@@ -303,8 +301,7 @@ export default function Landing() {
             ctaText={ultraCta.text}
             onCtaClick={ultraCta.onClick}
             ctaVariant={ultraCta.variant}
-            soldOut={ultraCta.soldOut}
-            tooltipExtras={ultraTier.tooltipExtras}
+            soldOutBanner={ultraCta.soldOut ? '今日已抢完 · 明日 9:55 再开' : undefined}
           />
         </div>
       </section>

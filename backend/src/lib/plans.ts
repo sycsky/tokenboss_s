@@ -32,6 +32,11 @@ export interface PlanConfig {
   /** newapi user-group name applied on subscription start. Should match
    *  the corresponding plan's `upgrade_group` field in newapi admin. */
   group: string;
+  /** Marketing-side "sold out" flag. When true, paymentHandlers rejects
+   *  new orders with 410 and the /pricing card renders disabled — used to
+   *  freeze a tier without removing it from the catalog (so existing
+   *  subscribers still resolve, dailyCron still runs, etc.). */
+  soldOut?: boolean;
 }
 
 export const PLANS = {
@@ -41,6 +46,7 @@ export const PLANS = {
     priceUSD: 49,
     durationDays: 28,
     group: "plus",
+    soldOut: false,
   },
   super: {
     displayName: "Super",
@@ -48,6 +54,7 @@ export const PLANS = {
     priceUSD: 119,
     durationDays: 28,
     group: "super",
+    soldOut: false,
   },
   ultra: {
     displayName: "Ultra",
@@ -55,6 +62,7 @@ export const PLANS = {
     priceUSD: 289,
     durationDays: 28,
     group: "ultra",
+    soldOut: true,
   },
 } as const satisfies Record<string, PlanConfig>;
 

@@ -9,8 +9,8 @@ describe('<TierCard>', () => {
       pricePeriod="¥288 / 4 周"
       leverage="×3"
       totalUsd="≈ $840 调用额度"
-      dailyCap="$30 每日 cap"
-      models="Codex 系列"
+      dailyCap="$30 每日 Cap"
+      models={['深度使用 Codex 模型']}
       ctaText="联系客服开通"
     />);
     expect(screen.getByText('Plus')).toBeInTheDocument();
@@ -22,16 +22,16 @@ describe('<TierCard>', () => {
 
   it('shows ★ when featured', () => {
     render(<TierCard
-      name="Super" pricePeriod="¥688/4周" dailyCap="$80/天" models="Claude+Codex"
+      name="Super" pricePeriod="¥688/4周" dailyCap="$80/天" models={['Claude+Codex']}
       ctaText="开通" featured />);
     expect(screen.getByText('★')).toBeInTheDocument();
   });
 
-  it('shows 售罄 + dims when soldOut', () => {
-    const { container } = render(<TierCard
-      name="Ultra" pricePeriod="¥1688/4周" dailyCap="$720/天" models="reasoning"
-      ctaText="名额已满" ctaVariant="disabled" soldOut />);
-    expect(screen.getByText('售罄')).toBeInTheDocument();
-    expect(container.firstChild).toHaveClass('opacity-55');
+  it('renders strong sold-out banner when soldOutBanner is set', () => {
+    render(<TierCard
+      name="Ultra" pricePeriod="¥1688/4周" dailyCap="$720/天" models={['极致使用 Codex 满血版']}
+      ctaText="下次开放 04:23:11" ctaVariant="muted"
+      soldOutBanner="今日 8 席已抢完 · 明日 10:00 再开" />);
+    expect(screen.getByText('今日 8 席已抢完 · 明日 10:00 再开')).toBeInTheDocument();
   });
 });

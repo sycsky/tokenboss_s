@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { api, type BucketRecord } from '../lib/api';
@@ -45,12 +44,6 @@ export default function Settings() {
             value={
               <span className="font-mono text-[13.5px] font-semibold text-ink break-all">
                 {user?.email}
-                <Link
-                  to="/console/account"
-                  className="ml-2 font-sans text-accent text-[11.5px] font-semibold underline underline-offset-2"
-                >
-                  需修改 → 联系客服
-                </Link>
               </span>
             }
           />
