@@ -15,7 +15,6 @@ import Primitive from './screens/Primitive';
 import Payment from './screens/Payment';
 import OrderStatus from './screens/OrderStatus';
 import ManualConfigPC from './screens/ManualConfigPC';
-import Skill from './screens/Skill';
 import { RequireAuth } from './components/RequireAuth';
 import { CurrencyProvider } from './lib/currency';
 
@@ -44,7 +43,6 @@ export default function App() {
       <Route path="/billing/success" element={<RequireAuth><OrderStatus /></RequireAuth>} />
 
       <Route path="/install/manual" element={<ManualConfigPC />} />
-      <Route path="/skill" element={<Skill />} />
     </Routes>
     </CurrencyProvider>
   );
