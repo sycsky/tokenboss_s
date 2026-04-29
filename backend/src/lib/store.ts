@@ -98,19 +98,29 @@ function ensureDir(filePath: string) {
  * Reads SQLITE_PATH (test override) or DATABASE_PATH (production) from env.
  * Safe to call multiple times — closes any existing connection first.
  */
+// Track the path of the currently open connection so re-init on the same
+// path (common in tests that call init() to trigger migrations) skips
+// close+reopen and instead runs migrations on the existing connection.
+let _currentDbPath: string | null = null;
+
 export function init(): void {
   const dbPath =
     process.env.SQLITE_PATH ?? process.env.DATABASE_PATH ?? "data/tokenboss.db";
 
-  if (db) {
-    db.close();
-  }
+  if (db && _currentDbPath === dbPath) {
+    // Same path already open — just re-run schema/migrations below.
+  } else {
+    if (db) {
+      db.close();
+    }
 
-  if (dbPath !== ":memory:") {
-    ensureDir(dbPath);
-  }
+    if (dbPath !== ":memory:") {
+      ensureDir(dbPath);
+    }
 
-  db = new Database(dbPath);
+    db = new Database(dbPath);
+    _currentDbPath = dbPath;
+  }
 
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
@@ -258,6 +268,17 @@ export function init(): void {
   try { db.exec(`ALTER TABLE orders ADD COLUMN topupAmountUsd REAL`); } catch {}
   try { db.exec(`ALTER TABLE orders ADD COLUMN settleStatus TEXT`); } catch {}
 
+  // Rename legacy plan ids → new tier names FIRST, so the backfill below
+  // only ever sees canonical planId values ('plus'|'super'|'ultra').
+  db.exec(`
+    UPDATE orders SET planId = CASE planId
+      WHEN 'basic'    THEN 'plus'
+      WHEN 'standard' THEN 'super'
+      WHEN 'pro'      THEN 'ultra'
+      ELSE planId
+    END
+  `);
+
   // Backfill skuType from legacy planId for any existing rows.
   // Idempotent: only overwrites NULL skuType, leaves explicit values alone.
   db.exec(`
@@ -270,16 +291,6 @@ export function init(): void {
        END
      WHERE skuType IS NULL AND planId IS NOT NULL
   `);
-
-  // Rename legacy plan ids → new tier names (kept for safety).
-  db.exec(`
-    UPDATE orders SET planId = CASE planId
-      WHEN 'basic'    THEN 'plus'
-      WHEN 'standard' THEN 'super'
-      WHEN 'pro'      THEN 'ultra'
-      ELSE planId
-    END
-  `);
 }
 
 // Initialise on module load (production default path).
@@ -287,6 +298,21 @@ export function init(): void {
 init();
 
 // ---------- Row → Record mappers ----------
+
+const VALID_SKU_TYPES = ['plan_plus', 'plan_super', 'plan_ultra', 'topup'] as const;
+type ValidSkuType = (typeof VALID_SKU_TYPES)[number];
+
+function deriveSkuType(skuType: string | undefined, planId: string | undefined): ValidSkuType {
+  if (skuType && (VALID_SKU_TYPES as readonly string[]).includes(skuType)) {
+    return skuType as ValidSkuType;
+  }
+  if (planId === 'plus') return 'plan_plus';
+  if (planId === 'super') return 'plan_super';
+  if (planId === 'ultra') return 'plan_ultra';
+  // Last-resort default: any other state means migration didn't fully run.
+  // 'plan_plus' is the safest fallback (lowest privilege paid tier).
+  return 'plan_plus';
+}
 
 function rowToUser(row: Record<string, unknown>): UserRecord {
   return {
@@ -311,10 +337,7 @@ function rowToOrder(row: Record<string, unknown>): OrderRecord {
   return {
     orderId: row.orderId as string,
     userId: row.userId as string,
-    // Backfill rule: if the row predates the skuType column AND somehow
-    // also has no planId, treat as plan_plus (safest historical default).
-    skuType: ((row.skuType as string) ??
-      (row.planId ? `plan_${row.planId}` : 'plan_plus')) as OrderRecord['skuType'],
+    skuType: deriveSkuType(row.skuType as string | undefined, row.planId as string | undefined),
     channel: row.channel as PaymentChannel,
     // DB column historically named `amountCNY` for legacy reasons.
     amount: row.amountCNY as number,

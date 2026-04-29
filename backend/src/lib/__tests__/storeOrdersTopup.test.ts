@@ -54,3 +54,29 @@ describe('orders table — topup schema', () => {
     expect(back?.topupAmountUsd).toBeUndefined();
   });
 });
+
+describe('orders table — backfill migration', () => {
+  it('backfills skuType from legacy planId on re-init', async () => {
+    // Insert as if from old schema (skuType column exists but is NULL)
+    db.prepare(
+      `INSERT INTO orders (orderId, userId, planId, channel, amountCNY, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run('legacy_super', 'u_test_bf', 'super', 'xunhupay', 688, 'CNY', 'paid', new Date().toISOString());
+
+    init();
+
+    const back = await getOrder('legacy_super');
+    expect(back?.skuType).toBe('plan_super');
+  });
+
+  it('does not overwrite an already-populated skuType on re-init', async () => {
+    db.prepare(
+      `INSERT INTO orders (orderId, userId, planId, skuType, topupAmountUsd, channel, amountCNY, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    ).run('explicit_topup', 'u_test_bf', null, 'topup', 50, 'xunhupay', 50, 'CNY', 'paid', new Date().toISOString());
+
+    init();
+
+    const back = await getOrder('explicit_topup');
+    expect(back?.skuType).toBe('topup');
+    expect(back?.topupAmountUsd).toBe(50);
+  });
+});
