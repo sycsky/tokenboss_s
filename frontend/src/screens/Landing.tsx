@@ -163,8 +163,10 @@ export default function Landing() {
   const ultraCta = isLoggedIn
     ? { text: '名额已满', onClick: undefined, soldOut: true, variant: 'disabled' as const }
     : { text: '免费开始 →', onClick: goRegister, soldOut: false, variant: 'secondary' as const };
-  const standardCta = isLoggedIn
-    ? { text: '联系客服充值', onClick: undefined }
+  const standardCta:
+    | { text: string; onClick: () => void; href?: undefined }
+    | { text: string; href: string; onClick?: undefined } = isLoggedIn
+    ? { text: '立即充值 →', href: '/billing/topup' }
     : { text: '免费开始 →', onClick: goRegister };
 
   return (
@@ -327,12 +329,19 @@ export default function Landing() {
               {std.minTopup}
             </div>
           </div>
-          {standardCta.onClick ? (
+          {standardCta.href ? (
+            <Link
+              to={standardCta.href}
+              className={slockBtn('secondary')}
+            >
+              {standardCta.text}
+            </Link>
+          ) : standardCta.onClick ? (
             <button onClick={standardCta.onClick} className={slockBtn('secondary')}>
               {standardCta.text}
             </button>
           ) : (
-            <span className={slockBtn('secondary') + ' cursor-default'}>
+            <span className={slockBtn('secondary') + ' opacity-60 cursor-default'}>
               {standardCta.text}
             </span>
           )}

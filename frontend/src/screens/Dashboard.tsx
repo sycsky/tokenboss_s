@@ -356,7 +356,7 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div className="w-full flex flex-col items-stretch sm:flex-row sm:items-center sm:w-auto sm:ml-auto gap-2 sm:gap-4">
+                <div className="w-full flex flex-col-reverse items-stretch sm:flex-row sm:items-center sm:w-auto sm:ml-auto gap-2 sm:gap-4">
                   <Link
                     to="/billing/topup"
                     className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0 text-center sm:text-left"
