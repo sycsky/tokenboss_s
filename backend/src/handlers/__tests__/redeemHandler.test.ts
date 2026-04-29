@@ -120,6 +120,23 @@ describe('redeemHandler', () => {
     }
   });
 
+  it('422 + non-2xx status when newapi returns 200 + "Redemption failed" (real i18n)', async () => {
+    // Real-world regression: newapi's MsgRedeemFailed renders as
+    // "Redemption failed, please try again later" (English locale).
+    // The earlier regex /redeem/i missed "Redemption" (different stem),
+    // and using err.status passed 200 through as the response status —
+    // both bugs combined sent the frontend a "success-shaped" body,
+    // which crashed SuccessView on `usdAdded.toFixed`. Lock it down.
+    redeemCodeMock.mockRejectedValue(
+      new NewapiError(200, 'Redemption failed, please try again later'),
+    );
+    const res = await run({ code: 'INVALID-XYZ' });
+    expect(res.statusCode).toBe(422);
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    const body = JSON.parse(res.body as string);
+    expect(body.error.type).toBe('invalid_code');
+  });
+
   it('502 upstream_error for non-redeem newapi errors (e.g., 500)', async () => {
     redeemCodeMock.mockRejectedValue(
       new NewapiError(500, 'database connection lost'),

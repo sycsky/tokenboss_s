@@ -145,14 +145,22 @@ export const redeemHandler = async (
     });
   } catch (err) {
     if (err instanceof NewapiError) {
-      // newapi returns 200+success=false for "invalid code" — we throw a
-      // NewapiError with the upstream message preserved. Treat anything
-      // that looks like a user-input failure as 422 (semantic 4xx) rather
-      // than the raw status (which would 200 → confusing).
+      // newapi returns HTTP 200 + success=false for "invalid code"; we
+      // re-throw as NewapiError with the upstream message preserved.
+      // Crucial: `err.status` may be 200 (the upstream HTTP), so NEVER
+      // pass it through as our response status — we must always return
+      // a 4xx/5xx for the frontend to treat this as an error.
       const msg = err.message;
+      // Accept several Chinese / English wordings newapi uses for the
+      // "code rejected by validation" family. Keep this loose because
+      // newapi's i18n drift would otherwise silently degrade to 502.
       const isUserInputFailure =
-        /redeem|无效|过期|已使用|不存在|invalid|expired|used/i.test(msg);
-      const status = isUserInputFailure ? 422 : err.status || 502;
+        /redeem|redempt|无效|过期|已使用|不存在|invalid|expired|used|失败/i.test(msg);
+      const status = isUserInputFailure
+        ? 422
+        : err.status >= 400
+        ? err.status
+        : 502;
       return jsonError(
         status,
         isUserInputFailure ? "invalid_code" : "upstream_error",
