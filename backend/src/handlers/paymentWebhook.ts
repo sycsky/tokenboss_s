@@ -19,14 +19,15 @@ import type {
 
 import { epusdtFromEnv } from "../lib/payment/epusdt.js";
 import { xunhupayFromEnv } from "../lib/payment/xunhupay.js";
-import type { PaymentChannelClient } from "../lib/payment/types.js";
+import type { OrderRecord, PaymentChannelClient } from "../lib/payment/types.js";
 import {
   getOrder,
   getUser,
   markOrderPaidIfPending,
   markOrderStatus,
+  markOrderSettleStatus,
 } from "../lib/store.js";
-import { isPlanId, getNewapiPlanId } from "../lib/plans.js";
+import { getNewapiPlanId, skuTypeToPlanId } from "../lib/plans.js";
 import { newapi, NewapiError } from "../lib/newapi.js";
 
 function textResponse(
@@ -45,7 +46,6 @@ function parseBody(event: APIGatewayProxyEventV2): Record<string, unknown> | nul
     const raw = event.isBase64Encoded
       ? Buffer.from(event.body ?? "", "base64").toString("utf8")
       : (event.body ?? "");
-    if (!raw) return null;
 
     // epusdt sends application/json. Form-encoded fallback is here for
     // future channels (xunhupay's webhook is form-encoded).
@@ -56,11 +56,15 @@ function parseBody(event: APIGatewayProxyEventV2): Record<string, unknown> | nul
     ).toLowerCase();
 
     if (ct.includes("application/x-www-form-urlencoded")) {
+      // Empty body is valid for form-encoded (no parameters) — return {}
+      // rather than null so downstream verifyCallback can still run.
       const params = new URLSearchParams(raw);
       const obj: Record<string, unknown> = {};
       for (const [k, v] of params.entries()) obj[k] = v;
       return obj;
     }
+
+    if (!raw) return null;
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
@@ -129,10 +133,19 @@ async function processWebhook(
       console.info(`${tag} order settled`, {
         orderId: order.orderId,
         userId: order.userId,
-        planId: order.planId,
+        skuType: order.skuType,
         amountActual: verified.amountActual,
       });
-      await applyPlanToUser(order.userId, order.planId, channel);
+      if (order.skuType === 'topup') {
+        await applyTopupToUser(order, channel);
+      } else {
+        const planId = skuTypeToPlanId(order.skuType);
+        if (planId) {
+          await applyPlanToUser(order.userId, planId, channel);
+        } else {
+          console.error(`${tag} unknown skuType on settled order: ${order.skuType}`);
+        }
+      }
     }
   }
 
@@ -172,14 +185,10 @@ export const xunhupayWebhookHandler = async (
  */
 async function applyPlanToUser(
   userId: string,
-  planId: string,
+  planId: import('../lib/plans.js').PlanId,
   channel: string,
 ): Promise<void> {
   const tag = `[webhook/${channel}]`;
-  if (!isPlanId(planId)) {
-    console.error(`${tag} unknown planId on settled order: ${planId}`);
-    return;
-  }
 
   const user = await getUser(userId);
   if (!user || user.newapiUserId == null) {
@@ -241,4 +250,102 @@ async function applyPlanToUser(
       `${tag} newapi.bindSubscription failed for ${userId}: ${msg}`,
     );
   }
+}
+
+/**
+ * Credit a settled topup order's $ to the user via newapi.
+ *
+ * Path: admin-mint a one-shot redemption code worth `topupAmountUsd` →
+ * log in as the user → apply the code via newapi's /api/user/topup. Two
+ * atomic newapi operations replace a single read-modify-write
+ * updateUser, which would race against the user's own consumption.
+ *
+ * Idempotency: caller (markOrderPaidIfPending) already guarantees one
+ * call per order. We additionally short-circuit if `settleStatus` is
+ * already 'settled' — defensive against future code paths.
+ *
+ * Failure mode: webhook still acks 200 (the order IS paid), but
+ * settleStatus is set to 'failed' and a structured error log lets ops
+ * grep by orderId. v1 is manual-recovery; v1.1 may add an auto-retry
+ * cron.
+ */
+async function applyTopupToUser(
+  order: OrderRecord,
+  channel: string,
+): Promise<void> {
+  const tag = `[webhook/${channel}]`;
+
+  if (order.settleStatus === 'settled') {
+    console.info(`${tag} topup already settled, skipping`, { orderId: order.orderId });
+    return;
+  }
+
+  const usd = order.topupAmountUsd;
+  if (!usd || usd <= 0) {
+    console.error(`${tag} topup order has no topupAmountUsd`, {
+      orderId: order.orderId,
+      userId: order.userId,
+    });
+    await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+    return;
+  }
+
+  const user = await getUser(order.userId);
+  if (!user || user.newapiUserId == null || !user.newapiPassword) {
+    console.error(`${tag} topup user has no newapi link`, {
+      orderId: order.orderId,
+      userId: order.userId,
+    });
+    await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+    return;
+  }
+
+  let code: string;
+  try {
+    code = await newapi.createRedemption({
+      name: order.orderId,
+      quotaUsd: usd,
+    });
+  } catch (err) {
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.error(`${tag} createRedemption failed`, {
+      orderId: order.orderId,
+      userId: order.userId,
+      topupAmountUsd: usd,
+      errorMessage: msg,
+      channel,
+    });
+    await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+    return;
+  }
+
+  try {
+    const session = await newapi.loginUser({
+      username: newapiUsername(order.userId),
+      password: user.newapiPassword,
+    });
+    await newapi.redeemCode(session, code);
+    await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'settled' });
+    console.info(`${tag} topup credited`, {
+      orderId: order.orderId,
+      userId: order.userId,
+      topupAmountUsd: usd,
+    });
+  } catch (err) {
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.error(`${tag} topup redeemCode failed`, {
+      orderId: order.orderId,
+      userId: order.userId,
+      topupAmountUsd: usd,
+      errorMessage: msg,
+      channel,
+      mintedCode: code, // include so ops can manually re-redeem if needed
+    });
+    await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+  }
+}
+
+/** Mirrors authHandlers#register — newapi username = userId without u_ prefix. */
+function newapiUsername(userId: string): string {
+  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
 }
