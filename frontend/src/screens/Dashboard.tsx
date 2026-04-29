@@ -21,6 +21,45 @@ import { getCachedKey, setCachedKey } from '../lib/keyCache';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
+/**
+ * Module-level cache for the four Dashboard fetches. Persists across route
+ * unmounts (Dashboard is a route element — react-router throws away the
+ * component instance on every navigation), so a user bouncing between
+ * /console and a sub-page sees an instant render on return: stale state
+ * paints first, the four API calls re-fire in the background and silently
+ * upgrade the UI when fresher numbers arrive (stale-while-revalidate).
+ *
+ * Scoped by `userId` so logout/login in the same SPA session (logout uses
+ * react-router navigate, not a full page reload) doesn't expose the
+ * previous account's buckets / usage / keys to a fresh login. The
+ * Dashboard guard at the top of the component invalidates the cache
+ * whenever the current authenticated userId stops matching the cached
+ * one.
+ */
+interface DashboardCache {
+  /** Auth subject this cache snapshot belongs to. Mismatched user → wipe. */
+  userId?: string;
+  buckets?: BucketRecord[];
+  usage?: UsageDetailResponse;
+  keyHintGroups?: UsageAggregateGroup[];
+  keys?: ProxyKeySummary[];
+  /** Wall-clock ms when the last full refresh completed. Used to decide
+   *  whether the first paint should hide the hero behind a skeleton
+   *  (no cache yet) or render directly with cached values. */
+  cachedAt?: number;
+}
+const dashboardCache: DashboardCache = {};
+
+/** Wipe every field — used when the cache no longer matches the active user. */
+function resetDashboardCache(): void {
+  dashboardCache.userId = undefined;
+  dashboardCache.buckets = undefined;
+  dashboardCache.usage = undefined;
+  dashboardCache.keyHintGroups = undefined;
+  dashboardCache.keys = undefined;
+  dashboardCache.cachedAt = undefined;
+}
+
 function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
   const m = new Map<string, KeyStats>();
   for (const g of groups) {
@@ -37,17 +76,38 @@ function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [buckets, setBuckets] = useState<BucketRecord[]>([]);
-  const [usage, setUsage] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
-  const [keyHintGroups, setKeyHintGroups] = useState<UsageAggregateGroup[]>([]);
-  const [keys, setKeys] = useState<ProxyKeySummary[]>([]);
+
+  // Cross-account safety: if the cache holds another user's snapshot
+  // (logout/login in the same SPA session — react-router navigate doesn't
+  // tear down the JS module), wipe it before we read any defaults below.
+  // Mutating module state during render is fine here — it's idempotent
+  // and React's tree isn't involved. Once `user` resolves the equality
+  // either holds (no-op) or fails (one wipe, then equal forever).
+  if (dashboardCache.userId !== user?.userId) {
+    resetDashboardCache();
+  }
+
+  const [buckets, setBuckets] = useState<BucketRecord[]>(dashboardCache.buckets ?? []);
+  const [usage, setUsage] = useState<UsageDetailResponse>(
+    dashboardCache.usage ?? { records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] },
+  );
+  const [keyHintGroups, setKeyHintGroups] = useState<UsageAggregateGroup[]>(
+    dashboardCache.keyHintGroups ?? [],
+  );
+  const [keys, setKeys] = useState<ProxyKeySummary[]>(dashboardCache.keys ?? []);
   const [keysError, setKeysError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+
+  // True only on the *very first* visit in this browser session — i.e.
+  // when the cache has nothing at all. After the first refresh completes
+  // we never block the UI again; we just silently revalidate in the
+  // background. This is what makes "回到 console" feel instant.
+  const [hydrating, setHydrating] = useState(!dashboardCache.cachedAt);
 
   async function reloadKeys() {
     try {
       const r = await api.listKeys();
       setKeys(r.keys);
+      dashboardCache.keys = r.keys;
       setKeysError(null);
     } catch (e) {
       setKeysError((e as Error).message);
@@ -56,14 +116,30 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      api.getBuckets().then((r) => setBuckets(r.buckets || [])),
+      api.getBuckets().then((r) => {
+        const b = r.buckets || [];
+        setBuckets(b);
+        dashboardCache.buckets = b;
+      }),
       // Recent-call list + balance hero totals — keep small.
-      api.getUsage({ limit: 4 }).then((r) => setUsage(r)),
+      api.getUsage({ limit: 4 }).then((r) => {
+        setUsage(r);
+        dashboardCache.usage = r;
+      }),
       // Per-key stats — server-side GROUP BY keyHint.
-      api.getUsageAggregate('keyHint').then((r) => setKeyHintGroups(r.groups)),
+      api.getUsageAggregate('keyHint').then((r) => {
+        setKeyHintGroups(r.groups);
+        dashboardCache.keyHintGroups = r.groups;
+      }),
       reloadKeys(),
-    ]).finally(() => setLoading(false));
-  }, []);
+    ]).finally(() => {
+      dashboardCache.cachedAt = Date.now();
+      // Stamp the cache with the user it belongs to so the guard above
+      // can detect cross-account drift on the next mount.
+      dashboardCache.userId = user?.userId;
+      setHydrating(false);
+    });
+  }, [user?.userId]);
 
   const keyStats = useMemo(() => shapeKeyStats(keyHintGroups), [keyHintGroups]);
   const noActivity = (usage.totals?.calls ?? 0) === 0;
@@ -194,13 +270,10 @@ export default function Dashboard() {
     await reloadKeys();
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center font-mono text-[#A89A8D]">
-        加载中…
-      </div>
-    );
-  }
+  // No global loading gate — render the layout immediately and let
+  // individual sections handle their own empty / skeleton state. The hero
+  // shows a pulsing skeleton during first hydration (see below) so we
+  // don't flash "Agent 余额 $0.0000" before real bucket data lands.
 
   return (
     <div className="min-h-screen bg-bg pb-12">
@@ -223,7 +296,24 @@ export default function Dashboard() {
                                      v1 has no self-serve upgrade across tiers,
                                      so within-tier renew + wallet topup are
                                      the only meaningful actions.
-              No active subscription → "Agent 余额" + "开通套餐 →". */}
+              No active subscription → "Agent 余额" + "开通套餐 →".
+
+              First-paint skeleton: when `hydrating` (no cache yet) and
+              buckets hasn't loaded, show a muted version of the hero so
+              we don't flash the "no subscription" branch before the
+              real bucket data arrives. */}
+        {hydrating && buckets.length === 0 ? (
+          <div
+            aria-hidden="true"
+            className={
+              'lg:col-span-2 bg-accent/30 border-2 border-ink rounded-lg ' +
+              'shadow-[4px_4px_0_0_#1C1917] mb-5 ' +
+              // Match the real hero's height profile so layout doesn't
+              // jump when the skeleton swaps out.
+              'h-[110px] sm:h-[120px] animate-pulse'
+            }
+          />
+        ) : (
         <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5">
           {/* Mobile: stack column (label/value → chip/days → CTA right-aligned).
               sm+: revert to flex-row with wrap so wide screens get the
@@ -329,6 +419,7 @@ export default function Dashboard() {
             </div>
           )}
         </section>
+        )}
 
         {/* MAIN COL */}
         <div className="space-y-5">
