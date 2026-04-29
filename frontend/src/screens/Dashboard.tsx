@@ -150,8 +150,12 @@ export default function Dashboard() {
   const periodRemaining = isTrial
     ? (subBucket?.totalRemainingUsd ?? 0)
     : (subBucket?.dailyRemainingUsd ?? 0);
-  const periodUsed = Math.max(0, periodTotal - periodRemaining);
-  const periodPct = periodTotal > 0 ? Math.min(100, (periodUsed / periodTotal) * 100) : 0;
+  // Hero progress bar visualizes "how much is LEFT" — full bar at the
+  // start of the period, shrinks as the user spends. Reads more naturally
+  // than a fill-from-empty bar next to a big "今日剩 $X" headline.
+  const periodRemainingPct = periodTotal > 0
+    ? Math.max(0, Math.min(100, (periodRemaining / periodTotal) * 100))
+    : 0;
 
   // Live trial countdown — ticks once a second, only when there's a
   // trial bucket whose expiry is in the future. The hero shows it as a
@@ -289,9 +293,6 @@ export default function Dashboard() {
                   <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
                     <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
                     {periodRemaining.toFixed(4)}
-                    <span className="opacity-60 text-[18px] sm:text-[22px] ml-2">
-                      / ${periodTotal}
-                    </span>
                   </span>
                 </div>
 
@@ -379,7 +380,7 @@ export default function Dashboard() {
               the same thing). */}
           {subBucket && periodTotal > 0 && !noActivity && (
             <div className="mt-4 h-2 bg-white/20 border border-white/40 rounded overflow-hidden">
-              <div className="h-full bg-white" style={{ width: `${periodPct}%` }} />
+              <div className="h-full bg-white" style={{ width: `${periodRemainingPct}%` }} />
             </div>
           )}
         </section>
@@ -407,26 +408,6 @@ export default function Dashboard() {
             </section>
           )}
 
-          {/* Latest call — keeps the dark "live status" feel from before but
-              dressed in Slock-pixel: ink fill + accent-orange hard offset. */}
-          {usage.records?.[0] && (
-            <section className="bg-ink text-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#E8692A] px-4 py-3.5 flex items-center gap-3">
-              <span className="relative flex-shrink-0" aria-hidden="true">
-                <span className="absolute inset-0 bg-[#16A34A]/40 rounded-full animate-ping" />
-                <span className="relative block w-2 h-2 bg-[#16A34A] rounded-full" />
-              </span>
-              <div className="font-mono text-[11.5px] text-[#A89A8D] leading-snug flex-1 truncate">
-                最近 ·{' '}
-                <span className="text-white font-semibold">
-                  {new Date(usage.records[0].createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                </span>{' '}
-                ·{' '}
-                <span className="text-accent font-semibold">{usage.records[0].model || 'auto'}</span>{' '}
-                · −${(usage.records[0].amountUsd ?? 0).toFixed(6)}
-              </div>
-            </section>
-          )}
-
           {/* Today stats — full numbers only after the first call has
               landed. Before that, an empty 0 / $0 grid feels like a
               sterile sandbox; the waiting card carries the story. */}
@@ -446,27 +427,50 @@ export default function Dashboard() {
               </div>
             </section>
           ) : (
-            <section>
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className={`${card} p-4`}>
-                  <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
-                  <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
-                  <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
+            <>
+              <section>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className={`${card} p-4`}>
+                    <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
+                    <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
+                    <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
+                  </div>
+                  <div className={`${card} p-4`}>
+                    <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
+                    <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
+                  </div>
                 </div>
-                <div className={`${card} p-4`}>
-                  <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
-                  <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
-                </div>
-              </div>
-              <div className="text-right mt-2">
-                <Link
-                  to="/console/history"
-                  className="font-mono text-[11.5px] text-accent font-bold tracking-wider hover:text-accent-deep underline underline-offset-4 decoration-2"
+              </section>
+
+              {/* Recent usage — moved out of the side col so the right
+                  side stays purely "接入 / AGENTS / API KEY". The single
+                  "查看全部 →" on this section's header replaces the
+                  prior separate "查看完整用量" link under the stat grid. */}
+              <section>
+                <SectionLabel
+                  action={
+                    <Link to="/console/history" className="text-accent font-bold tracking-wider hover:text-accent-deep">
+                      查看全部 →
+                    </Link>
+                  }
                 >
-                  查看完整用量 →
-                </Link>
-              </div>
-            </section>
+                  最近使用
+                </SectionLabel>
+                <div className={`${card} overflow-hidden`}>
+                  {usage.records?.slice(0, 4).map((r) => (
+                    <UsageRow
+                      key={r.id}
+                      variant="mobile"
+                      time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                      eventType={r.eventType}
+                      model={r.model || undefined}
+                      source={r.source || undefined}
+                      amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(6)}`}
+                    />
+                  ))}
+                </div>
+              </section>
+            </>
           )}
         </div>
 
@@ -549,35 +553,6 @@ export default function Dashboard() {
             />
           </section>
 
-          {/* Recent usage — only when there's something to show. Empty
-              "暂无使用记录" card was the same nothing as the left-col
-              waiting indicator and added visual filler. */}
-          {!noActivity && (
-            <section>
-              <SectionLabel
-                action={
-                  <Link to="/console/history" className="text-accent font-bold tracking-wider hover:text-accent-deep">
-                    查看全部 →
-                  </Link>
-                }
-              >
-                最近使用
-              </SectionLabel>
-              <div className={`${card} overflow-hidden`}>
-                {usage.records?.slice(0, 4).map((r) => (
-                  <UsageRow
-                    key={r.id}
-                    variant="mobile"
-                    time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                    eventType={r.eventType}
-                    model={r.model || undefined}
-                    source={r.source || undefined}
-                    amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(6)}`}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
         </aside>
       </main>
 
