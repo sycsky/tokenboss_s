@@ -59,37 +59,26 @@ export interface UserRecord {
 
 export type UserPlan = "trial" | "plus" | "super" | "ultra";
 
-export type OrderStatus = "pending" | "paid" | "expired" | "failed";
-export type PaymentChannel = "epusdt" | "xunhupay";
-export type OrderCurrency = "CNY" | "USD";
-export type { PlanId } from "./plans.js";
-import type { PlanId } from "./plans.js";
+// ---------- Order types (re-export from payment/types) ----------
 
-export interface OrderRecord {
-  orderId: string;
-  userId: string;
-  planId: PlanId;
-  channel: PaymentChannel;
-  /** Quoted amount in the order's `currency`. epusdt orders use USD,
-   *  xunhupay orders use CNY. (Stored in the DB column historically
-   *  named `amountCNY` — column kept for back-compat; the mapper
-   *  exposes it as `amount` regardless of currency.) */
-  amount: number;
-  /** Currency the `amount` is denominated in. Defaults to CNY for
-   *  legacy V2 rows that pre-date crypto-USD pricing. */
-  currency: OrderCurrency;
-  /** Channel-side actual settled amount. epusdt: USDT count after FX
-   *  (often differs slightly from amount due to exchange-rate spread).
-   *  xunhupay: same as amount in CNY. */
-  amountActual?: number;
-  status: OrderStatus;
-  upstreamTradeId?: string;
-  upstreamPaymentUrl?: string;
-  blockTxId?: string;
-  receiveAddress?: string;
-  createdAt: string;
-  paidAt?: string;
-}
+export type {
+  OrderRecord,
+  OrderStatus,
+  PaymentChannel,
+  OrderCurrency,
+  OrderSkuType,
+  OrderSettleStatus,
+  PlanId,
+} from "./payment/types.js";
+
+// Type-only imports kept locally so `as PaymentChannel` casts in
+// rowToOrder still compile.
+import type {
+  OrderCurrency,
+  OrderRecord,
+  OrderStatus,
+  PaymentChannel,
+} from "./payment/types.js";
 
 // ---------- Database singleton ----------
 
@@ -243,7 +232,10 @@ export function init(): void {
     CREATE TABLE IF NOT EXISTS orders (
       orderId            TEXT PRIMARY KEY,
       userId             TEXT NOT NULL,
-      planId             TEXT NOT NULL,
+      planId             TEXT,                      -- legacy; nullable now (back-compat for rollback)
+      skuType            TEXT,                      -- 'plan_plus'|'plan_super'|'plan_ultra'|'topup'
+      topupAmountUsd     REAL,                      -- only set for skuType='topup'
+      settleStatus       TEXT,                      -- 'settled'|'failed' for topup; null otherwise
       channel            TEXT NOT NULL,
       amountCNY          REAL NOT NULL,
       amountActual       REAL,
@@ -261,14 +253,25 @@ export function init(): void {
   `);
 
   // Idempotent migration for pre-V3 dev DBs that don't have the column.
-  try {
-    db.exec(`ALTER TABLE orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'`);
-  } catch {
-    // Column already exists — fine.
-  }
+  try { db.exec(`ALTER TABLE orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN skuType TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN topupAmountUsd REAL`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN settleStatus TEXT`); } catch {}
 
-  // Rename legacy plan ids → new tier names. Idempotent — once data is
-  // migrated the CASE expression is a no-op for fresh rows.
+  // Backfill skuType from legacy planId for any existing rows.
+  // Idempotent: only overwrites NULL skuType, leaves explicit values alone.
+  db.exec(`
+    UPDATE orders
+       SET skuType = CASE planId
+         WHEN 'plus'  THEN 'plan_plus'
+         WHEN 'super' THEN 'plan_super'
+         WHEN 'ultra' THEN 'plan_ultra'
+         ELSE skuType
+       END
+     WHERE skuType IS NULL AND planId IS NOT NULL
+  `);
+
+  // Rename legacy plan ids → new tier names (kept for safety).
   db.exec(`
     UPDATE orders SET planId = CASE planId
       WHEN 'basic'    THEN 'plus'
@@ -308,14 +311,18 @@ function rowToOrder(row: Record<string, unknown>): OrderRecord {
   return {
     orderId: row.orderId as string,
     userId: row.userId as string,
-    planId: row.planId as PlanId,
+    // Backfill rule: if the row predates the skuType column AND somehow
+    // also has no planId, treat as plan_plus (safest historical default).
+    skuType: ((row.skuType as string) ??
+      (row.planId ? `plan_${row.planId}` : 'plan_plus')) as OrderRecord['skuType'],
     channel: row.channel as PaymentChannel,
-    // DB column historically named `amountCNY` for legacy reasons; the
-    // value's actual currency is in the `currency` column. Old rows
-    // default to CNY (set by the migration).
+    // DB column historically named `amountCNY` for legacy reasons.
     amount: row.amountCNY as number,
     currency: ((row.currency as string) ?? "CNY") as OrderCurrency,
     amountActual: (row.amountActual as number) ?? undefined,
+    topupAmountUsd: (row.topupAmountUsd as number) ?? undefined,
+    settleStatus:
+      (row.settleStatus as OrderRecord['settleStatus']) ?? undefined,
     status: row.status as OrderStatus,
     upstreamTradeId: (row.upstreamTradeId as string) ?? undefined,
     upstreamPaymentUrl: (row.upstreamPaymentUrl as string) ?? undefined,
@@ -573,19 +580,29 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
 // ---------- Public API — Orders ----------
 
 export async function createOrder(rec: OrderRecord): Promise<void> {
+  // planId column is kept for back-compat / rollback. Derive from skuType
+  // when the order is a plan_* SKU; null for topup.
+  const legacyPlanId = rec.skuType.startsWith('plan_')
+    ? rec.skuType.replace(/^plan_/, '')
+    : null;
   db.prepare(`
     INSERT INTO orders
-      (orderId, userId, planId, channel, amountCNY, currency, amountActual, status,
+      (orderId, userId, planId, skuType, topupAmountUsd, settleStatus,
+       channel, amountCNY, currency, amountActual, status,
        upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
        createdAt, paidAt)
     VALUES
-      (@orderId, @userId, @planId, @channel, @amount, @currency, @amountActual, @status,
+      (@orderId, @userId, @planId, @skuType, @topupAmountUsd, @settleStatus,
+       @channel, @amount, @currency, @amountActual, @status,
        @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
        @createdAt, @paidAt)
   `).run({
     orderId: rec.orderId,
     userId: rec.userId,
-    planId: rec.planId,
+    planId: legacyPlanId,
+    skuType: rec.skuType,
+    topupAmountUsd: rec.topupAmountUsd ?? null,
+    settleStatus: rec.settleStatus ?? null,
     channel: rec.channel,
     amount: rec.amount,
     currency: rec.currency,
