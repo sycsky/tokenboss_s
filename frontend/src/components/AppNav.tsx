@@ -38,7 +38,7 @@ export function AppNav({ current: _current }: { current?: AppNavCurrent } = {}) 
           <Link
             to="/pricing"
             className={
-              'hidden sm:inline-flex items-center px-2.5 py-1 bg-yellow-stamp border-2 border-ink rounded ' +
+              'inline-flex items-center px-2.5 py-1 bg-yellow-stamp border-2 border-ink rounded ' +
               'font-mono text-[10.5px] font-bold tracking-[0.12em] uppercase text-yellow-stamp-ink ' +
               'shadow-[2px_2px_0_0_#1C1917] ' +
               'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +

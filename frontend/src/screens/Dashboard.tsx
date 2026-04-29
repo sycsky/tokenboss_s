@@ -276,7 +276,10 @@ export default function Dashboard() {
                                      the only meaningful actions.
               No active subscription → "Agent 余额" + "开通套餐 →". */}
         <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          {/* Mobile: stack column (label/value → chip/days → CTA right-aligned).
+              sm+: revert to flex-row with wrap so wide screens get the
+              compact horizontal hero we always had. */}
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
             {subBucket ? (
               <>
                 <div className="flex items-baseline gap-3 flex-wrap">
@@ -312,23 +315,32 @@ export default function Dashboard() {
                 {isTrial ? (
                   <Link
                     to="/pricing"
-                    className={slockBtn('secondary') + ' ml-auto'}
+                    className={
+                      slockBtn('secondary') +
+                      ' w-full text-center sm:w-auto sm:ml-auto'
+                    }
                   >
                     选个套餐 →
                   </Link>
                 ) : (
-                  <div className="ml-auto flex items-center gap-3 flex-wrap">
+                  // Paid: two CTAs (充值 + 续费). Mobile: stack 续费 full-width
+                  // primary, 充值额度 as a small link to its right (single row,
+                  // no wasted horizontal space). Desktop: revert to inline.
+                  <div className="w-full flex items-center justify-end gap-4 sm:w-auto sm:ml-auto">
                     <button
                       type="button"
                       onClick={() => setContactReason('topup')}
-                      className="font-mono text-[12px] text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors"
+                      // py-2 px-1 expands the click area to ~44px tall on
+                      // touch without changing visual weight (text stays
+                      // 12px). Apple HIG minimum tap target.
+                      className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
                     >
                       充值额度
                     </button>
                     <button
                       type="button"
                       onClick={() => setContactReason('renew')}
-                      className={slockBtn('secondary')}
+                      className={slockBtn('secondary') + ' flex-1 sm:flex-none'}
                     >
                       续费 →
                     </button>
@@ -347,7 +359,15 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <Link to="/pricing" className={slockBtn('secondary') + ' ml-auto'}>开通套餐 →</Link>
+                <Link
+                  to="/pricing"
+                  className={
+                    slockBtn('secondary') +
+                    ' w-full text-center sm:w-auto sm:ml-auto'
+                  }
+                >
+                  开通套餐 →
+                </Link>
               </>
             )}
           </div>
