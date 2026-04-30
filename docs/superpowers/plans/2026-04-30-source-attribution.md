@@ -982,8 +982,8 @@ Gated by SOURCE_ATTRIBUTION=off env for emergency rollback."
 
 ## Task 5: usageHandlers — join attribution into source field
 
-> **PROBE RESULT (Task 0):** [fill in EXACT_JOIN_OK or SOFT_JOIN_REQUIRED here after Task 0]
-> 因此 Task 5 实施 [精确 join | 软 join] 路径。
+> **PROBE RESULT (Task 0):** SOFT_JOIN_REQUIRED
+> 因此 Task 5 实施软 join 路径。newapi 忽略转发的 `X-Request-ID`，始终自己生成（格式如 `202604300158119389174738268d9d6JRPexzr9`）；无法用精确 join。
 
 **Files:**
 - Modify: `backend/src/handlers/usageHandlers.ts` (mapNewapiLog + join layer in `/v1/usage` handler)
