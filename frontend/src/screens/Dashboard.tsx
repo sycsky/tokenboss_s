@@ -505,7 +505,9 @@ export default function Dashboard() {
                       time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                       eventType={r.eventType}
                       model={formatModelName(r.model)}
-                      source={r.source || undefined}
+                      // Fallback to keyHint (token name) until real source
+                      // attribution via X-Source header lands.
+                      source={r.source || r.keyHint || undefined}
                       amountUsd={r.amountUsd ?? 0}
                     />
                   ))}

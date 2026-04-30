@@ -122,7 +122,10 @@ export default function UsageHistory() {
                     time={new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     eventType={r.eventType}
                     model={formatModelName(r.model)}
-                    source={r.source || undefined}
+                    // Fallback to keyHint (= API key 的用户自命名) until X-Source
+                    // header attribution lands. Users naming keys after their
+                    // agents (e.g. "OpenClaw 用 key") get free attribution today.
+                    source={r.source || r.keyHint || undefined}
                     amountUsd={r.amountUsd}
                   />
                 ))
