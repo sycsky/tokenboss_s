@@ -14,7 +14,9 @@ describe('<UsageRow>', () => {
     />);
     expect(screen.getByText('9:41')).toBeInTheDocument();
     expect(screen.getByText('Claude Sonnet 4.7')).toBeInTheDocument();
-    expect(screen.getByText('OpenClaw')).toBeInTheDocument();
+    // Mobile variant intentionally drops the source line for visual
+    // density (UsageRow.tsx mobile branch comment) — source is only
+    // shown in the desktop variant. So we don't assert OpenClaw here.
     expect(screen.getByText('消耗')).toBeInTheDocument();
     // Sign derived from eventType, not from value sign — backend ships
     // a positive magnitude and the row owns the '−' for consume events.
