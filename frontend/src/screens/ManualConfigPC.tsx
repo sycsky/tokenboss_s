@@ -178,13 +178,13 @@ fallback_model:
     id: 'codex',
     name: 'Codex CLI',
     homepage: 'https://github.com/openai/codex',
-    blurb: 'OpenAI 官方 CLI，TOML 配置 + 环境变量，wire_api = chat',
+    blurb: 'OpenAI 官方 CLI · 锁 0.80.0 版（TokenBoss 走 Chat Completions 协议，新版 Codex 砍了 chat wire_api 不再兼容）',
     steps: [
       {
-        title: '1. 安装 Codex',
-        desc: <>需要 Node.js 18+。已装可跳过。</>,
+        title: '1. 安装 Codex（锁 0.80.0 版）',
+        desc: <>需要 Node.js 18+。<strong>必须锁版本 <span className={codeChip}>@openai/codex@0.80.0</span></strong>——0.80 之后的 Codex 砍掉了 <span className={codeChip}>wire_api = "chat"</span> 配置项，强制走 OpenAI Responses API；TokenBoss 后端只暴露 Chat Completions（<span className={codeChip}>/v1/chat/completions</span>），新版 Codex 协议层接不上。等后端加 Responses API 端点后这一限制会移除。</>,
         codeLabel: '终端',
-        code: 'npm install -g @openai/codex',
+        code: 'npm install -g @openai/codex@0.80.0',
       },
       {
         title: '2. 编辑配置文件',
