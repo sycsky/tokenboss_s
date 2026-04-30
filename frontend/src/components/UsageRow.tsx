@@ -33,6 +33,10 @@ export function UsageRow({ time, eventType, source, model, amountUsd, variant = 
   const styles = TYPE_STYLES[eventType];
   const amount = `${styles.sign}$${Math.abs(amountUsd).toFixed(6)}`;
   if (variant === 'mobile') {
+    // Compact list rows (Dashboard "最近使用") — drop the `source` line
+    // here for visual density. The desktop variant in /console/history
+    // keeps source as its own column so users can still see attribution
+    // when they need it.
     return (
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b-2 border-ink/10 last:border-b-0">
         <div className="font-mono text-[10.5px] text-[#A89A8D] w-12 flex-shrink-0">{time}</div>
@@ -42,7 +46,6 @@ export function UsageRow({ time, eventType, source, model, amountUsd, variant = 
             <span className={`font-mono text-[9.5px] font-bold tracking-wider uppercase px-1.5 py-px rounded ${styles.pill}`}>
               {styles.label}
             </span>
-            {source && <span className="font-mono text-[10px] text-[#A89A8D]">{source}</span>}
           </div>
         </div>
         <div className={`font-mono text-[12px] font-bold ${styles.amount}`}>{amount}</div>
