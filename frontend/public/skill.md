@@ -1,10 +1,10 @@
 ---
 name: tokenboss
-version: 0.7.0
-description: TokenBoss — one API key, one OpenAI-compatible endpoint, six curated models (three GPT, three Claude). Configure as a custom provider on OpenClaw, Hermes Agent, or any other agent that speaks OpenAI Chat Completions. Use when setting up TokenBoss, switching LLM provider, or configuring AI routing.
+version: 0.8.0
+description: TokenBoss — one API key, one OpenAI-compatible endpoint, six curated models (three GPT, three Claude). Configure as a custom provider on OpenClaw, Hermes Agent, Codex CLI, or any other agent that speaks OpenAI Chat Completions. Use when setting up TokenBoss, switching LLM provider, or configuring AI routing.
 homepage: https://tokenboss.co
 api_endpoint: https://api.tokenboss.co/v1
-last_updated: 2026-04-29
+last_updated: 2026-04-30
 metadata:
   api_key:
     required: true
@@ -17,11 +17,20 @@ metadata:
   hermes:
     config_file: ~/.hermes/config.yaml
     env_file: ~/.hermes/.env
+  codex:
+    config_file: ~/.codex/config.toml
+    install_command: "npm install -g @openai/codex"
+    requires: "Node.js 18+"
+    # Codex hard-codes the env var lookup; key_env in the provider table
+    # tells it which name to read from. Default to OPENAI_API_KEY since
+    # that's the muscle-memory variable for Codex users.
+    env_var: OPENAI_API_KEY
+    wire_api: chat
 ---
 
 # TokenBoss
 
-One API key, one OpenAI-compatible endpoint, six curated models. Configure TokenBoss as a custom provider on **OpenClaw**, **Hermes Agent**, or any other agent that speaks OpenAI Chat Completions.
+One API key, one OpenAI-compatible endpoint, six curated models. Configure TokenBoss as a custom provider on **OpenClaw**, **Hermes Agent**, **Codex CLI**, or any other agent that speaks OpenAI Chat Completions.
 
 > **Protocol** — OpenAI Chat Completions only (`/v1/chat/completions`). The Anthropic-native `/v1/messages` endpoint is **not** available; Claude models (`claude-*`) are reached through `/v1/chat/completions` like any OpenAI model. See [Claude Code users](#claude-code-users) for a workaround.
 
@@ -188,6 +197,52 @@ Use the slash command shape Hermes documents for custom providers — typical fo
 /model custom:claude-opus-4-6
 /model custom:claude-opus-4-7
 ```
+
+---
+
+## For Codex CLI
+
+OpenAI's official CLI. Configuration is TOML-based and the bearer credential is read from an environment variable named in the provider table.
+
+### Install
+
+```bash
+# Requires Node.js 18+. Skip if codex is already on PATH.
+npm install -g @openai/codex
+```
+
+### Config block
+
+Edit `~/.codex/config.toml`. Add the `tokenboss` provider table and set the top-level `model_provider` / `model` to point at it. **Preserve any existing `[model_providers.*]` tables** — Codex supports multiple providers side by side.
+
+```toml
+model_provider = "tokenboss"
+model = "gpt-5.5"
+
+[model_providers.tokenboss]
+name = "TokenBoss"
+base_url = "https://api.tokenboss.co/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "chat"
+```
+
+`wire_api = "chat"` selects the OpenAI Chat Completions surface — required because TokenBoss exposes that protocol only (the newer Codex Responses API surface is **not** supported, see the Protocol note at the top of this file).
+
+### Persist the key
+
+Codex reads its bearer credential from the env var named in `env_key` — `OPENAI_API_KEY` by convention. Append it to the shell profile so every `codex` run picks it up:
+
+```
+# Add to ~/.zshrc or ~/.bashrc — open in an editor; do NOT echo >> the file
+# (that writes the key into shell history). Then re-source the profile.
+export OPENAI_API_KEY=<key>
+```
+
+> If the user already uses Codex against the real OpenAI API and you don't want to clobber their existing `OPENAI_API_KEY`, switch `env_key` in the provider table to a TokenBoss-specific name (e.g. `TOKENBOSS_API_KEY`) and persist that instead.
+
+### Switch model mid-session
+
+Codex doesn't have a runtime `/model` switch — model is config-driven. To change models, edit `model = "..."` in `~/.codex/config.toml` (any of `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-opus-4-7`) and rerun `codex`.
 
 ---
 
