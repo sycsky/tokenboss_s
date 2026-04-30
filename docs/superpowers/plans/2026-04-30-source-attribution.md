@@ -191,30 +191,40 @@ beforeAll(() => {
 });
 
 describe('usage_attribution table — schema', () => {
-  it('exists with the required columns', () => {
-    const cols = db.prepare(`PRAGMA table_info(usage_attribution)`).all() as { name: string; type: string; notnull: number; pk: number }[];
+  it('exists with the required columns + types', () => {
+    const cols = db
+      .prepare(`PRAGMA table_info(usage_attribution)`)
+      .all() as { name: string; type: string; notnull: number; pk: number }[];
     const byName = new Map(cols.map((c) => [c.name, c]));
-    expect(byName.get('request_id')?.pk).toBe(1);
-    expect(byName.get('user_id')?.notnull).toBe(1);
+    expect(byName.get('requestId')?.pk).toBe(1);
+    expect(byName.get('requestId')?.type).toBe('TEXT');
+    expect(byName.get('userId')?.notnull).toBe(1);
+    expect(byName.get('userId')?.type).toBe('TEXT');
     expect(byName.get('source')?.notnull).toBe(1);
-    expect(byName.get('source_method')?.notnull).toBe(1);
+    expect(byName.get('sourceMethod')?.notnull).toBe(1);
     expect(byName.get('model')).toBeDefined();
-    expect(byName.get('captured_at')?.notnull).toBe(1);
+    expect(byName.get('capturedAt')?.notnull).toBe(1);
+    expect(byName.get('capturedAt')?.type).toBe('TEXT');
   });
 
-  it('rejects source longer than 32 chars (CHECK constraint)', () => {
-    expect(() =>
+  it('rejects source / sourceMethod longer than 32 chars (CHECK constraint)', () => {
+    const baseInsert = (source: string, sourceMethod: string, model: string | null) =>
       db.prepare(
-        `INSERT INTO usage_attribution (request_id, user_id, source, source_method, model, captured_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run('tb-aa', 'u_x', 'a'.repeat(40), 'header', 'gpt-4o', new Date().toISOString()),
-    ).toThrow();
+        `INSERT INTO usage_attribution (requestId, userId, source, sourceMethod, model, capturedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run('tb-aaaaaaaa', 'u_x', source, sourceMethod, model, new Date().toISOString());
+    expect(() => baseInsert('a'.repeat(40), 'header', 'gpt-4o')).toThrow();
+    expect(() => baseInsert('openclaw', 'a'.repeat(40), 'gpt-4o')).toThrow();
+    expect(() => baseInsert('openclaw', 'header', 'a'.repeat(200))).toThrow();
   });
 
-  it('has the user_id+captured_at index for soft-join queries', () => {
-    const idx = db.prepare(`PRAGMA index_list(usage_attribution)`).all() as { name: string }[];
+  it('has the user+time index for soft-join queries (PK index for requestId is implicit, not duplicated)', () => {
+    const idx = db
+      .prepare(`PRAGMA index_list(usage_attribution)`)
+      .all() as { name: string }[];
     const names = new Set(idx.map((i) => i.name));
+    // We rely on SQLite's implicit PK index for requestId lookups; only
+    // need to verify our explicit secondary index for soft-join.
     expect(names.has('idx_attribution_user_time')).toBe(true);
-    expect(names.has('idx_attribution_request_id')).toBe(true);
   });
 });
 ```
@@ -231,23 +241,19 @@ Expected: FAIL — table `usage_attribution` does not exist.
 ```typescript
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage_attribution (
-      request_id    TEXT PRIMARY KEY,
-      user_id       TEXT NOT NULL,
-      source        TEXT NOT NULL,
-      source_method TEXT NOT NULL,
-      model         TEXT,
-      captured_at   TEXT NOT NULL,
-      CHECK (length(source) <= 32)
+      requestId    TEXT PRIMARY KEY,
+      userId       TEXT NOT NULL,
+      source       TEXT NOT NULL,
+      sourceMethod TEXT NOT NULL,
+      model        TEXT,
+      capturedAt   TEXT NOT NULL,
+      CHECK (length(source) <= 32),
+      CHECK (length(sourceMethod) <= 32),
+      CHECK (model IS NULL OR length(model) <= 128)
     );
     CREATE INDEX IF NOT EXISTS idx_attribution_user_time
-      ON usage_attribution(user_id, captured_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_attribution_request_id
-      ON usage_attribution(request_id);
+      ON usage_attribution(userId, capturedAt DESC);
   `);
-
-  // Idempotent migration: if a pre-feature DB existed, the CREATE TABLE
-  // IF NOT EXISTS above is a no-op for it; nothing else needed because
-  // we add no columns to existing tables.
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -264,10 +270,10 @@ Expected: 80/80 (was 77 + 3 new). No regressions.
 git add backend/src/lib/store.ts backend/src/lib/__tests__/store.attribution.test.ts
 git commit -m "feat(store): add usage_attribution table
 
-Foundation for X-Source agent attribution. Records (request_id, user_id,
-source, source_method, model, captured_at) per chat completion at proxy
-entry. Indexed for both exact (request_id) and soft (user_id+captured_at)
-join paths."
+Foundation for X-Source agent attribution. Records (requestId, userId,
+source, sourceMethod, model, capturedAt) per chat completion at proxy
+entry. camelCase columns matching rest of store.ts. Indexed for soft
+join (userId+capturedAt); requestId PK carries its own implicit index."
 ```
 
 ---
@@ -324,12 +330,12 @@ describe('attribution helpers', () => {
     expect(got.get('tb-missing')).toBeUndefined();
   });
 
-  it('insertAttribution is idempotent on duplicate request_id (INSERT OR IGNORE)', () => {
+  it('insertAttribution is idempotent on duplicate requestId (INSERT OR IGNORE)', () => {
     const now = new Date().toISOString();
     insertAttribution({
       requestId: 'tb-dup', userId: 'u_alice', source: 'openclaw', sourceMethod: 'header', model: 'm', capturedAt: now,
     });
-    // Second insert with same request_id but different source should be a no-op.
+    // Second insert with same requestId but different source should be a no-op.
     insertAttribution({
       requestId: 'tb-dup', userId: 'u_alice', source: 'hermes', sourceMethod: 'header', model: 'm', capturedAt: now,
     });
@@ -353,7 +359,7 @@ describe('attribution helpers', () => {
     const ids = new Set(rows.map((r) => r.requestId));
     expect(ids.has('tb-j-1')).toBe(true); // in window, matching model+user
     expect(ids.has('tb-j-2')).toBe(true);
-    expect(ids.has('tb-j-3')).toBe(false); // captured_at > window end
+    expect(ids.has('tb-j-3')).toBe(false); // capturedAt > window end
     expect(ids.has('tb-j-4')).toBe(false); // wrong model
     expect(ids.has('tb-j-5')).toBe(false); // wrong user
   });
@@ -381,13 +387,13 @@ export interface AttributionRecord {
   capturedAt: string;
 }
 
-/** INSERT OR IGNORE — duplicate request_id is a no-op (first write wins).
+/** INSERT OR IGNORE — duplicate requestId is a no-op (first write wins).
  *  Caller should not depend on whether the insert actually happened; this
  *  is best-effort observability data. */
 export function insertAttribution(rec: AttributionRecord): void {
   db.prepare(`
     INSERT OR IGNORE INTO usage_attribution
-      (request_id, user_id, source, source_method, model, captured_at)
+      (requestId, userId, source, sourceMethod, model, capturedAt)
     VALUES
       (@requestId, @userId, @source, @sourceMethod, @model, @capturedAt)
   `).run({
@@ -400,8 +406,8 @@ export function insertAttribution(rec: AttributionRecord): void {
   });
 }
 
-/** Batch fetch by request_id. Returns a Map for O(1) lookup. Missing
- *  request_ids are simply absent from the result. */
+/** Batch fetch by requestId. Returns a Map for O(1) lookup. Missing
+ *  requestIds are simply absent from the result. */
 export function getAttributionByRequestIds(
   requestIds: string[],
 ): Map<string, AttributionRecord> {
@@ -410,33 +416,33 @@ export function getAttributionByRequestIds(
   const placeholders = requestIds.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT request_id, user_id, source, source_method, model, captured_at
+      `SELECT requestId, userId, source, sourceMethod, model, capturedAt
          FROM usage_attribution
-        WHERE request_id IN (${placeholders})`,
+        WHERE requestId IN (${placeholders})`,
     )
     .all(...requestIds) as Array<{
-      request_id: string;
-      user_id: string;
+      requestId: string;
+      userId: string;
       source: string;
-      source_method: AttributionRecord['sourceMethod'];
+      sourceMethod: AttributionRecord['sourceMethod'];
       model: string | null;
-      captured_at: string;
+      capturedAt: string;
     }>;
   for (const r of rows) {
-    out.set(r.request_id, {
-      requestId: r.request_id,
-      userId: r.user_id,
+    out.set(r.requestId, {
+      requestId: r.requestId,
+      userId: r.userId,
       source: r.source,
-      sourceMethod: r.source_method,
+      sourceMethod: r.sourceMethod,
       model: r.model,
-      capturedAt: r.captured_at,
+      capturedAt: r.capturedAt,
     });
   }
   return out;
 }
 
 /** Soft-join fetch: returns all attribution rows in the window matching
- *  user + any of the given models. Caller picks the closest captured_at
+ *  user + any of the given models. Caller picks the closest capturedAt
  *  per newapi log entry. */
 export function getAttributionsForJoin(
   userId: string,
@@ -448,27 +454,27 @@ export function getAttributionsForJoin(
   const placeholders = models.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT request_id, user_id, source, source_method, model, captured_at
+      `SELECT requestId, userId, source, sourceMethod, model, capturedAt
          FROM usage_attribution
-        WHERE user_id = ?
-          AND captured_at BETWEEN ? AND ?
+        WHERE userId = ?
+          AND capturedAt BETWEEN ? AND ?
           AND model IN (${placeholders})`,
     )
     .all(userId, minCapturedAt, maxCapturedAt, ...models) as Array<{
-      request_id: string;
-      user_id: string;
+      requestId: string;
+      userId: string;
       source: string;
-      source_method: AttributionRecord['sourceMethod'];
+      sourceMethod: AttributionRecord['sourceMethod'];
       model: string | null;
-      captured_at: string;
+      capturedAt: string;
     }>;
   return rows.map((r) => ({
-    requestId: r.request_id,
-    userId: r.user_id,
+    requestId: r.requestId,
+    userId: r.userId,
     source: r.source,
-    sourceMethod: r.source_method,
+    sourceMethod: r.sourceMethod,
     model: r.model,
-    capturedAt: r.captured_at,
+    capturedAt: r.capturedAt,
   }));
 }
 ```
@@ -789,11 +795,11 @@ describe('chatProxy — attribution capture', () => {
     await streamChatCore(chatEvent({ 'x-source': 'openclaw' }), cap.writer);
     const rows = db.prepare(`SELECT * FROM usage_attribution`).all() as any[];
     expect(rows).toHaveLength(1);
-    expect(rows[0].user_id).toBe(userId);
+    expect(rows[0].userId).toBe(userId);
     expect(rows[0].source).toBe('openclaw');
-    expect(rows[0].source_method).toBe('header');
+    expect(rows[0].sourceMethod).toBe('header');
     expect(rows[0].model).toBe('gpt-4o-mini');
-    expect(rows[0].request_id).toMatch(/^tb-[0-9a-f]{8}$/);
+    expect(rows[0].requestId).toMatch(/^tb-[0-9a-f]{8}$/);
   });
 
   it('falls back to UA when no X-Source', async () => {
@@ -801,7 +807,7 @@ describe('chatProxy — attribution capture', () => {
     await streamChatCore(chatEvent({ 'user-agent': 'hermes-cli/1.0' }), cap.writer);
     const rows = db.prepare(`SELECT * FROM usage_attribution`).all() as any[];
     expect(rows[0].source).toBe('hermes');
-    expect(rows[0].source_method).toBe('ua');
+    expect(rows[0].sourceMethod).toBe('ua');
   });
 
   it("falls back to 'other' when neither X-Source nor UA matches", async () => {
@@ -809,7 +815,7 @@ describe('chatProxy — attribution capture', () => {
     await streamChatCore(chatEvent({ 'user-agent': 'curl/8.0' }), cap.writer);
     const rows = db.prepare(`SELECT * FROM usage_attribution`).all() as any[];
     expect(rows[0].source).toBe('other');
-    expect(rows[0].source_method).toBe('fallback');
+    expect(rows[0].sourceMethod).toBe('fallback');
   });
 
   it('skips attribution when bearer key is unknown (no api_key_index entry)', async () => {
@@ -1077,7 +1083,7 @@ const attributions = page.items.length > 0
 
 const records = page.items.map((entry) => {
   const base = mapNewapiLog(entry, userId);
-  // Pick the closest attribution by |captured_at - entry.created_at|, with
+  // Pick the closest attribution by |capturedAt - entry.created_at|, with
   // matching model + within ±5s window.
   let best: { slug: string; deltaMs: number } | null = null;
   const entryMs = entry.created_at * 1000;
@@ -1464,7 +1470,7 @@ These are spec Open Questions deferred to implementation. Surface at execute tim
 
 2. **api_key_index coverage** — Spec § Open Q #3. Verify that ALL key creation paths (register, verify-code, OAuth, /v1/keys self-service) call `putApiKeyIndex`. Otherwise some users' attribution writes silently no-op (Task 4 Step 3 returns early when `getUserIdByKeyHash` returns null). Grep for `putApiKeyIndex` callers; cross-check against `createAndRevealToken` callers.
 
-3. **30-day cleanup cron** — Spec § Open Q #4. Out of scope for this plan (called out in File Structure). Track as v1.x followup ticket: either a SQLite-side `DELETE FROM usage_attribution WHERE captured_at < datetime('now', '-30 days')` triggered by a `/v1/admin/sweep` endpoint, OR a startup-time cleanup in `init()`.
+3. **30-day cleanup cron** — Spec § Open Q #4. Out of scope for this plan (called out in File Structure). Track as v1.x followup ticket: either a SQLite-side `DELETE FROM usage_attribution WHERE capturedAt < datetime('now', '-30 days')` triggered by a `/v1/admin/sweep` endpoint, OR a startup-time cleanup in `init()`.
 
 ---
 
@@ -1487,7 +1493,7 @@ These are spec Open Questions deferred to implementation. Surface at execute tim
 - `AttributionRecord` fields (`requestId`, `userId`, `source`, `sourceMethod`, `model`, `capturedAt`) used identically in Tasks 2, 4, 5.
 - `SourceMethod` literal union (`'header' | 'ua' | 'fallback'`) consistent across Task 3 and Task 4.
 - `ResolvedSource` shape (`{ slug, method }`) consistent in Task 3; consumed by Task 4.
-- DB column names (`request_id`, `user_id`, `source`, `source_method`, `model`, `captured_at`) consistent in Task 1 (DDL), Task 2 (queries), Task 4 (insert), Task 5 (join).
-- Index names (`idx_attribution_user_time`, `idx_attribution_request_id`) consistent.
+- DB column names (`requestId`, `userId`, `source`, `sourceMethod`, `model`, `capturedAt`) consistent in Task 1 (DDL), Task 2 (queries), Task 4 (insert), Task 5 (join).
+- Index name `idx_attribution_user_time` consistent; no explicit `idx_attribution_request_id` (PK carries implicit index).
 
 No drift detected.

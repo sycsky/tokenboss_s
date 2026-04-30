@@ -66,29 +66,31 @@ X-Request-ID: tb-<8 hex>   # 我们生成并 forward 给 newapi，用于精确 j
 新增 SQLite 表 `usage_attribution`：
 
 ```sql
-CREATE TABLE usage_attribution (
-  request_id    TEXT PRIMARY KEY,        -- 我们生成的 tb-<8hex>
-  user_id       TEXT NOT NULL,           -- TokenBoss userId（从 sha256(bearer) → api_key_index 反查）
-  source        TEXT NOT NULL,           -- 'openclaw' | 'hermes' | 'claude-code' | 'codex' | <第三方 slug> | 'other'
-  source_method TEXT NOT NULL,           -- 'header' | 'ua' | 'fallback'  (analytics 用)
-  model         TEXT,                    -- 用户请求的 model name（soft join 用）
-  captured_at   TEXT NOT NULL,           -- ISO timestamp 在 proxy 入口
-  CHECK (length(source) <= 32)
+CREATE TABLE IF NOT EXISTS usage_attribution (
+  requestId    TEXT PRIMARY KEY,
+  userId       TEXT NOT NULL,
+  source       TEXT NOT NULL,
+  sourceMethod TEXT NOT NULL,
+  model        TEXT,
+  capturedAt   TEXT NOT NULL,
+  CHECK (length(source) <= 32),
+  CHECK (length(sourceMethod) <= 32),
+  CHECK (model IS NULL OR length(model) <= 128)
 );
-CREATE INDEX idx_attribution_user_time ON usage_attribution(user_id, captured_at DESC);
-CREATE INDEX idx_attribution_request_id ON usage_attribution(request_id);
+CREATE INDEX IF NOT EXISTS idx_attribution_user_time
+  ON usage_attribution(userId, capturedAt DESC);
 ```
 
 **字段说明：**
 
 | 字段 | 说明 |
 |---|---|
-| `request_id` | 精确 join 路径用。即使 newapi 不回，本身也用于查重 / debug |
-| `user_id` | TokenBoss 这边的 userId。chatProxy 入口通过 `sha256(bearerToken) → api_key_index` 反查（这张表已有，cheap SQLite lookup） |
+| `requestId` | 精确 join 路径用。即使 newapi 不回，本身也用于查重 / debug |
+| `userId` | TokenBoss 这边的 userId。chatProxy 入口通过 `sha256(bearerToken) → api_key_index` 反查（这张表已有，cheap SQLite lookup） |
 | `source` | normalized slug（已 lowercase、字符校验过）|
-| `source_method` | 值从哪条路得来的，便于以后看 X-Source 普及率 |
+| `sourceMethod` | 值从哪条路得来的，便于以后看 X-Source 普及率 |
 | `model` | soft join 三元组之一 |
-| `captured_at` | soft join 时间窗中心 |
+| `capturedAt` | soft join 时间窗中心 |
 
 **保留策略：** 30 天滚动 cron 清理（attribution 是 dashboard 用的辅助元数据，不是审计；超过 30 天的 history 落到 `'other'` 也无所谓）。具体 cron 实施位置待 plan 阶段调研（见 Open Question #4）。
 
@@ -99,7 +101,7 @@ CREATE INDEX idx_attribution_request_id ON usage_attribution(request_id);
 每次 `POST /v1/chat/completions` 进来，proxy 入口加：
 
 ```
-1. 生成 request_id：tb-<8 hex>
+1. 生成 requestId：tb-<8 hex>
 2. 解析 source（按优先级）：
    a. X-Source header 存在且合法 → 用它，method='header'
    b. UA 正则匹配 → 用匹配到的 slug，method='ua'
@@ -131,8 +133,8 @@ CREATE INDEX idx_attribution_request_id ON usage_attribution(request_id);
 **精确 join（首选 —— 如果 newapi forward request_id 通）：**
 
 ```sql
-SELECT request_id, source FROM usage_attribution
-WHERE request_id IN (?, ?, ?, ...)  -- newapi log 当页所有 request_id
+SELECT requestId, source FROM usage_attribution
+WHERE requestId IN (?, ?, ?, ...)  -- newapi log 当页所有 request_id
 ```
 
 应用层用 Map 一次性映射回去。**单 SQL，O(1) per entry**。
@@ -140,14 +142,14 @@ WHERE request_id IN (?, ?, ?, ...)  -- newapi log 当页所有 request_id
 **软 join（兜底 —— 如果 newapi 自己 reroll request_id）：**
 
 ```sql
-SELECT request_id, user_id, model, source, captured_at
+SELECT requestId, userId, model, source, capturedAt
 FROM usage_attribution
-WHERE user_id = ?
-  AND captured_at BETWEEN ? AND ?         -- min - 5s 到 max + 5s
+WHERE userId = ?
+  AND capturedAt BETWEEN ? AND ?         -- min - 5s 到 max + 5s
   AND model IN (?, ?, ?, ...)             -- 当页 distinct models
 ```
 
-应用层对每条 newapi entry 在内存里挑 `model` 匹配 + `|captured_at - entry.created_at|` 最小的那条。**单 SQL + 内存扫，O(N+M) 总开销**。
+应用层对每条 newapi entry 在内存里挑 `model` 匹配 + `|capturedAt - entry.created_at|` 最小的那条。**单 SQL + 内存扫，O(N+M) 总开销**。
 
 **第三 fallback（永远兜底）：** attribution 表里没匹配（写入失败 / 30 天清理后 / 部署前的旧数据）→ `source = 'other'`。**chat-completions 这条线 source 永远非 null**。
 
@@ -202,7 +204,7 @@ source={r.source ? formatSource(r.source) : (r.keyHint ?? undefined)}
 
 **SQLite 写入异常：**
 - `try/catch` 包住 `insertAttribution`
-- 失败 → `console.warn('[chatProxy] attribution insert failed', { request_id, error })` + 继续
+- 失败 → `console.warn('[chatProxy] attribution insert failed', { requestId, error })` + 继续
 - 不阻塞 chat completion 主流程
 
 **join 阶段失败：**
@@ -298,7 +300,7 @@ plan 阶段需砸钉子：
 | SQLite 写入吞吐成瓶颈 | chat 延迟上升 | better-sqlite3 sync < 1ms；INSERT OR IGNORE 防主键冲突；监控 attribution insert 时长 |
 | newapi 把 forwarded request_id 当攻击防御丢掉 | 退化到软 join | spec 已设计软 join 兜底 |
 | 第三方 slug 含恶意 unicode / 长字符串 | XSS / DOS | 入口校验 `[a-z0-9-]{1,32}` + 截断；React 默认 escape |
-| 软 join 5s 窗口太宽误归属 | dashboard 显错 source（罕见）| 监控 source_method 分布；缩到 2s |
+| 软 join 5s 窗口太宽误归属 | dashboard 显错 source（罕见）| 监控 sourceMethod 分布；缩到 2s |
 | attribution 表无限增长 | DB 膨胀 | 30 天 cron 清理（Open Q #4 落实）|
 
 **rollback 路径：**
@@ -316,7 +318,7 @@ plan 阶段需砸钉子：
 
 ## Acceptance
 
-- `chatProxy` 收到带 `X-Source: openclaw` 的 chat 请求 → `usage_attribution` 表新增一行 `(source='openclaw', method='header', user_id=...)`
+- `chatProxy` 收到带 `X-Source: openclaw` 的 chat 请求 → `usage_attribution` 表新增一行 `(source='openclaw', sourceMethod='header', userId=...)`
 - `chatProxy` 收到只带 OpenClaw UA 的 chat 请求 → 表新增 `(source='openclaw', method='ua')`
 - `chatProxy` 收到既无 X-Source 也无识别 UA 的请求 → 表新增 `(source='other', method='fallback')`
 - 匿名调用 / 无 bearer → 不写表
