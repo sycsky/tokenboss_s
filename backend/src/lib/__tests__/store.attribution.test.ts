@@ -121,4 +121,14 @@ describe('attribution helpers', () => {
     expect(ids.has('tb-j-4')).toBe(false); // wrong model
     expect(ids.has('tb-j-5')).toBe(false); // wrong user
   });
+
+  it('getAttributionByRequestIds returns empty Map for empty input (guard)', () => {
+    expect(getAttributionByRequestIds([]).size).toBe(0);
+  });
+
+  it('getAttributionsForJoin returns empty array for empty models (guard)', () => {
+    expect(
+      getAttributionsForJoin('u_x', [], '2026-04-30T00:00:00Z', '2026-04-30T01:00:00Z'),
+    ).toEqual([]);
+  });
 });

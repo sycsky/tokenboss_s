@@ -743,13 +743,38 @@ export async function markOrderSettleStatus(args: {
 
 // ---------- Public API — Usage Attribution ----------
 
+export const SOURCE_METHODS = ['header', 'ua', 'fallback'] as const;
+export type SourceMethod = (typeof SOURCE_METHODS)[number];
+
 export interface AttributionRecord {
   requestId: string;
   userId: string;
   source: string;
-  sourceMethod: 'header' | 'ua' | 'fallback';
+  sourceMethod: SourceMethod;
   model: string | null;
   capturedAt: string;
+}
+
+type AttributionRow = {
+  requestId: string;
+  userId: string;
+  source: string;
+  sourceMethod: SourceMethod;
+  model: string | null;
+  capturedAt: string;
+};
+
+const ATTR_COLS = 'requestId, userId, source, sourceMethod, model, capturedAt';
+
+function rowToAttribution(r: AttributionRow): AttributionRecord {
+  return {
+    requestId: r.requestId,
+    userId: r.userId,
+    source: r.source,
+    sourceMethod: r.sourceMethod,
+    model: r.model,
+    capturedAt: r.capturedAt,
+  };
 }
 
 /** INSERT OR IGNORE — duplicate requestId is a no-op (first write wins).
@@ -781,27 +806,13 @@ export function getAttributionByRequestIds(
   const placeholders = requestIds.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT requestId, userId, source, sourceMethod, model, capturedAt
+      `SELECT ${ATTR_COLS}
          FROM usage_attribution
         WHERE requestId IN (${placeholders})`,
     )
-    .all(...requestIds) as Array<{
-      requestId: string;
-      userId: string;
-      source: string;
-      sourceMethod: AttributionRecord['sourceMethod'];
-      model: string | null;
-      capturedAt: string;
-    }>;
+    .all(...requestIds) as AttributionRow[];
   for (const r of rows) {
-    out.set(r.requestId, {
-      requestId: r.requestId,
-      userId: r.userId,
-      source: r.source,
-      sourceMethod: r.sourceMethod,
-      model: r.model,
-      capturedAt: r.capturedAt,
-    });
+    out.set(r.requestId, rowToAttribution(r));
   }
   return out;
 }
@@ -819,26 +830,12 @@ export function getAttributionsForJoin(
   const placeholders = models.map(() => '?').join(',');
   const rows = db
     .prepare(
-      `SELECT requestId, userId, source, sourceMethod, model, capturedAt
+      `SELECT ${ATTR_COLS}
          FROM usage_attribution
         WHERE userId = ?
           AND capturedAt BETWEEN ? AND ?
           AND model IN (${placeholders})`,
     )
-    .all(userId, minCapturedAt, maxCapturedAt, ...models) as Array<{
-      requestId: string;
-      userId: string;
-      source: string;
-      sourceMethod: AttributionRecord['sourceMethod'];
-      model: string | null;
-      capturedAt: string;
-    }>;
-  return rows.map((r) => ({
-    requestId: r.requestId,
-    userId: r.userId,
-    source: r.source,
-    sourceMethod: r.sourceMethod,
-    model: r.model,
-    capturedAt: r.capturedAt,
-  }));
+    .all(userId, minCapturedAt, maxCapturedAt, ...models) as AttributionRow[];
+  return rows.map(rowToAttribution);
 }
