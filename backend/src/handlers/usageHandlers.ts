@@ -28,7 +28,7 @@ import type {
 } from "aws-lambda";
 
 import { isAuthFailure, verifySessionHeader } from "../lib/auth.js";
-import { getUser } from "../lib/store.js";
+import { getUser, getAttributionsForJoin, type AttributionRecord } from "../lib/store.js";
 import { newapi, newapiQuotaToUsd, type NewapiLogEntry } from "../lib/newapi.js";
 
 // ---------- Helpers ----------
@@ -81,7 +81,49 @@ interface UsageRecordShape {
   createdAt: string;
 }
 
-function mapNewapiLog(entry: NewapiLogEntry, userId: string): UsageRecordShape {
+/** Soft-join newapi log entries with usage_attribution rows. Per spec, the
+ *  match is `(userId, model, |capturedAt - created_at| ≤ 5s)`; the closest
+ *  attribution wins. Entries with no match get source='other' so the
+ *  chat-completions API line is never null. */
+function attachSourcesToLogEntries(
+  userId: string,
+  entries: NewapiLogEntry[],
+): Map<number, string> {  // map keyed by entry.id → source slug
+  const out = new Map<number, string>();
+  if (entries.length === 0) return out;
+
+  const minTs = Math.min(...entries.map((e) => e.created_at));
+  const maxTs = Math.max(...entries.map((e) => e.created_at));
+  const minIso = new Date((minTs - 5) * 1000).toISOString();
+  const maxIso = new Date((maxTs + 5) * 1000).toISOString();
+  const distinctModels = Array.from(new Set(
+    entries.map((e) => e.model_name).filter((m): m is string => Boolean(m)),
+  ));
+
+  const attributions: AttributionRecord[] = distinctModels.length > 0
+    ? getAttributionsForJoin(userId, distinctModels, minIso, maxIso)
+    : [];
+
+  for (const entry of entries) {
+    let bestSlug: string | null = null;
+    let bestDeltaMs = Number.POSITIVE_INFINITY;
+    const entryMs = entry.created_at * 1000;
+    for (const attr of attributions) {
+      if (attr.model !== entry.model_name) continue;
+      const captureMs = new Date(attr.capturedAt).getTime();
+      const delta = Math.abs(captureMs - entryMs);
+      if (delta > 5000) continue;
+      if (delta < bestDeltaMs) {
+        bestDeltaMs = delta;
+        bestSlug = attr.source;
+      }
+    }
+    out.set(entry.id, bestSlug ?? 'other');
+  }
+  return out;
+}
+
+function mapNewapiLog(entry: NewapiLogEntry, userId: string, source: string | null): UsageRecordShape {
   return {
     id: entry.id,
     userId,
@@ -89,7 +131,7 @@ function mapNewapiLog(entry: NewapiLogEntry, userId: string): UsageRecordShape {
     eventType: "consume",
     amountUsd: newapiQuotaToUsd(entry.quota),
     model: entry.model_name ?? null,
-    source: null, // newapi has no x-source notion
+    source,                              // <-- pass through from caller
     keyHint: entry.token_name ?? null, // user-friendly token label
     tokensIn: entry.prompt_tokens ?? null,
     tokensOut: entry.completion_tokens ?? null,
@@ -123,7 +165,7 @@ async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]>
       start_timestamp: p.start_timestamp,
       end_timestamp: p.end_timestamp,
     });
-    const items = res.items ?? [];
+    const items = res?.items ?? [];
     all.push(...items);
     if (items.length < perPage) break;
   }
@@ -297,7 +339,11 @@ export const usageHandler = async (
     start_timestamp: startTs,
     end_timestamp: endTs,
   });
-  const records = (pageRes.items ?? []).map((e) => mapNewapiLog(e, userId));
+  const pageItems = pageRes.items ?? [];
+  const sourceByEntryId = attachSourcesToLogEntries(userId, pageItems);
+  const records = pageItems.map((entry) =>
+    mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
+  );
 
   // Pull the full window for totals + hourly chart. Reasonable cap.
   const all = await fetchAllConsumeLogs({

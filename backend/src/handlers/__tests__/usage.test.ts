@@ -14,7 +14,7 @@ vi.mock('../../lib/newapi.js', async (orig) => {
   };
 });
 
-import { init, putUser } from '../../lib/store.js';
+import { init, putUser, insertAttribution, db } from '../../lib/store.js';
 import { usageHandler } from '../usageHandlers.js';
 import { newapi } from '../../lib/newapi.js';
 
@@ -143,5 +143,106 @@ describe('usageHandler (newapi-backed)', () => {
     expect(body.groups).toHaveLength(1);
     expect(body.groups[0].groupKey).toBeNull();
     expect(body.groups[0].callCount).toBe(2);
+  });
+});
+
+describe('GET /v1/usage — source attribution soft-join', () => {
+  // The soft-join uses the user's TokenBoss userId (from x-tb-user-id header
+  // → 'u_1') + model + ±5s window from each newapi entry's created_at.
+  // attribution_capturedAt is the 'now' we set when inserting the row in
+  // chatProxy; for tests we generate it close to entry.created_at.
+  beforeEach(() => {
+    db.exec(`DELETE FROM usage_attribution`);
+  });
+
+  it('fills source from attribution when match is in the time window', async () => {
+    const entryTs = Math.floor(Date.now() / 1000);
+    insertAttribution({
+      requestId: 'tb-aaaaaaaa11111111',
+      userId: 'u_1',  // matches the test user
+      source: 'openclaw',
+      sourceMethod: 'header',
+      model: 'sonnet',
+      capturedAt: new Date(entryTs * 1000).toISOString(),
+    });
+    getLogsMock.mockResolvedValueOnce({
+      items: [logEntry({ created_at: entryTs, model_name: 'sonnet' })],
+      total: 1, page: 0, page_size: 200,
+    });
+
+    const res = await usageHandler(makeEvt({ limit: '50' })) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body!);
+    expect(body.records[0].source).toBe('openclaw');
+  });
+
+  it("falls back to 'other' when attribution is outside the time window", async () => {
+    const entryTs = Math.floor(Date.now() / 1000);
+    insertAttribution({
+      requestId: 'tb-bbbbbbbb22222222',
+      userId: 'u_1',
+      source: 'hermes',
+      sourceMethod: 'header',
+      model: 'sonnet',
+      capturedAt: new Date((entryTs - 60) * 1000).toISOString(), // 60s earlier — outside ±5s window
+    });
+    getLogsMock.mockResolvedValueOnce({
+      items: [logEntry({ created_at: entryTs, model_name: 'sonnet' })],
+      total: 1, page: 0, page_size: 200,
+    });
+
+    const res = await usageHandler(makeEvt({ limit: '50' })) as APIGatewayProxyStructuredResultV2;
+    const body = JSON.parse(res.body!);
+    expect(body.records[0].source).toBe('other');
+  });
+
+  it("falls back to 'other' when no attribution rows exist (pre-feature data)", async () => {
+    // No insertAttribution calls.
+    const entryTs = Math.floor(Date.now() / 1000);
+    getLogsMock.mockResolvedValueOnce({
+      items: [logEntry({ created_at: entryTs, model_name: 'sonnet' })],
+      total: 1, page: 0, page_size: 200,
+    });
+
+    const res = await usageHandler(makeEvt({ limit: '50' })) as APIGatewayProxyStructuredResultV2;
+    const body = JSON.parse(res.body!);
+    expect(body.records[0].source).toBe('other');
+  });
+
+  it('picks the closest attribution when multiple are in the window', async () => {
+    const entryTs = Math.floor(Date.now() / 1000);
+    // 3 attributions in the window; closest by capturedAt should win.
+    insertAttribution({
+      requestId: 'tb-cccccccc33333333',
+      userId: 'u_1',
+      source: 'codex',
+      sourceMethod: 'header',
+      model: 'sonnet',
+      capturedAt: new Date((entryTs - 4) * 1000).toISOString(), // 4s before
+    });
+    insertAttribution({
+      requestId: 'tb-dddddddd44444444',
+      userId: 'u_1',
+      source: 'openclaw',
+      sourceMethod: 'header',
+      model: 'sonnet',
+      capturedAt: new Date((entryTs + 1) * 1000).toISOString(), // 1s after — closest
+    });
+    insertAttribution({
+      requestId: 'tb-eeeeeeee55555555',
+      userId: 'u_1',
+      source: 'hermes',
+      sourceMethod: 'header',
+      model: 'sonnet',
+      capturedAt: new Date((entryTs + 4) * 1000).toISOString(), // 4s after
+    });
+    getLogsMock.mockResolvedValueOnce({
+      items: [logEntry({ created_at: entryTs, model_name: 'sonnet' })],
+      total: 1, page: 0, page_size: 200,
+    });
+
+    const res = await usageHandler(makeEvt({ limit: '50' })) as APIGatewayProxyStructuredResultV2;
+    const body = JSON.parse(res.body!);
+    expect(body.records[0].source).toBe('openclaw'); // 1s delta wins over 4s
   });
 });
