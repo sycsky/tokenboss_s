@@ -740,3 +740,105 @@ export async function markOrderSettleStatus(args: {
   `).run({ orderId: args.orderId, settleStatus: args.settleStatus });
   return result.changes > 0;
 }
+
+// ---------- Public API — Usage Attribution ----------
+
+export interface AttributionRecord {
+  requestId: string;
+  userId: string;
+  source: string;
+  sourceMethod: 'header' | 'ua' | 'fallback';
+  model: string | null;
+  capturedAt: string;
+}
+
+/** INSERT OR IGNORE — duplicate requestId is a no-op (first write wins).
+ *  Caller should not depend on whether the insert actually happened; this
+ *  is best-effort observability data. */
+export function insertAttribution(rec: AttributionRecord): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO usage_attribution
+      (requestId, userId, source, sourceMethod, model, capturedAt)
+    VALUES
+      (@requestId, @userId, @source, @sourceMethod, @model, @capturedAt)
+  `).run({
+    requestId: rec.requestId,
+    userId: rec.userId,
+    source: rec.source,
+    sourceMethod: rec.sourceMethod,
+    model: rec.model ?? null,
+    capturedAt: rec.capturedAt,
+  });
+}
+
+/** Batch fetch by requestId. Returns a Map for O(1) lookup. Missing
+ *  requestIds are simply absent from the result. */
+export function getAttributionByRequestIds(
+  requestIds: string[],
+): Map<string, AttributionRecord> {
+  const out = new Map<string, AttributionRecord>();
+  if (requestIds.length === 0) return out;
+  const placeholders = requestIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT requestId, userId, source, sourceMethod, model, capturedAt
+         FROM usage_attribution
+        WHERE requestId IN (${placeholders})`,
+    )
+    .all(...requestIds) as Array<{
+      requestId: string;
+      userId: string;
+      source: string;
+      sourceMethod: AttributionRecord['sourceMethod'];
+      model: string | null;
+      capturedAt: string;
+    }>;
+  for (const r of rows) {
+    out.set(r.requestId, {
+      requestId: r.requestId,
+      userId: r.userId,
+      source: r.source,
+      sourceMethod: r.sourceMethod,
+      model: r.model,
+      capturedAt: r.capturedAt,
+    });
+  }
+  return out;
+}
+
+/** Soft-join fetch: returns all attribution rows in the window matching
+ *  user + any of the given models. Caller picks the closest capturedAt
+ *  per newapi log entry. */
+export function getAttributionsForJoin(
+  userId: string,
+  models: string[],
+  minCapturedAt: string,  // inclusive ISO
+  maxCapturedAt: string,  // inclusive ISO
+): AttributionRecord[] {
+  if (models.length === 0) return [];
+  const placeholders = models.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT requestId, userId, source, sourceMethod, model, capturedAt
+         FROM usage_attribution
+        WHERE userId = ?
+          AND capturedAt BETWEEN ? AND ?
+          AND model IN (${placeholders})`,
+    )
+    .all(userId, minCapturedAt, maxCapturedAt, ...models) as Array<{
+      requestId: string;
+      userId: string;
+      source: string;
+      sourceMethod: AttributionRecord['sourceMethod'];
+      model: string | null;
+      capturedAt: string;
+    }>;
+  return rows.map((r) => ({
+    requestId: r.requestId,
+    userId: r.userId,
+    source: r.source,
+    sourceMethod: r.sourceMethod,
+    model: r.model,
+    capturedAt: r.capturedAt,
+  }));
+}
