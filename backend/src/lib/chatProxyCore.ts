@@ -15,10 +15,16 @@
  */
 
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
+import { createHash, randomBytes } from "node:crypto";
 import { Agent } from "undici";
 
 import { isMockMode } from "./upstream.js";
 import { detectVirtualProfile, resolveVirtualModel } from "../router/resolve.js";
+import {
+  getUserIdByKeyHash,
+  insertAttribution,
+} from "./store.js";
+import { resolveSource } from "./sourceAttribution.js";
 
 /**
  * Dedicated undici dispatcher for upstream calls.
@@ -113,6 +119,50 @@ export async function streamChatCore(
       `Could not parse JSON body: ${String(err)}`,
     );
     return;
+  }
+
+  // ---------- Source attribution (best-effort, non-blocking) ----------
+  // Generate our own request_id; forward to upstream as X-Request-ID so
+  // that newapi can (hopefully) log it as the entry's request_id, enabling
+  // exact join in /v1/usage. Even if newapi reroles, the soft-join path
+  // covers it.
+  const requestId = `tb-${randomBytes(4).toString('hex')}`;
+
+  // Capture attribution row only when (a) feature isn't disabled and
+  // (b) we can identify the TokenBoss user from the bearer.
+  if (process.env.SOURCE_ATTRIBUTION !== 'off') {
+    try {
+      const bearer = (() => {
+        if (!authHeader) return null;
+        const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+        return m ? m[1].trim() : authHeader.trim();
+      })();
+      if (bearer && bearer.length > 0) {
+        const keyHash = createHash('sha256').update(bearer).digest('hex');
+        const ownerUserId = getUserIdByKeyHash(keyHash);
+        if (ownerUserId) {
+          const headerMap: Record<string, string | undefined> = {};
+          for (const [k, v] of Object.entries(event.headers ?? {})) {
+            if (typeof v === 'string') headerMap[k] = v;
+          }
+          const { slug, method } = resolveSource(headerMap);
+          insertAttribution({
+            requestId,
+            userId: ownerUserId,
+            source: slug,
+            sourceMethod: method,
+            model: typeof body.model === 'string' ? body.model : null,
+            capturedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err) {
+      // Best-effort: never block the chat completion on attribution.
+      console.warn('[chatProxy] attribution insert failed', {
+        requestId,
+        error: (err as Error).message,
+      });
+    }
   }
 
   // Resolve virtual models (auto/eco/premium/agentic) — before any prefix
@@ -238,6 +288,7 @@ export async function streamChatCore(
           headers: {
             "content-type": "application/json",
             authorization: authHeader,
+            "x-request-id": requestId,
           },
           body: JSON.stringify(body),
           // @ts-expect-error undici-specific extension on fetch init
