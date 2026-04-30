@@ -130,44 +130,13 @@ export async function streamChatCore(
   }
 
   // ---------- Source attribution (best-effort, non-blocking) ----------
-  // Generate our own request_id; forward to upstream as X-Request-ID so
-  // that newapi can (hopefully) log it as the entry's request_id, enabling
-  // exact join in /v1/usage. Even if newapi reroles, the soft-join path
-  // covers it.
+  // Generate our own request_id EARLY — forwarded to upstream as X-Request-ID
+  // so newapi can (hopefully) log it as the entry's request_id, enabling an
+  // exact join in /v1/usage. Even if newapi re-rolls it, the soft-join path
+  // covers it. The attribution row itself is written AFTER model resolution +
+  // prefix-strip (see below) so that attribution.model matches the concrete
+  // model id that newapi will actually log.
   const requestId = `tb-${randomBytes(8).toString('hex')}`;
-
-  // Capture attribution row only when (a) feature isn't disabled and
-  // (b) we can identify the TokenBoss user from the bearer.
-  if (process.env.SOURCE_ATTRIBUTION !== 'off') {
-    try {
-      const bearer = extractBearerToken(authHeader);
-      if (bearer) {
-        const keyHash = createHash('sha256').update(bearer).digest('hex');
-        const ownerUserId = getUserIdByKeyHash(keyHash);
-        if (ownerUserId) {
-          const headerMap: Record<string, string | undefined> = {};
-          for (const [k, v] of Object.entries(event.headers ?? {})) {
-            if (typeof v === 'string') headerMap[k] = v;
-          }
-          const { slug, method } = resolveSource(headerMap);
-          insertAttribution({
-            requestId,
-            userId: ownerUserId,
-            source: slug,
-            sourceMethod: method,
-            model: typeof body.model === 'string' ? body.model : null,
-            capturedAt: new Date().toISOString(),
-          });
-        }
-      }
-    } catch (err) {
-      // Best-effort: never block the chat completion on attribution.
-      console.warn('[chatProxy] attribution insert failed', {
-        requestId,
-        error: (err as Error).message,
-      });
-    }
-  }
 
   // Resolve virtual models (auto/eco/premium/agentic) — before any prefix
   // stripping so `detectVirtualProfile` sees the original name. The rules
@@ -220,6 +189,43 @@ export async function streamChatCore(
       : m,
   );
   void routingReasoning;
+
+  // LATE attribution capture — runs AFTER body.model is fully resolved +
+  // prefix-stripped, so attribution.model matches the concrete model id that
+  // newapi will actually log. The soft-join filter in usageHandlers compares
+  // attr.model === entry.model_name; capturing the user-supplied virtual name
+  // (e.g. "auto") instead of the resolved concrete id made that filter always
+  // miss, degrading every virtual-profile call to source='other'.
+  if (process.env.SOURCE_ATTRIBUTION !== 'off') {
+    try {
+      const bearer = extractBearerToken(authHeader);
+      if (bearer) {
+        const keyHash = createHash('sha256').update(bearer).digest('hex');
+        const ownerUserId = getUserIdByKeyHash(keyHash);
+        if (ownerUserId) {
+          const headerMap: Record<string, string | undefined> = {};
+          for (const [k, v] of Object.entries(event.headers ?? {})) {
+            if (typeof v === 'string') headerMap[k] = v;
+          }
+          const { slug, method } = resolveSource(headerMap);
+          insertAttribution({
+            requestId,
+            userId: ownerUserId,
+            source: slug,
+            sourceMethod: method,
+            model: typeof body.model === 'string' ? body.model : null,
+            capturedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err) {
+      // Best-effort: never block the chat completion on attribution.
+      console.warn('[chatProxy] attribution insert failed', {
+        requestId,
+        error: (err as Error).message,
+      });
+    }
+  }
 
   const wantsStream = body.stream === true;
 

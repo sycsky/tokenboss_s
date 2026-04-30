@@ -119,4 +119,37 @@ describe('chatProxy — attribution capture', () => {
     expect(cap.status).toBeLessThan(500);
     spy.mockRestore();
   });
+
+  it('captures the RESOLVED model after prefix-strip (provider/model → model)', async () => {
+    // Use a provider-prefixed model name to exercise the prefix-strip path.
+    // body.model starts as 'anthropic/claude-haiku-4.5'; after strip it becomes
+    // 'claude-haiku-4.5'. Attribution must record the post-strip name so the
+    // soft-join model-equality filter in usageHandlers can match newapi's log.
+    const cap = captureWriter();
+    await streamChatCore(chatEvent({ 'x-source': 'openclaw' }, 'anthropic/claude-haiku-4.5'), cap.writer);
+    const rows = db.prepare(`SELECT * FROM usage_attribution`).all() as any[];
+    expect(rows).toHaveLength(1);
+    // Must NOT be the user-supplied prefixed form
+    expect(rows[0].model).not.toBe('anthropic/claude-haiku-4.5');
+    // Must be the stripped concrete id
+    expect(rows[0].model).toBe('claude-haiku-4.5');
+  });
+
+  it('captures the RESOLVED model after virtual profile resolution (auto → concrete)', async () => {
+    // body.model='auto' triggers detectVirtualProfile → resolveVirtualModel →
+    // body.model = concrete id (e.g. 'claude-haiku-4.5' after prefix strip).
+    // Attribution row must reflect the resolved model, not 'auto', so the
+    // soft-join model-equality filter in usageHandlers can match newapi's log.
+    const cap = captureWriter();
+    await streamChatCore(chatEvent({ 'x-source': 'openclaw' }, 'auto'), cap.writer);
+    const rows = db.prepare(`SELECT * FROM usage_attribution`).all() as any[];
+    expect(rows).toHaveLength(1);
+    // Must NOT be 'auto' (the user-supplied virtual profile name)
+    expect(rows[0].model).not.toBe('auto');
+    // Must be a concrete model id (non-empty string)
+    expect(typeof rows[0].model).toBe('string');
+    expect(rows[0].model.length).toBeGreaterThan(0);
+    // Must not contain a '/' — prefix strip must have run
+    expect(rows[0].model).not.toContain('/');
+  });
 });
