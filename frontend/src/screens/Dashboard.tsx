@@ -12,6 +12,7 @@ import {
 import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
 import { UsageRow } from '../components/UsageRow';
+import { formatModelName } from '../lib/modelName';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
@@ -503,9 +504,9 @@ export default function Dashboard() {
                       variant="mobile"
                       time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                       eventType={r.eventType}
-                      model={r.model || undefined}
+                      model={formatModelName(r.model)}
                       source={r.source || undefined}
-                      amount={`${(r.amountUsd ?? 0) >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd ?? 0).toFixed(6)}`}
+                      amountUsd={r.amountUsd ?? 0}
                     />
                   ))}
                 </div>

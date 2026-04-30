@@ -1,28 +1,37 @@
 export type UsageEventType = 'consume' | 'reset' | 'expire' | 'topup' | 'refund';
 
 export interface UsageRowProps {
-  time: string;           // e.g. "2026/04/26 9:41"
+  time: string;              // e.g. "2026/04/26 9:41"
   eventType: UsageEventType;
   source?: string;
   model?: string;
-  amount: string;         // "−$0.027" or "+$30.00"
+  /** Absolute USD value of the change. Sign is derived from eventType
+   *  (consume / expire are negatives, reset / topup / refund are positives)
+   *  so the backend can keep storing magnitudes and the UI owns presentation. */
+  amountUsd: number;
   variant?: 'mobile' | 'desktop';
 }
 
 // Each event type carries a "stamp" pill (matching Slock-pixel — solid fill +
-// 2px ink border) and an amount color. Consume is brand orange to call out the
-// most common case; positive movements (reset / topup) lean green; expire and
-// refund are quieter neutrals.
-const TYPE_STYLES: Record<UsageEventType, { pill: string; amount: string; label: string }> = {
-  consume: { pill: 'bg-accent text-white border-2 border-ink', amount: 'text-accent-deep', label: '消耗' },
-  reset:   { pill: 'bg-[#16A34A] text-white border-2 border-ink', amount: 'text-[#15803D]', label: '重置' },
-  expire:  { pill: 'bg-bg text-ink border-2 border-ink', amount: 'text-[#A89A8D]', label: '作废' },
-  topup:   { pill: 'bg-[#16A34A] text-white border-2 border-ink', amount: 'text-[#15803D]', label: '充值' },
-  refund:  { pill: 'bg-bg text-ink border-2 border-ink', amount: 'text-[#A89A8D]', label: '退款' },
+// 2px ink border), an amount color, and the sign used to render the change.
+// Consume / expire are negatives in red; reset / topup / refund are positives
+// in green. Spec credits-economy § 8 mandates these semantics.
+const TYPE_STYLES: Record<UsageEventType, {
+  pill: string;
+  amount: string;
+  label: string;
+  sign: '+' | '−';
+}> = {
+  consume: { pill: 'bg-accent text-white border-2 border-ink', amount: 'text-red-600', label: '消耗', sign: '−' },
+  reset:   { pill: 'bg-[#16A34A] text-white border-2 border-ink', amount: 'text-[#15803D]', label: '重置', sign: '+' },
+  expire:  { pill: 'bg-bg text-ink border-2 border-ink', amount: 'text-[#A89A8D]', label: '作废', sign: '−' },
+  topup:   { pill: 'bg-[#16A34A] text-white border-2 border-ink', amount: 'text-[#15803D]', label: '充值', sign: '+' },
+  refund:  { pill: 'bg-bg text-ink border-2 border-ink', amount: 'text-[#A89A8D]', label: '退款', sign: '+' },
 };
 
-export function UsageRow({ time, eventType, source, model, amount, variant = 'desktop' }: UsageRowProps) {
+export function UsageRow({ time, eventType, source, model, amountUsd, variant = 'desktop' }: UsageRowProps) {
   const styles = TYPE_STYLES[eventType];
+  const amount = `${styles.sign}$${Math.abs(amountUsd).toFixed(6)}`;
   if (variant === 'mobile') {
     return (
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b-2 border-ink/10 last:border-b-0">

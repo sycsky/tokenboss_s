@@ -4,6 +4,7 @@ import { AppNav, Breadcrumb, SectionLabel } from '../components/AppNav';
 import { BalancePill } from '../components/BalancePill';
 import { ConsumeChart24h, type HourBucket } from '../components/ConsumeChart24h';
 import { UsageRow } from '../components/UsageRow';
+import { formatModelName } from '../lib/modelName';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 const selectCls =
@@ -67,17 +68,13 @@ export default function UsageHistory() {
           <BalancePill amount={`$${balance.toFixed(4)}`} label="当前余额" />
         </div>
 
-        {/* 24h chart */}
+        {/* 24h chart — peak hour gets a deeper accent, no separate legend dot */}
         <section className="mb-7">
           <SectionLabel
             action={
-              <span className="font-mono text-[10px] flex gap-3 normal-case tracking-tight text-[#6B5E52]">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 bg-accent border-2 border-ink rounded-sm" />消耗
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 bg-accent-deep border-2 border-ink rounded-sm" />峰值
-                </span>
+              <span className="font-mono text-[10px] normal-case tracking-tight text-[#6B5E52] flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 bg-accent border-2 border-ink rounded-sm" />
+                消耗 · 峰值高亮
               </span>
             }
           >
@@ -124,9 +121,9 @@ export default function UsageHistory() {
                     variant="desktop"
                     time={new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     eventType={r.eventType}
-                    model={r.model || undefined}
+                    model={formatModelName(r.model)}
                     source={r.source || undefined}
-                    amount={`${r.amountUsd >= 0 ? '+' : '−'}$${Math.abs(r.amountUsd).toFixed(6)}`}
+                    amountUsd={r.amountUsd}
                   />
                 ))
               ) : (

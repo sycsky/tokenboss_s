@@ -3,34 +3,36 @@ import { render, screen } from '@testing-library/react';
 import { UsageRow } from '../UsageRow';
 
 describe('<UsageRow>', () => {
-  it('renders mobile variant with all data', () => {
+  it('renders mobile variant with all data and applies consume sign', () => {
     render(<UsageRow
       variant="mobile"
       time="9:41"
       eventType="consume"
       source="OpenClaw"
-      model="Sonnet 4.7"
-      amount="−$0.027"
+      model="Claude Sonnet 4.7"
+      amountUsd={0.027}
     />);
     expect(screen.getByText('9:41')).toBeInTheDocument();
-    expect(screen.getByText('Sonnet 4.7')).toBeInTheDocument();
+    expect(screen.getByText('Claude Sonnet 4.7')).toBeInTheDocument();
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
     expect(screen.getByText('消耗')).toBeInTheDocument();
-    expect(screen.getByText('−$0.027')).toBeInTheDocument();
+    // Sign derived from eventType, not from value sign — backend ships
+    // a positive magnitude and the row owns the '−' for consume events.
+    expect(screen.getByText('−$0.027000')).toBeInTheDocument();
   });
 
-  it('renders reset event with green pill', () => {
+  it('renders reset event with green pill and + sign', () => {
     render(<UsageRow
       variant="mobile"
       time="0:00"
       eventType="reset"
-      amount="+$30.00"
+      amountUsd={30}
     />);
     expect(screen.getByText('重置')).toBeInTheDocument();
-    expect(screen.getByText('+$30.00')).toBeInTheDocument();
+    expect(screen.getByText('+$30.000000')).toBeInTheDocument();
   });
 
-  it('renders desktop variant inside a table', () => {
+  it('renders expire event with − sign even when value is positive', () => {
     render(
       <table>
         <tbody>
@@ -40,12 +42,23 @@ describe('<UsageRow>', () => {
             eventType="expire"
             source="套餐"
             model="日 cap 重置"
-            amount="−$4.57"
+            amountUsd={4.57}
           />
         </tbody>
       </table>
     );
     expect(screen.getByText('作废')).toBeInTheDocument();
-    expect(screen.getByText('−$4.57')).toBeInTheDocument();
+    expect(screen.getByText('−$4.570000')).toBeInTheDocument();
+  });
+
+  it('renders topup event with + sign', () => {
+    render(<UsageRow
+      variant="mobile"
+      time="10:00"
+      eventType="topup"
+      amountUsd={50}
+    />);
+    expect(screen.getByText('充值')).toBeInTheDocument();
+    expect(screen.getByText('+$50.000000')).toBeInTheDocument();
   });
 });
