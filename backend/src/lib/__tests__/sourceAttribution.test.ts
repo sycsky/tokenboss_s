@@ -52,6 +52,21 @@ describe('parseUaSource', () => {
   it('all matches carry method=ua', () => {
     expect(parseUaSource('openclaw/1.0')?.method).toBe('ua');
   });
+
+  it('does not mis-attribute on substring matches (hermesjs / codex-archive)', () => {
+    expect(parseUaSource('hermesjs/2.0')).toBeNull();
+    expect(parseUaSource('codex-archive-bot/1.0')).toBeNull();
+    expect(parseUaSource('hyperopenclaw/1.0')).toBeNull();
+  });
+
+  it('also matches the regex variants in the original positive cases', () => {
+    // Re-confirm the 4-agent positive matrix still passes after tightening.
+    expect(parseUaSource('openclaw-cli/1.2.3')?.slug).toBe('openclaw');
+    expect(parseUaSource('Hermes-SDK/0.5.0 (linux)')?.slug).toBe('hermes');
+    expect(parseUaSource('Mozilla/5.0 Claude-Code/1.0')?.slug).toBe('claude-code');
+    expect(parseUaSource('codex-runtime/2.1')?.slug).toBe('codex');
+    expect(parseUaSource('claudecode/1.0')?.slug).toBe('claude-code');
+  });
 });
 
 describe('resolveSource', () => {

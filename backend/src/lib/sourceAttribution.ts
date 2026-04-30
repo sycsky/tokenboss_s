@@ -11,6 +11,10 @@
  * The chat-completions line guarantees a non-null source by always
  * falling through to 'other' — downstream / frontend never has to
  * handle null for chat traffic.
+ *
+ * SECURITY: this is observability-grade attribution, not authentication.
+ * Any client can set `X-Source` or forge a `User-Agent`. Do NOT gate
+ * billing, quota, or access control on the resolved slug.
  */
 
 import type { SourceMethod } from './store.js';
@@ -34,13 +38,15 @@ export function parseSourceHeader(raw: string | undefined): ResolvedSource | nul
   return { slug: truncated, method: 'header' };
 }
 
-// UA → slug mapping. First match wins. Patterns are intentionally loose —
-// SDKs may include version suffixes, platform info, etc.
+// Match the slug only as the major UA token name, potentially with a short
+// dash-separated qualifier (e.g., openclaw-cli, hermes-sdk), then version.
+// Prevents 'hermesjs/2.0' → 'hermes' or 'codex-archive-bot' → 'codex'.
+// Pattern: (start|space) + slug + (optional -qualifier) + (space|slash|end)
 const UA_PATTERNS: Array<[RegExp, string]> = [
-  [/openclaw/i, 'openclaw'],
-  [/hermes/i, 'hermes'],
-  [/claude.?code/i, 'claude-code'],  // matches 'claude-code', 'claude_code', 'claudecode'
-  [/codex/i, 'codex'],
+  [/(?:^|\s)openclaw(?:-[a-z]+)?(?:\s|\/|$)/i, 'openclaw'],
+  [/(?:^|\s)hermes(?:-[a-z]+)?(?:\s|\/|$)/i,   'hermes'],
+  [/(?:^|\s)claude[-_]?code(?:-[a-z]+)?(?:\s|\/|$)/i, 'claude-code'],
+  [/(?:^|\s)codex(?:-[a-z]+)?(?:\s|\/|$)/i,    'codex'],
 ];
 
 /** Match incoming User-Agent against the 4 canonical agent patterns. */
