@@ -291,6 +291,26 @@ export function init(): void {
        END
      WHERE skuType IS NULL AND planId IS NOT NULL
   `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_attribution (
+      request_id    TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL,
+      source        TEXT NOT NULL,
+      source_method TEXT NOT NULL,
+      model         TEXT,
+      captured_at   TEXT NOT NULL,
+      CHECK (length(source) <= 32)
+    );
+    CREATE INDEX IF NOT EXISTS idx_attribution_user_time
+      ON usage_attribution(user_id, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_attribution_request_id
+      ON usage_attribution(request_id);
+  `);
+
+  // Idempotent migration: if a pre-feature DB existed, the CREATE TABLE
+  // IF NOT EXISTS above is a no-op for it; nothing else needed because
+  // we add no columns to existing tables.
 }
 
 // Initialise on module load (production default path).
