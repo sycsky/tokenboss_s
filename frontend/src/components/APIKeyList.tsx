@@ -89,8 +89,11 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
       )}
 
       {keys.map((k, i) => {
-        const last4 = k.key.slice(-4);
-        const stats = keyStats.get(last4);
+        // The backend aggregates usage by newapi's `token_name` (the user-
+        // given key label, e.g. "default"), so the lookup key here must be
+        // the same label, not a slice of the masked-key string. See the
+        // shapeKeyStats comment in Dashboard.tsx for the full story.
+        const stats = keyStats.get(k.label || 'default');
         const isCopying = copyingId === k.keyId;
         const isCopied = copiedId === k.keyId;
         return (

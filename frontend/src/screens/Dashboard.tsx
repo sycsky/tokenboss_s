@@ -61,12 +61,22 @@ function resetDashboardCache(): void {
   dashboardCache.cachedAt = undefined;
 }
 
+/**
+ * Build a label → KeyStats map from the server's keyHint aggregation.
+ *
+ * Backend's `keyHint` (usageHandlers.ts:93) is actually the newapi
+ * `token_name` — the user-given label like "default" — NOT the raw key
+ * tail. Earlier code took `groupKey.slice(-4)` and matched it against
+ * `k.key.slice(-4)`, which silently missed every time ("default".slice(-4)
+ * = "ault" vs masked-key tail "aCvC"), so every key showed "未使用" no
+ * matter how much it was used. We index by the full label string so the
+ * lookup actually works.
+ */
 function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
   const m = new Map<string, KeyStats>();
   for (const g of groups) {
     if (!g.groupKey) continue;
-    const tail = g.groupKey.slice(-4);
-    m.set(tail, {
+    m.set(g.groupKey, {
       callCount: g.callCount,
       totalSpent: g.totalConsumedUsd,
       lastUsedAt: g.lastUsedAt,
@@ -178,6 +188,15 @@ export default function Dashboard() {
   const periodRemainingPct = periodTotal > 0
     ? Math.max(0, Math.min(100, (periodRemaining / periodTotal) * 100))
     : 0;
+
+  // Threshold-colored fill: white = comfortable, yellow = mind it,
+  // red-soft = top up soon. Pure white on accent-orange has weak
+  // contrast at low remaining %, so we shift hue when the user is
+  // running low — a "fuel gauge" cue in addition to the bar length.
+  const periodFillColor =
+    periodRemainingPct >= 50 ? 'bg-white'
+    : periodRemainingPct >= 20 ? 'bg-yellow-stamp'
+    : 'bg-red-soft';
 
   // Live trial countdown — ticks once a second, only when there's a
   // trial bucket whose expiry is in the future. The hero shows it as a
@@ -419,8 +438,21 @@ export default function Dashboard() {
               with the "等 Agent 第一笔调用…" placeholder below in saying
               the same thing). */}
           {subBucket && periodTotal > 0 && !noActivity && (
-            <div className="mt-4 h-2 bg-white/20 border border-white/40 rounded overflow-hidden">
-              <div className="h-full bg-white" style={{ width: `${periodRemainingPct}%` }} />
+            // Two-tone bar with threshold-colored fill + a mono readout
+            // on the right. Container is bg-black/30 (dark on accent-orange)
+            // so the white/yellow/red fill always reads as a distinct mass,
+            // not a near-invisible gradient. The "剩 X%" number gives users
+            // an exact sense of where they are without parsing bar length.
+            <div className="mt-4 flex items-center gap-3">
+              <div className="flex-1 h-2.5 bg-black/30 border border-white/30 rounded overflow-hidden">
+                <div
+                  className={`h-full ${periodFillColor} transition-all duration-300`}
+                  style={{ width: `${periodRemainingPct}%` }}
+                />
+              </div>
+              <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
+                剩 {Math.round(periodRemainingPct)}%
+              </span>
             </div>
           )}
         </section>
