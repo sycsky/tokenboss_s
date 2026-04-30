@@ -81,13 +81,21 @@ export function inferTierFromModelId(modelId: string): ModelTier {
   return "standard";
 }
 
-/** Last 8 chars of the bearer (for log attribution only — no longer
- *  used for quota math). */
-export function extractKeyHint(authHeader: string | undefined): string | null {
+/** Pull the raw bearer token out of an Authorization header. Returns null
+ *  for missing/empty header. Used by both extractKeyHint (last-8-chars)
+ *  and the attribution block (sha256 → api_key_index lookup). */
+export function extractBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader) return null;
   const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
   const token = m ? m[1].trim() : authHeader.trim();
-  if (token.length < 4) return null;
+  return token.length > 0 ? token : null;
+}
+
+/** Last 8 chars of the bearer (for log attribution only — no longer
+ *  used for quota math). */
+export function extractKeyHint(authHeader: string | undefined): string | null {
+  const token = extractBearerToken(authHeader);
+  if (!token || token.length < 4) return null;
   return token.slice(-8);
 }
 
@@ -126,18 +134,14 @@ export async function streamChatCore(
   // that newapi can (hopefully) log it as the entry's request_id, enabling
   // exact join in /v1/usage. Even if newapi reroles, the soft-join path
   // covers it.
-  const requestId = `tb-${randomBytes(4).toString('hex')}`;
+  const requestId = `tb-${randomBytes(8).toString('hex')}`;
 
   // Capture attribution row only when (a) feature isn't disabled and
   // (b) we can identify the TokenBoss user from the bearer.
   if (process.env.SOURCE_ATTRIBUTION !== 'off') {
     try {
-      const bearer = (() => {
-        if (!authHeader) return null;
-        const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
-        return m ? m[1].trim() : authHeader.trim();
-      })();
-      if (bearer && bearer.length > 0) {
+      const bearer = extractBearerToken(authHeader);
+      if (bearer) {
         const keyHash = createHash('sha256').update(bearer).digest('hex');
         const ownerUserId = getUserIdByKeyHash(keyHash);
         if (ownerUserId) {

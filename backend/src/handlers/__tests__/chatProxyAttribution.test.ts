@@ -69,7 +69,7 @@ describe('chatProxy — attribution capture', () => {
     expect(rows[0].source).toBe('openclaw');
     expect(rows[0].sourceMethod).toBe('header');
     expect(rows[0].model).toBe('gpt-4o-mini');
-    expect(rows[0].requestId).toMatch(/^tb-[0-9a-f]{8}$/);
+    expect(rows[0].requestId).toMatch(/^tb-[0-9a-f]{16}$/);
   });
 
   it('falls back to UA when no X-Source', async () => {
