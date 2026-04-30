@@ -13,6 +13,7 @@ import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
 import { UsageRow } from '../components/UsageRow';
 import { formatModelName } from '../lib/modelName';
+import { formatSource } from '../lib/sourceDisplay';
 import { UnverifiedEmailBanner } from '../components/UnverifiedEmailBanner';
 import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
@@ -537,9 +538,11 @@ export default function Dashboard() {
                       time={new Date(r.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                       eventType={r.eventType}
                       model={formatModelName(r.model)}
-                      // Fallback to keyHint (token name) until real source
-                      // attribution via X-Source header lands.
-                      source={r.source || r.keyHint || undefined}
+                      // chat-completions line: r.source non-null (worst case 'other')
+                      // → formatSource displays the brand name. Other endpoints
+                      // (embeddings/audio etc.) still return source=null →
+                      // right-hand keyHint fallback (legacy path, commit 1be9be2).
+                      source={r.source ? formatSource(r.source) : (r.keyHint ?? undefined)}
                       amountUsd={r.amountUsd ?? 0}
                     />
                   ))}

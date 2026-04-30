@@ -5,6 +5,7 @@ import { BalancePill } from '../components/BalancePill';
 import { ConsumeChart24h, type HourBucket } from '../components/ConsumeChart24h';
 import { UsageRow } from '../components/UsageRow';
 import { formatModelName } from '../lib/modelName';
+import { formatSource } from '../lib/sourceDisplay';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 const selectCls =
@@ -122,10 +123,11 @@ export default function UsageHistory() {
                     time={new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     eventType={r.eventType}
                     model={formatModelName(r.model)}
-                    // Fallback to keyHint (= API key 的用户自命名) until X-Source
-                    // header attribution lands. Users naming keys after their
-                    // agents (e.g. "OpenClaw 用 key") get free attribution today.
-                    source={r.source || r.keyHint || undefined}
+                    // chat-completions line: r.source non-null (worst case 'other')
+                    // → formatSource displays the brand name. Other endpoints
+                    // (embeddings/audio etc.) still return source=null →
+                    // right-hand keyHint fallback (legacy path, commit 1be9be2).
+                    source={r.source ? formatSource(r.source) : (r.keyHint ?? undefined)}
                     amountUsd={r.amountUsd}
                   />
                 ))
