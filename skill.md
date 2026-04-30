@@ -1,7 +1,7 @@
 ---
 name: tokenboss
-version: 0.8.0
-description: TokenBoss — one API key, one OpenAI-compatible endpoint, six curated models (three GPT, three Claude). Configure as a custom provider on OpenClaw, Hermes Agent, Codex CLI, or any other agent that speaks OpenAI Chat Completions. Use when setting up TokenBoss, switching LLM provider, or configuring AI routing.
+version: 0.8.1
+description: TokenBoss — one API key, one OpenAI-compatible endpoint, six curated models (three GPT, three Claude). Configure as a custom provider on OpenClaw, Hermes Agent, Codex CLI (pin 0.80.0), or any other agent that speaks OpenAI Chat Completions. Use when setting up TokenBoss, switching LLM provider, or configuring AI routing.
 homepage: https://tokenboss.co
 api_endpoint: https://api.tokenboss.co/v1
 last_updated: 2026-04-30
@@ -19,7 +19,12 @@ metadata:
     env_file: ~/.hermes/.env
   codex:
     config_file: ~/.codex/config.toml
-    install_command: "npm install -g @openai/codex"
+    # Lock to 0.80.0 — newer Codex versions removed `wire_api = "chat"` and
+    # force the OpenAI Responses API; TokenBoss only exposes Chat Completions
+    # (/v1/chat/completions), so the protocol mismatch makes anything > 0.80
+    # unable to talk to the endpoint. Lifts when the backend adds Responses.
+    install_command: "npm install -g @openai/codex@0.80.0"
+    version_pin: "0.80.0"
     requires: "Node.js 18+"
     # Codex hard-codes the env var lookup; key_env in the provider table
     # tells it which name to read from. Default to OPENAI_API_KEY since
@@ -206,9 +211,11 @@ OpenAI's official CLI. Configuration is TOML-based and the bearer credential is 
 
 ### Install
 
+> **Pin to 0.80.0.** Codex versions after 0.80 removed the `wire_api = "chat"` provider option and force the OpenAI Responses API. TokenBoss only exposes Chat Completions (`/v1/chat/completions`), so newer Codex can't talk to it at the protocol layer. This pin can be lifted once the backend adds a Responses-API surface.
+
 ```bash
-# Requires Node.js 18+. Skip if codex is already on PATH.
-npm install -g @openai/codex
+# Requires Node.js 18+. The version pin is load-bearing — see note above.
+npm install -g @openai/codex@0.80.0
 ```
 
 ### Config block
