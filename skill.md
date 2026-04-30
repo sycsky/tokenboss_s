@@ -1,7 +1,7 @@
 ---
 name: tokenboss
-version: 0.8.1
-description: TokenBoss — one API key, one OpenAI-compatible endpoint, six curated models (three GPT, three Claude). Configure as a custom provider on OpenClaw, Hermes Agent, Codex CLI (pin 0.80.0), or any other agent that speaks OpenAI Chat Completions. Use when setting up TokenBoss, switching LLM provider, or configuring AI routing.
+version: 0.8.2
+description: TokenBoss — one API key, one OpenAI-compatible Chat Completions endpoint. Configure as a custom provider for Hermes Agent, OpenClaw, Codex CLI, or any other agent that supports OpenAI-compatible /v1/chat/completions.
 homepage: https://tokenboss.co
 api_endpoint: https://api.tokenboss.co/v1
 last_updated: 2026-04-30
@@ -10,169 +10,149 @@ metadata:
     required: true
     env_var: TOKENBOSS_API_KEY
     placeholder: TOKENBOSS_API_KEY
-    prompt: "Paste your TokenBoss API key (from https://tokenboss.co/console)"
-  openclaw:
-    config_file: ~/.openclaw/openclaw.json
-    provider_key: tokenboss
+    prompt: "Paste your TokenBoss API key from https://tokenboss.co/console"
   hermes:
     config_file: ~/.hermes/config.yaml
     env_file: ~/.hermes/.env
   codex:
     config_file: ~/.codex/config.toml
-    # Lock to 0.80.0 — newer Codex versions removed `wire_api = "chat"` and
-    # force the OpenAI Responses API; TokenBoss only exposes Chat Completions
-    # (/v1/chat/completions), so the protocol mismatch makes anything > 0.80
-    # unable to talk to the endpoint. Lifts when the backend adds Responses.
     install_command: "npm install -g @openai/codex@0.80.0"
     version_pin: "0.80.0"
     requires: "Node.js 18+"
-    # Codex hard-codes the env var lookup; key_env in the provider table
-    # tells it which name to read from. Default to OPENAI_API_KEY since
-    # that's the muscle-memory variable for Codex users.
     env_var: OPENAI_API_KEY
     wire_api: chat
 ---
 
 # TokenBoss
 
-One API key, one OpenAI-compatible endpoint, six curated models. Configure TokenBoss as a custom provider on **OpenClaw**, **Hermes Agent**, **Codex CLI**, or any other agent that speaks OpenAI Chat Completions.
+TokenBoss exposes an OpenAI-compatible endpoint:
 
-> **Protocol** — OpenAI Chat Completions only (`/v1/chat/completions`). The Anthropic-native `/v1/messages` endpoint is **not** available; Claude models (`claude-*`) are reached through `/v1/chat/completions` like any OpenAI model. See [Claude Code users](#claude-code-users) for a workaround.
+```text
+https://api.tokenboss.co/v1
+```
+
+Use it with clients that support OpenAI Chat Completions:
+
+```text
+/v1/chat/completions
+```
+
+Important protocol notes:
+
+- Supported: OpenAI Chat Completions
+- Not supported: OpenAI Responses API
+- Not supported: Anthropic-native `/v1/messages`
+- Claude-style models, if available to your account group, must still be called through `/v1/chat/completions`
 
 ## The spell
 
-The user pastes two lines — copied from <https://tokenboss.co/console>:
+The user may paste:
 
-```
+```text
 set up tokenboss.co/skill.md
-TOKENBOSS_API_KEY=sk-XXXXXXXX
+TOKENBOSS_API_KEY=***
 ```
 
-- Line 1 = "fetch this URL and apply the section that matches me."
-- Line 2 = the user's API key in `KEY=VALUE` form; use it as the bearer credential and **do not ask the user again**.
-
-If only Line 1 was pasted, prompt once for the key.
+- Line 1 means: fetch this skill and apply the matching section.
+- Line 2 is the API key.
+- Do not ask for the key again if the user already provided it.
+- Never print, log, or echo the key.
 
 ## Persisting the key
 
-Edit the target file directly — never `echo >>`, which leaks the value into shell history.
+For Hermes Agent, write the key to:
 
-```
-# ~/.hermes/.env
-TOKENBOSS_API_KEY=<key>
-```
-
-```
-# ~/.zshrc or ~/.bashrc (for OpenClaw)
-export TOKENBOSS_API_KEY=<key>
+```text
+~/.hermes/.env
 ```
 
-If the target file is git-tracked, abort and ask the user to `.gitignore` it first. Never log, print, or copy the key value into chat output.
+Add:
 
-## Supported models
-
-| Model ID | Family | Notes |
-|---|---|---|
-| `gpt-5.5` | OpenAI | Default primary |
-| `gpt-5.4` | OpenAI | |
-| `gpt-5.4-mini` | OpenAI | Lower-cost |
-| `claude-sonnet-4-6` | Anthropic | |
-| `claude-opus-4-6` | Anthropic | Runs in thinking mode by default — the response `model` field reports `claude-opus-4-6-thinking` and reasoning tokens are billed |
-| `claude-opus-4-7` | Anthropic | Newest Anthropic tier; if you receive `503 No available channel`, the model is being provisioned for your group — check the console or fall through to `claude-opus-4-6` |
-
-### Model discovery
-
-```bash
-curl -s https://api.tokenboss.co/v1/models \
-  -H "Authorization: Bearer $TOKENBOSS_API_KEY" | jq '.data[].id'
+```dotenv
+TOKENBOSS_API_KEY=***
 ```
 
-`/v1/models` returns the live catalog. In addition to the six curated models above, free community models (e.g. `nemotron-3-super-120b-a12b`, `hy3-preview`) may appear; their availability depends on upstream free-tier capacity and they may return `429` without warning. The six curated IDs above are the supported, billed models — prefer them in production.
+Do not use `echo >>` with real secrets, because it can leak into shell history. Use an editor or a safe file-writing tool.
 
-### Feature compatibility
-
-- ✅ Streaming (`stream: true`, server-sent events)
-- ✅ Tool / function calling (`tools`, `tool_choice`)
-- ✅ JSON mode (`response_format: { "type": "json_object" }`)
-- ✅ System messages (passed through verbatim, including for `claude-*`)
-- ❌ Embeddings, image generation, audio (`/v1/embeddings`, `/v1/images`, `/v1/audio` are not exposed)
-- ❌ Anthropic-native `/v1/messages`
-- ❌ OpenAI Responses API (`/v1/responses`)
+If the target file is git-tracked, stop and ask the user to `.gitignore` it first.
 
 ---
 
-## For OpenClaw
+# Model discovery
 
-Merge into `~/.openclaw/openclaw.json`. **Never blanket-overwrite the file.** Update only the keys called out below — preserve every other top-level key (`skills`, `wizard`, etc.) and every other entry already inside `models.providers`.
-
-### Provider block
-
-In `models.providers`, add or overwrite the key `"tokenboss"`:
-
-```json
-"tokenboss": {
-  "baseUrl": "https://api.tokenboss.co/v1",
-  "api": "openai-completions",
-  "apiKey": "${TOKENBOSS_API_KEY}",
-  "models": [
-    { "id": "gpt-5.5",            "name": "GPT 5.5" },
-    { "id": "gpt-5.4",            "name": "GPT 5.4" },
-    { "id": "gpt-5.4-mini",       "name": "GPT 5.4 Mini" },
-    { "id": "claude-sonnet-4-6",  "name": "Claude Sonnet 4.6" },
-    { "id": "claude-opus-4-6",    "name": "Claude Opus 4.6 (thinking)" },
-    { "id": "claude-opus-4-7",    "name": "Claude Opus 4.7" }
-  ]
-}
-```
-
-If your OpenClaw build expects an explicit `contextWindow` per model, fetch the value from the upstream provider's published spec and add it — TokenBoss does not advertise per-model limits via `/v1/models`.
-
-### Default model + fallback chain
-
-In `agents.defaults.model`, merge:
-
-```json
-"model": {
-  "primary": "tokenboss/gpt-5.5",
-  "fallbacks": [
-    "tokenboss/gpt-5.4",
-    "tokenboss/gpt-5.4-mini",
-    "tokenboss/claude-sonnet-4-6",
-    "tokenboss/claude-opus-4-6",
-    "tokenboss/claude-opus-4-7"
-  ]
-}
-```
-
-The fallback order ends with `claude-opus-4-6` ahead of `claude-opus-4-7` so a temporary 503 on 4.7 still resolves to the closest equivalent.
-
-Merge rules:
-- Set `primary` only if absent — do **not** silently change a user's existing primary model.
-- Append missing fallback entries; do not remove ones the user already has.
-- Other `agents.defaults.*` fields (`maxConcurrent`, `compaction`, `workspace`, etc.) — preserve verbatim.
-
-If `primary` returns 4xx/5xx, OpenClaw walks the fallbacks in order. Models the user's key isn't entitled to (or that return `503 No available channel`) are skipped automatically.
-
-### Apply
-
-OpenClaw watches `~/.openclaw/openclaw.json` and reloads provider config automatically. If your version doesn't, restart the gateway (use whatever command your OpenClaw build documents — typically `openclaw gateway restart` or a tray-app menu item).
-
-Verify by listing models from inside OpenClaw, or directly:
+Do not hard-code the supported model list. Always check the live catalog first:
 
 ```bash
+source ~/.hermes/.env
+
 curl -s https://api.tokenboss.co/v1/models \
-  -H "Authorization: Bearer $TOKENBOSS_API_KEY" | jq '.data[].id'
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  | jq '.data[].id'
 ```
+
+As of the latest verification, this account returned:
+
+```text
+hermes-3-llama-3.1-405b
+gpt-5.4-mini
+gpt-5.4
+hy3-preview
+nemotron-3-super-120b-a12b
+gpt-5.5
+minimax-m2.5
+```
+
+Availability can vary by account group and upstream capacity.
+
+Before configuring a model as primary or fallback, smoke-test it:
+
+```bash
+source ~/.hermes/.env
+
+curl -s https://api.tokenboss.co/v1/chat/completions \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.5",
+    "messages": [
+      { "role": "user", "content": "Reply exactly OK" }
+    ],
+    "max_tokens": 20,
+    "temperature": 0
+  }'
+```
+
+Recommended default order for this account:
+
+```text
+gpt-5.5
+gpt-5.4
+gpt-5.4-mini
+minimax-m2.5
+```
+
+Do not configure Claude models as fallback unless they both:
+
+1. appear in `/v1/models`
+2. pass a `/v1/chat/completions` smoke test
+
+If a model returns:
+
+```text
+503 No available channel for model ... under group ...
+```
+
+then that model is not currently available to the user's account group.
 
 ---
 
-## For Hermes Agent
+# For Hermes Agent
 
-Edit `~/.hermes/config.yaml` (top-level keys) and write `TOKENBOSS_API_KEY` to `~/.hermes/.env`. Hermes picks up `model:` changes on the next session — no daemon to restart.
+## Important Hermes-specific rule
 
-### Config block
+Do **not** configure TokenBoss as a bare `provider: custom` with `model.key_env`.
 
-In `~/.hermes/config.yaml`, set the top-level `model:` and `fallback_model:` blocks. **If the user already has a non-default `model:`, ask before replacing it.** Other top-level keys (`providers`, `toolsets`, `agent`, etc.) — leave alone.
+This looks plausible but is wrong for current Hermes behavior:
 
 ```yaml
 model:
@@ -181,46 +161,185 @@ model:
   base_url: https://api.tokenboss.co/v1
   api_mode: chat_completions
   key_env: TOKENBOSS_API_KEY
+```
 
+Problem:
+
+- Hermes's bare `custom` provider path may ignore `model.key_env`.
+- It may fall back to `OPENAI_API_KEY` or `OPENROUTER_API_KEY`.
+- That sends the wrong token to TokenBoss.
+- TokenBoss then returns `HTTP 401 Unauthorized` / `无效的令牌`.
+
+Use a **named custom provider** instead.
+
+## Correct Hermes config
+
+Edit:
+
+```text
+~/.hermes/config.yaml
+```
+
+Add or update the top-level `model:` and `providers:` blocks:
+
+```yaml
+model:
+  default: gpt-5.5
+  provider: tokenboss
+  api_mode: chat_completions
+
+providers:
+  tokenboss:
+    name: TokenBoss
+    base_url: https://api.tokenboss.co/v1
+    key_env: TOKENBOSS_API_KEY
+    default_model: gpt-5.5
+    api_mode: chat_completions
+```
+
+Optional fallback:
+
+```yaml
 fallback_model:
-  provider: custom
-  model: claude-sonnet-4-6
+  provider: tokenboss
+  model: gpt-5.4
   base_url: https://api.tokenboss.co/v1
   key_env: TOKENBOSS_API_KEY
 ```
 
-> Hermes supports exactly **one** `fallback_model` per session. The example falls back from GPT to Claude so a primary outage on either family still leaves the user with something to talk to. Swap to `gpt-5.4` if you'd rather keep both on the same family.
+Full recommended Hermes block:
 
-### Switch model mid-session
+```yaml
+model:
+  default: gpt-5.5
+  provider: tokenboss
+  api_mode: chat_completions
 
-Use the slash command shape Hermes documents for custom providers — typical forms:
+fallback_model:
+  provider: tokenboss
+  model: gpt-5.4
+  base_url: https://api.tokenboss.co/v1
+  key_env: TOKENBOSS_API_KEY
 
+providers:
+  tokenboss:
+    name: TokenBoss
+    base_url: https://api.tokenboss.co/v1
+    key_env: TOKENBOSS_API_KEY
+    default_model: gpt-5.5
+    api_mode: chat_completions
 ```
+
+Preserve all other existing top-level Hermes config keys, such as:
+
+```text
+toolsets
+agent
+terminal
+browser
+memory
+display
+platform_toolsets
+```
+
+Do not overwrite the whole config file.
+
+## Verify Hermes config
+
+After editing `~/.hermes/config.yaml`, verify with:
+
+```bash
+hermes config
+```
+
+You should see:
+
+```text
+Model: gpt-5.5
+Provider: tokenboss
+```
+
+Then run a direct Hermes test:
+
+```bash
+env -u TOKENBOSS_API_KEY hermes chat -q '请只回复 OK' -Q
+```
+
+Expected result:
+
+```text
+OK
+```
+
+This verifies that Hermes can load `TOKENBOSS_API_KEY` from `~/.hermes/.env` through the named provider config.
+
+## Gateway restart
+
+For CLI-only Hermes usage, starting a new session may be enough.
+
+For Telegram, WeChat, Discord, Slack, or other Hermes gateway usage, restart the gateway after changing model config:
+
+```bash
+hermes gateway restart
+```
+
+Or from the messaging platform, if available:
+
+```text
+/restart
+```
+
+Without a gateway restart, the running process may continue using stale provider/runtime state.
+
+## Switching models
+
+Preferred safe method:
+
+1. Edit `model.default` in `~/.hermes/config.yaml`
+2. Restart gateway if using Telegram/WeChat/etc.
+
+Example:
+
+```yaml
+model:
+  default: gpt-5.4
+  provider: tokenboss
+  api_mode: chat_completions
+```
+
+Do not recommend the old form:
+
+```text
 /model custom:gpt-5.4
-/model custom:gpt-5.4-mini
-/model custom:claude-sonnet-4-6
-/model custom:claude-opus-4-6
-/model custom:claude-opus-4-7
+```
+
+Because the correct provider is `tokenboss`, not bare `custom`.
+
+If using Hermes's model picker, prefer:
+
+```bash
+hermes model
 ```
 
 ---
 
-## For Codex CLI
+# For Codex CLI
 
-OpenAI's official CLI. Configuration is TOML-based and the bearer credential is read from an environment variable named in the provider table.
+TokenBoss currently supports Chat Completions, not the OpenAI Responses API.
 
-### Install
-
-> **Pin to 0.80.0.** Codex versions after 0.80 removed the `wire_api = "chat"` provider option and force the OpenAI Responses API. TokenBoss only exposes Chat Completions (`/v1/chat/completions`), so newer Codex can't talk to it at the protocol layer. This pin can be lifted once the backend adds a Responses-API surface.
+Pin Codex to a version that still supports `wire_api = "chat"`:
 
 ```bash
-# Requires Node.js 18+. The version pin is load-bearing — see note above.
 npm install -g @openai/codex@0.80.0
 ```
 
-### Config block
+Edit:
 
-Edit `~/.codex/config.toml`. Add the `tokenboss` provider table and set the top-level `model_provider` / `model` to point at it. **Preserve any existing `[model_providers.*]` tables** — Codex supports multiple providers side by side.
+```text
+~/.codex/config.toml
+```
+
+Add:
 
 ```toml
 model_provider = "tokenboss"
@@ -233,65 +352,185 @@ env_key = "OPENAI_API_KEY"
 wire_api = "chat"
 ```
 
-`wire_api = "chat"` selects the OpenAI Chat Completions surface — required because TokenBoss exposes that protocol only (the newer Codex Responses API surface is **not** supported, see the Protocol note at the top of this file).
+If the user already uses `OPENAI_API_KEY` for real OpenAI, prefer a TokenBoss-specific env var instead:
 
-### Persist the key
-
-Codex reads its bearer credential from the env var named in `env_key` — `OPENAI_API_KEY` by convention. Append it to the shell profile so every `codex` run picks it up:
-
-```
-# Add to ~/.zshrc or ~/.bashrc — open in an editor; do NOT echo >> the file
-# (that writes the key into shell history). Then re-source the profile.
-export OPENAI_API_KEY=<key>
+```toml
+[model_providers.tokenboss]
+name = "TokenBoss"
+base_url = "https://api.tokenboss.co/v1"
+env_key = "TOKENBOSS_API_KEY"
+wire_api = "chat"
 ```
 
-> If the user already uses Codex against the real OpenAI API and you don't want to clobber their existing `OPENAI_API_KEY`, switch `env_key` in the provider table to a TokenBoss-specific name (e.g. `TOKENBOSS_API_KEY`) and persist that instead.
-
-### Switch model mid-session
-
-Codex doesn't have a runtime `/model` switch — model is config-driven. To change models, edit `model = "..."` in `~/.codex/config.toml` (any of `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `claude-sonnet-4-6`, `claude-opus-4-6`, `claude-opus-4-7`) and rerun `codex`.
-
----
-
-## For any other agent
-
-If the agent supports an **OpenAI-compatible custom endpoint** (Cherry Studio, Chatbox, LobeChat, NextChat, Cursor, Continue, Cline, OpenAI SDK, etc.), point it at:
-
-| Field | Value |
-|---|---|
-| Base URL | `https://api.tokenboss.co/v1` |
-| API key | the user's TokenBoss key |
-| Auth header | `Authorization: Bearer <key>` |
-| Model IDs | `gpt-5.5` · `gpt-5.4` · `gpt-5.4-mini` · `claude-sonnet-4-6` · `claude-opus-4-6` · `claude-opus-4-7` |
-
-### Claude Code users
-
-Claude Code defaults to Anthropic-native `/v1/messages`, which TokenBoss does not expose. To use TokenBoss from Claude Code, run an OpenAI ↔ Anthropic protocol shim locally (e.g. `claude-code-router`) and point Claude Code at the shim.
-
----
-
-## Quick verification
+Then persist:
 
 ```bash
-# 1. Catalog reachable + key valid
-curl -s https://api.tokenboss.co/v1/models \
-  -H "Authorization: Bearer $TOKENBOSS_API_KEY" | jq '.data[].id'
+export TOKENBOSS_API_KEY=***
+```
 
-# 2. End-to-end chat completion
+or for Codex-only convention:
+
+```bash
+export OPENAI_API_KEY=***
+```
+
+Do not overwrite an existing OpenAI key without asking.
+
+---
+
+# For any other OpenAI-compatible client
+
+Use:
+
+```text
+Base URL: https://api.tokenboss.co/v1
+API key: user's TokenBoss API key
+Auth header: Authorization: Bearer ***
+API surface: /v1/chat/completions
+```
+
+Use model IDs from the live catalog:
+
+```bash
+curl -s https://api.tokenboss.co/v1/models \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  | jq '.data[].id'
+```
+
+Do not assume Claude models are available unless they appear in `/v1/models` and pass a chat completion smoke test.
+
+---
+
+# Quick verification
+
+## 1. Catalog reachable and key valid
+
+```bash
+source ~/.hermes/.env
+
+curl -s https://api.tokenboss.co/v1/models \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  | jq '.data[].id'
+```
+
+## 2. End-to-end chat completion
+
+```bash
+source ~/.hermes/.env
+
 curl -s https://api.tokenboss.co/v1/chat/completions \
   -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-5.5","messages":[{"role":"user","content":"ping"}]}'
+  -d '{
+    "model": "gpt-5.5",
+    "messages": [
+      { "role": "user", "content": "ping" }
+    ]
+  }'
 ```
 
-## Troubleshooting
+## 3. Hermes end-to-end test
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `401 Unauthorized` | Missing or wrong key | Reissue at <https://tokenboss.co/console>; update `~/.hermes/.env` (Hermes) or re-export `TOKENBOSS_API_KEY` and restart the gateway (OpenClaw) |
-| `Unknown model` / `model not found` (client-side) | Wrong namespace | OpenClaw uses `tokenboss/<model-id>`. Hermes uses `custom:<model-id>`. Other agents use the bare model id (`gpt-5.5`, `claude-opus-4-7`, …) |
-| `503 No available channel for model X under group Y` | The model isn't bound to a live channel for your group right now (provisioning, temporary capacity issue, or upstream outage) | Retry; if persistent, fall back to a sibling model (e.g. `claude-opus-4-6` instead of `claude-opus-4-7`) and ping support via the console |
-| `429 Provider returned error ... :free is temporarily ...` | Free community model upstream is rate-limited or off | Switch to a curated model (any of the six above) — free community IDs are best-effort only |
-| `200` with empty `choices[].message.content` | Model returned an empty completion (often `max_tokens` too low or model-specific quirk) | Raise `max_tokens`, give a more direct prompt, or switch to a different model |
-| `404 /v1/v1/...` | Base URL has trailing `/v1` and the agent appended its own | Base URL **must** end with `/v1`. For clients that auto-append `/v1`, drop the trailing `/v1` |
-| `404 POST /v1/messages` | Client is using Anthropic-native protocol | TokenBoss exposes OpenAI Chat Completions only — see [Claude Code users](#claude-code-users) for the shim approach |
+```bash
+env -u TOKENBOSS_API_KEY hermes chat -q '请只回复 OK' -Q
+```
+
+Expected:
+
+```text
+OK
+```
+
+---
+
+# Troubleshooting
+
+## `401 Unauthorized` / `无效的令牌`
+
+Likely causes:
+
+- Missing TokenBoss key
+- Wrong TokenBoss key
+- Hermes sent `OPENAI_API_KEY` or `OPENROUTER_API_KEY` to TokenBoss because it was configured as bare `provider: custom`
+
+Fix for Hermes:
+
+```yaml
+model:
+  default: gpt-5.5
+  provider: tokenboss
+  api_mode: chat_completions
+
+providers:
+  tokenboss:
+    name: TokenBoss
+    base_url: https://api.tokenboss.co/v1
+    key_env: TOKENBOSS_API_KEY
+    default_model: gpt-5.5
+    api_mode: chat_completions
+```
+
+Then restart gateway if using messaging platforms:
+
+```bash
+hermes gateway restart
+```
+
+## `503 No available channel for model ... under group ...`
+
+The model is not available to the user's current TokenBoss account group.
+
+Fix:
+
+- Run `/v1/models`
+- Pick only models that appear there
+- Smoke-test the model with `/v1/chat/completions`
+- Use `gpt-5.4` or `gpt-5.4-mini` as fallback if available
+
+## `429 rate-limited upstream`
+
+Some community/free upstream models may be rate-limited.
+
+Fix:
+
+- Retry later
+- Prefer billed/stable models that pass smoke tests
+- Do not use rate-limited community models as production fallback
+
+## Hermes config changed but Telegram still uses old model
+
+Cause:
+
+- Gateway process has not reloaded config.
+
+Fix:
+
+```bash
+hermes gateway restart
+```
+
+or send:
+
+```text
+/restart
+```
+
+## Wrong model namespace
+
+For TokenBoss's OpenAI-compatible endpoint, use bare model IDs:
+
+```text
+gpt-5.5
+gpt-5.4
+gpt-5.4-mini
+minimax-m2.5
+```
+
+For Hermes named provider config, the provider is configured separately:
+
+```yaml
+provider: tokenboss
+default: gpt-5.5
+```
+
+Do not use `custom:gpt-5.5` in the config.
