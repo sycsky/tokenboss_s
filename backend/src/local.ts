@@ -58,7 +58,11 @@ import { catalogJsonHandler } from "./handlers/catalogJson.js";
 import { skillMdHandler } from "./handlers/skillMd.js";
 import { usageHandler } from "./handlers/usageHandlers.js";
 import { listBucketsHandler } from "./handlers/buckets.js";
-import { streamChatCore, type StreamWriter } from "./lib/chatProxyCore.js";
+import {
+  streamChatCore,
+  streamResponsesCore,
+  type StreamWriter,
+} from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
 
 type LambdaHandler = (
@@ -106,6 +110,7 @@ const routes: Route[] = [
 /** Routes that bypass the buffered Lambda adapter and stream directly. */
 const STREAM_ROUTES: { method: string; path: string }[] = [
   { method: "POST", path: "/v1/chat/completions" },
+  { method: "POST", path: "/v1/responses" },
 ];
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -414,9 +419,13 @@ async function handleChatStream(
   };
 
   try {
-    await streamChatCore(event, writer);
+    if (pathname === "/v1/responses") {
+      await streamResponsesCore(event, writer);
+    } else {
+      await streamChatCore(event, writer);
+    }
   } catch (err) {
-    console.error(`[local] streamChatCore error on ${pathname}:`, err);
+    console.error(`[local] stream*Core error on ${pathname}:`, err);
     if (!headWritten) {
       res.writeHead(500, { "content-type": "application/json" });
       headWritten = true;

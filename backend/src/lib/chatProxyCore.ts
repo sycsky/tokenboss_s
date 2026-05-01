@@ -565,6 +565,258 @@ async function aggregateSSEToCompletion(
   return result;
 }
 
+// ---------- /v1/responses (OpenAI Responses API — used by Codex CLI) ----------
+
+/**
+ * Best-effort conversion of Responses API `input` + `instructions` into the
+ * chat-completions `messages` shape that the virtual-model classifier expects.
+ *
+ * `input` may be a plain string or an array of input items
+ * (`{role, content: [{type:"input_text", text}]}`); `instructions` is the
+ * top-level system prompt. We just need enough fidelity for `extractPrompts`
+ * in `router/resolve.ts` to pull last-user/system text — full type accuracy
+ * isn't needed because virtual routing on the responses path is rare anyway
+ * (Codex CLI passes concrete model ids).
+ */
+function responsesInputToMessages(
+  body: Record<string, unknown>,
+): Array<{ role: string; content: unknown }> {
+  const out: Array<{ role: string; content: unknown }> = [];
+  if (typeof body.instructions === "string" && body.instructions.length > 0) {
+    out.push({ role: "system", content: body.instructions });
+  }
+  const input = body.input;
+  if (typeof input === "string") {
+    out.push({ role: "user", content: input });
+  } else if (Array.isArray(input)) {
+    for (const item of input) {
+      if (!item || typeof item !== "object") continue;
+      const it = item as Record<string, unknown>;
+      const role = typeof it.role === "string" ? it.role : "user";
+      const content = it.content;
+      if (Array.isArray(content)) {
+        const text = content
+          .map((part) => {
+            if (!part || typeof part !== "object") return "";
+            const p = part as Record<string, unknown>;
+            return typeof p.text === "string" ? p.text : "";
+          })
+          .filter((t) => t.length > 0)
+          .join(" ");
+        out.push({ role, content: text });
+      } else {
+        out.push({ role, content });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Transparent forwarder for `POST /v1/responses` — used by Codex CLI and
+ * any other client targeting the OpenAI Responses API.
+ *
+ * Mirrors `streamChatCore` but trimmed: Responses API SSE is byte-pipeable
+ * (the `event: response.xxx` named events go through verbatim), and there's
+ * no equivalent of the gpt-* "force upstream stream and aggregate"
+ * workaround — Responses exposes reasoning in dedicated `output_reasoning`
+ * items so non-stream mode through newapi is reliable.
+ */
+export async function streamResponsesCore(
+  event: APIGatewayProxyEventV2,
+  writer: StreamWriter,
+): Promise<void> {
+  const authHeader =
+    event.headers?.authorization ?? event.headers?.Authorization;
+
+  let body: Record<string, unknown>;
+  try {
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body ?? "", "base64").toString("utf8")
+      : (event.body ?? "");
+    body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  } catch (err) {
+    writeJsonError(
+      writer,
+      400,
+      "invalid_request_error",
+      `Could not parse JSON body: ${String(err)}`,
+    );
+    return;
+  }
+
+  let fallbackModels: string[] = [];
+  if (typeof body.model === "string") {
+    const profile = detectVirtualProfile(body.model);
+    if (profile) {
+      try {
+        const maxTokens =
+          typeof body.max_output_tokens === "number"
+            ? body.max_output_tokens
+            : 4096;
+        const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+        const messages = responsesInputToMessages(body);
+        const resolved = await resolveVirtualModel(
+          profile,
+          messages,
+          hasTools,
+          maxTokens,
+        );
+        console.log(
+          `[router] ${body.model} → ${resolved.primary} (tier=${resolved.tier}, profile=${resolved.profile}) fallback=[${resolved.fallback.join(", ")}]`,
+        );
+        body.model = resolved.primary;
+        fallbackModels = resolved.fallback;
+      } catch (err) {
+        console.error(`[router] resolve failed: ${String(err)}`);
+      }
+    }
+  }
+
+  if (
+    typeof body.model === "string" &&
+    body.model.includes("/") &&
+    process.env.UPSTREAM_PRESERVE_MODEL_PREFIX !== "1"
+  ) {
+    const stripped = body.model.slice(body.model.lastIndexOf("/") + 1);
+    if (stripped.length > 0) body.model = stripped;
+  }
+  fallbackModels = fallbackModels.map((m) =>
+    m.includes("/") && process.env.UPSTREAM_PRESERVE_MODEL_PREFIX !== "1"
+      ? m.slice(m.lastIndexOf("/") + 1)
+      : m,
+  );
+
+  const wantsStream = body.stream === true;
+
+  try {
+    if (isMockMode()) {
+      writeJsonError(
+        writer,
+        503,
+        "service_unavailable",
+        "Mock mode is not implemented for /v1/responses.",
+        "mock_not_supported",
+      );
+      return;
+    }
+
+    if (!authHeader) {
+      writeJsonError(
+        writer,
+        401,
+        "authentication_error",
+        "Missing Authorization header.",
+        "missing_api_key",
+      );
+      return;
+    }
+    const base = getNewapiBase();
+    if (!base) {
+      writeJsonError(
+        writer,
+        503,
+        "service_unavailable",
+        "Responses proxy is unavailable — NEWAPI_BASE_URL is not configured.",
+        "newapi_not_configured",
+      );
+      return;
+    }
+
+    const attemptModels = [
+      typeof body.model === "string" ? body.model : "",
+      ...fallbackModels,
+    ].filter((m) => m.length > 0);
+    let upstreamRes: Response | null = null;
+    let lastErr: unknown = null;
+    for (let i = 0; i < attemptModels.length; i++) {
+      const model = attemptModels[i];
+      body.model = model;
+      try {
+        const res = await fetch(`${base}/v1/responses`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: authHeader,
+          },
+          body: JSON.stringify(body),
+          // @ts-expect-error undici-specific extension on fetch init
+          dispatcher: upstreamDispatcher,
+        });
+        if (res.status >= 500 && i < attemptModels.length - 1) {
+          console.warn(
+            `[responsesProxy] upstream ${model} returned ${res.status}; trying fallback`,
+          );
+          try {
+            await res.body?.cancel();
+          } catch {
+            /* ignore */
+          }
+          continue;
+        }
+        upstreamRes = res;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.error(
+          `[responsesProxy] upstream fetch failed for ${model}: ${String(err)}`,
+        );
+        if (i === attemptModels.length - 1) break;
+      }
+    }
+    if (!upstreamRes) {
+      writeJsonError(
+        writer,
+        502,
+        "upstream_error",
+        `Failed to reach upstream: ${String(lastErr ?? "all models failed")}`,
+      );
+      return;
+    }
+
+    const contentType =
+      upstreamRes.headers.get("content-type") ?? "application/json";
+
+    if (wantsStream && upstreamRes.body) {
+      writer.writeHead(upstreamRes.status, {
+        "content-type": contentType,
+        "cache-control": "no-cache",
+        "x-accel-buffering": "no",
+      });
+      const reader = upstreamRes.body.getReader();
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength > 0) writer.write(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      writer.end();
+      return;
+    }
+
+    const responseText = await upstreamRes.text();
+    writer.writeHead(upstreamRes.status, { "content-type": contentType });
+    writer.write(responseText);
+    writer.end();
+  } catch (err) {
+    console.error(`[responsesProxy] unexpected error during handling:`, err);
+    try {
+      writeJsonError(
+        writer,
+        500,
+        "server_error",
+        `Internal error: ${(err as Error).message}`,
+      );
+    } catch {
+      /* writer already closed */
+    }
+  }
+}
+
 function writeJsonError(
   writer: StreamWriter,
   statusCode: number,
