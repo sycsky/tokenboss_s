@@ -242,7 +242,13 @@ export function init(): void {
     CREATE TABLE IF NOT EXISTS orders (
       orderId            TEXT PRIMARY KEY,
       userId             TEXT NOT NULL,
-      planId             TEXT,                      -- legacy; nullable now (back-compat for rollback)
+      -- Legacy column. Originally short name for the newapi subscription plan
+      -- ('plus'|'super'|'ultra') used at settle time to bind the user. Topup
+      -- orders have no newapi plan, but pre-2026-04-29 production tables were
+      -- created with NOT NULL and ALTER COLUMN isn't supported in SQLite — so
+      -- createOrder() writes the literal 'topup' as a placeholder. The real
+      -- discriminator is the skuType column below; nothing reads planId to decide flow.
+      planId             TEXT,
       skuType            TEXT,                      -- 'plan_plus'|'plan_super'|'plan_ultra'|'topup'
       topupAmountUsd     REAL,                      -- only set for skuType='topup'
       settleStatus       TEXT,                      -- 'settled'|'failed' for topup; null otherwise
@@ -325,6 +331,11 @@ function deriveSkuType(skuType: string | undefined, planId: string | undefined):
   if (planId === 'plus') return 'plan_plus';
   if (planId === 'super') return 'plan_super';
   if (planId === 'ultra') return 'plan_ultra';
+  // 'topup' is the placeholder createOrder() writes for topup orders (see
+  // schema comment on `planId`). Never produced by real plan binding —
+  // keeping this branch makes the fallback honest about what values the
+  // legacy column can hold.
+  if (planId === 'topup') return 'topup';
   // Last-resort default: any other state means migration didn't fully run.
   // 'plan_plus' is the safest fallback (lowest privilege paid tier).
   return 'plan_plus';
@@ -619,10 +630,8 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
 // ---------- Public API — Orders ----------
 
 export async function createOrder(rec: OrderRecord): Promise<void> {
-  // Legacy `planId` column. Production DBs predate the schema change that
-  // made it nullable (CREATE TABLE IF NOT EXISTS no-ops on existing tables),
-  // so we always write a non-null value derived from skuType:
-  //   plan_plus → 'plus' / plan_super → 'super' / plan_ultra → 'ultra' / topup → 'topup'
+  // Legacy planId column — see schema comment above. Always non-null:
+  // plan_plus → 'plus' / plan_super → 'super' / plan_ultra → 'ultra' / topup → 'topup'.
   const legacyPlanId = rec.skuType.replace(/^plan_/, '');
   db.prepare(`
     INSERT INTO orders

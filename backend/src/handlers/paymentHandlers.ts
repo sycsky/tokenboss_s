@@ -305,7 +305,9 @@ export const createOrderHandler = async (
   return jsonResponse(201, {
     orderId,
     skuType,
-    planId: type === 'plan' ? planId : undefined,
+    // Mirror shapeOrder() — derive planId from skuType so plan-only UI
+    // surfaces stay working; null/undefined for topup.
+    planId: skuTypeToPlanId(skuType) ?? undefined,
     channel,
     amount,
     currency,

@@ -48,10 +48,11 @@ export interface OrderRecord {
   /** Channel-side actual settled amount (USDT for epusdt, same as
    *  amount for xunhupay). */
   amountActual?: number;
-  /** USD value to credit on topup orders. ¥1 = $1, so equals `amount`
-   *  when currency=CNY, and equals `amount` when currency=USD. Stored
-   *  separately so settle can be 100% certain about $ delta even if
-   *  `amount`/`currency` ever drift. Undefined for plan orders. */
+  /** USD value to credit on topup orders. CNY orders: ¥1 = $1 baseline,
+   *  so equals `amount`. USD orders: `amount` (USDT) is multiplied by the
+   *  USD_TO_CREDIT_RATE in paymentHandlers (currently 7), so $1 USDT pays
+   *  → $7 credited. Stored separately so settle is decoupled from FX drift
+   *  between order and webhook. Undefined for plan orders. */
   topupAmountUsd?: number;
   status: OrderStatus;
   /** Set on topup orders after the webhook has attempted to apply credits.

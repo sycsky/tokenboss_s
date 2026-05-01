@@ -84,6 +84,14 @@ describe('orders table — legacy production schema (planId NOT NULL)', () => {
     const back = await getOrder('tb_legacy_topup');
     expect(back?.skuType).toBe('topup');
     expect(back?.topupAmountUsd).toBe(50);
+
+    // Raw column assertion — verify the literal placeholder value, not just
+    // "non-null garbage". This is the contract createOrder() commits to:
+    // topup orders write `planId='topup'` to satisfy the legacy NOT NULL.
+    const rawTopup = db
+      .prepare(`SELECT planId FROM orders WHERE orderId = ?`)
+      .get('tb_legacy_topup') as { planId: string };
+    expect(rawTopup.planId).toBe('topup');
   });
 
   it('createOrder() still works for plan orders on the legacy schema', async () => {
@@ -101,5 +109,12 @@ describe('orders table — legacy production schema (planId NOT NULL)', () => {
 
     const back = await getOrder('tb_legacy_plan');
     expect(back?.skuType).toBe('plan_super');
+
+    // Raw column assertion — plan orders write the short plan tag so the
+    // legacy column still matches the historical 'plus'|'super'|'ultra' shape.
+    const rawPlan = db
+      .prepare(`SELECT planId FROM orders WHERE orderId = ?`)
+      .get('tb_legacy_plan') as { planId: string };
+    expect(rawPlan.planId).toBe('super');
   });
 });

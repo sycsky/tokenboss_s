@@ -79,6 +79,19 @@ describe('orders table — backfill migration', () => {
     expect(back?.skuType).toBe('topup');
     expect(back?.topupAmountUsd).toBe(50);
   });
+
+  it("deriveSkuType maps legacy planId='topup' back to skuType='topup' when skuType is NULL", async () => {
+    // Defense in depth: createOrder always writes both columns, but if a row
+    // ever ends up with skuType=NULL and planId='topup' (manual SQL, partial
+    // migration), the rowToOrder fallback should recognize the placeholder
+    // instead of defaulting to 'plan_plus'.
+    db.prepare(
+      `INSERT INTO orders (orderId, userId, planId, skuType, topupAmountUsd, channel, amountCNY, currency, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    ).run('orphan_topup', 'u_test_bf', 'topup', null, 75, 'xunhupay', 75, 'CNY', 'paid', new Date().toISOString());
+
+    const back = await getOrder('orphan_topup');
+    expect(back?.skuType).toBe('topup');
+  });
 });
 
 describe('markOrderSettleStatus', () => {
