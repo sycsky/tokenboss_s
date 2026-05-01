@@ -336,151 +336,180 @@ export default function Dashboard() {
           />
         ) : (
         <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5">
-          {/* Mobile: stack column (label/value → chip/days → CTA right-aligned).
-              sm+: revert to flex-row with wrap so wide screens get the
-              compact horizontal hero we always had. */}
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
-            {subBucket ? (
-              <>
-                <div className="flex items-baseline gap-3 flex-wrap">
-                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                    今日剩
-                  </span>
-                  <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
-                    <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
-                    {periodRemaining.toFixed(4)}
-                  </span>
-                </div>
+          {/* Hero is split into two zones when the user has wallet credits:
+                LEFT  zone — subscription (今日剩 / tier / progress / 续费)
+                RIGHT zone — wallet card (钱包余额 / 充值)
+              Each zone owns its own action — buttons grouped by domain.
+              Without topup, hero collapses to a single column (legacy
+              behavior preserved). Mobile: split → vertical stack. */}
+          <div
+            className={
+              topupBucket
+                ? 'grid grid-cols-1 sm:grid-cols-[1fr_220px] gap-4 sm:gap-5 items-stretch'
+                : ''
+            }
+          >
+            {/* ===== LEFT ZONE ===== */}
+            <div className="flex flex-col gap-3 sm:gap-3.5 min-w-0">
+              {subBucket ? (
+                <>
+                  <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
+                    <div className="flex items-baseline gap-3 flex-wrap">
+                      <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                        今日剩
+                      </span>
+                      <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
+                        <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
+                        {periodRemaining.toFixed(4)}
+                      </span>
+                    </div>
 
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className={
-                      `font-mono text-[9.5px] tracking-[0.16em] uppercase font-bold px-1.5 py-0.5 ${tierChipClass} border-2 border-ink rounded`
-                    }
-                  >
-                    {tierLabel}
-                  </span>
-                  <span className="font-mono text-[13px] font-bold leading-none">
-                    {isTrial && trialSecRemaining > 0
-                      ? `剩 ${trialClock}`
-                      : isTrial
-                        ? '已到期'
-                        : `本月还 ${subDaysRemaining} 天`}
-                  </span>
-                </div>
-
-                {isTrial ? (
-                  <Link
-                    to="/pricing"
-                    className={
-                      slockBtn('secondary') +
-                      ' w-full text-center sm:w-auto sm:ml-auto'
-                    }
-                  >
-                    选个套餐 →
-                  </Link>
-                ) : (
-                  // Paid: two CTAs (充值 + 续费). Mobile: stack 续费 full-width
-                  // primary, 充值额度 as a small link to its right (single row,
-                  // no wasted horizontal space). Desktop: revert to inline.
-                  <div className="w-full flex items-center justify-end gap-4 sm:w-auto sm:ml-auto">
-                    <Link
-                      to="/billing/topup"
-                      className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
-                    >
-                      充值额度
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setContactReason('renew')}
-                      className={slockBtn('secondary') + ' flex-1 sm:flex-none'}
-                    >
-                      续费 →
-                    </button>
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className={
+                          `font-mono text-[9.5px] tracking-[0.16em] uppercase font-bold px-1.5 py-0.5 ${tierChipClass} border-2 border-ink rounded`
+                        }
+                      >
+                        {tierLabel}
+                      </span>
+                      <span className="font-mono text-[13px] font-bold leading-none">
+                        {isTrial && trialSecRemaining > 0
+                          ? `剩 ${trialClock}`
+                          : isTrial
+                            ? '已到期'
+                            : `本月还 ${subDaysRemaining} 天`}
+                      </span>
+                    </div>
                   </div>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="flex items-baseline gap-3 flex-wrap">
-                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                    Agent 余额
-                  </span>
-                  <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
-                    <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
-                    {balanceUsd.toFixed(4)}
-                  </span>
-                </div>
 
-                <div className="w-full flex flex-col-reverse items-stretch sm:flex-row sm:items-center sm:w-auto sm:ml-auto gap-2 sm:gap-4">
-                  <Link
-                    to="/billing/topup"
-                    className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0 text-center sm:text-left"
-                  >
-                    充值额度
-                  </Link>
-                  <Link
-                    to="/pricing"
-                    className={
-                      slockBtn('secondary') +
-                      ' w-full text-center sm:w-auto'
-                    }
-                  >
-                    开通套餐 →
-                  </Link>
+                  {/* Mini progress bar — same logic as before, just scoped to
+                      the LEFT zone width so it doesn't bleed under the
+                      wallet card on desktop. */}
+                  {periodTotal > 0 && !noActivity && (
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-2.5 bg-black/30 border border-white/30 rounded overflow-hidden">
+                        <div
+                          className={`h-full ${periodFillColor} transition-all duration-300`}
+                          style={{ width: `${periodRemainingPct}%` }}
+                        />
+                      </div>
+                      <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
+                        剩 {Math.round(periodRemainingPct)}%
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Subscription-side action(s). 充值额度 link only shown
+                      when there's no wallet card yet (first-topup entry). */}
+                  {isTrial ? (
+                    <Link
+                      to="/pricing"
+                      className={
+                        slockBtn('secondary') +
+                        ' w-full text-center sm:w-auto sm:self-start mt-1'
+                      }
+                    >
+                      选个套餐 →
+                    </Link>
+                  ) : (
+                    <div className="flex items-center gap-3 sm:gap-4 mt-1 flex-wrap">
+                      {!topupBucket && (
+                        <Link
+                          to="/billing/topup"
+                          className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
+                        >
+                          充值额度
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setContactReason('renew')}
+                        className={slockBtn('secondary') + ' flex-1 sm:flex-none sm:ml-auto'}
+                      >
+                        续费 →
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                // No active subscription. When wallet credits exist, the
+                // LEFT zone becomes a muted "未开通" prompt (the wallet
+                // card on the right carries the real money). When neither
+                // exists, fall back to the legacy "Agent 余额 $0" hero.
+                <>
+                  <div className="flex items-baseline gap-3 flex-wrap">
+                    <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                      {topupBucket ? '未开通套餐' : 'Agent 余额'}
+                    </span>
+                    {!topupBucket && (
+                      <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
+                        <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
+                        {balanceUsd.toFixed(4)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col-reverse items-stretch sm:flex-row sm:items-center gap-2 sm:gap-4 mt-1">
+                    {!topupBucket && (
+                      <Link
+                        to="/billing/topup"
+                        className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0 text-center sm:text-left"
+                      >
+                        充值额度
+                      </Link>
+                    )}
+                    <Link
+                      to="/pricing"
+                      className={
+                        slockBtn('secondary') +
+                        ' w-full text-center sm:w-auto sm:ml-auto'
+                      }
+                    >
+                      开通套餐 →
+                    </Link>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* ===== RIGHT ZONE: wallet card ===== */}
+            {topupBucket && (
+              <div className="bg-ink border-2 border-ink rounded-lg p-4 flex flex-col gap-3 min-w-0">
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold text-lime-stamp">
+                    钱包余额
+                  </span>
+                  <span className="font-mono text-[28px] sm:text-[32px] font-bold text-white leading-none">
+                    <span className="text-[14px] sm:text-[16px] opacity-70 align-top mr-0.5">$</span>
+                    {(topupBucket.totalRemainingUsd ?? 0).toFixed(2)}
+                  </span>
                 </div>
-              </>
+                <Link
+                  to="/billing/topup"
+                  className={
+                    'inline-flex items-center justify-center gap-1.5 ' +
+                    'border-2 border-lime-stamp bg-lime-stamp text-lime-stamp-ink ' +
+                    'rounded-md font-bold tracking-tight ' +
+                    'px-4 py-2 text-[13px] md:text-[14px] ' +
+                    'shadow-[2px_2px_0_0_#365314] ' +
+                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#365314] ' +
+                    'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#365314] ' +
+                    'transition-all whitespace-nowrap'
+                  }
+                >
+                  充值 →
+                </Link>
+              </div>
             )}
           </div>
-
-          {/* Mini progress bar — only when there's a sub AND the user has
-              actually called something. Before the first call there's
-              nothing meaningful to visualize (an empty 0% bar overlaps
-              with the "等 Agent 第一笔调用…" placeholder below in saying
-              the same thing). */}
-          {subBucket && periodTotal > 0 && !noActivity && (
-            // Two-tone bar with threshold-colored fill + a mono readout
-            // on the right. Container is bg-black/30 (dark on accent-orange)
-            // so the white/yellow/red fill always reads as a distinct mass,
-            // not a near-invisible gradient. The "剩 X%" number gives users
-            // an exact sense of where they are without parsing bar length.
-            <div className="mt-4 flex items-center gap-3">
-              <div className="flex-1 h-2.5 bg-black/30 border border-white/30 rounded overflow-hidden">
-                <div
-                  className={`h-full ${periodFillColor} transition-all duration-300`}
-                  style={{ width: `${periodRemainingPct}%` }}
-                />
-              </div>
-              <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
-                剩 {Math.round(periodRemainingPct)}%
-              </span>
-            </div>
-          )}
         </section>
         )}
 
         {/* MAIN COL */}
         <div className="space-y-5">
-          {/* Total balance — only shown when the user has BOTH a sub AND
-              wallet topup. In that case the hero shows today's allowance
-              (sub-bound) but the user also has accrued topup that won't
-              expire — this card surfaces the "your total walking-around
-              money" so they don't think today's number is everything.
-              For sub-only users, balance ≈ today's allowance, so this
-              card would just be a confusing duplicate. */}
-          {subBucket && topupBucket && (
-            <section className={`${card} p-4 flex items-center gap-3 flex-wrap`}>
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold flex-shrink-0">
-                Agent 余额
-              </span>
-              <span className="font-mono text-[16px] font-bold text-ink">
-                ${balanceUsd.toFixed(4)}
-              </span>
-              <span className="font-mono text-[11px] text-[#A89A8D] flex-1 min-w-0">
-                总可用 ≈ 订阅剩余 + 充值余量
-              </span>
-            </section>
-          )}
+          {/* (Total-balance summary card moved into the hero's wallet zone
+              — see RIGHT ZONE in the section above. Single source of truth
+              for "user has wallet credits beyond the subscription".) */}
 
           {/* Today stats — full numbers only after the first call has
               landed. Before that, an empty 0 / $0 grid feels like a
