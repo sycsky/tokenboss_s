@@ -335,6 +335,13 @@ export async function streamChatCore(
       return;
     }
 
+    // Intercept account-level errors (e.g. newapi "用户额度不足") and rewrite
+    // to a friendly 402 with a top-up link before any pass-through happens.
+    // Non-balance 4xx are still buffered + passed through with original status.
+    if (await maybeInterceptUpstreamError(upstreamRes, writer)) {
+      return;
+    }
+
     const contentType =
       upstreamRes.headers.get("content-type") ?? "application/json";
 
@@ -774,6 +781,10 @@ export async function streamResponsesCore(
       return;
     }
 
+    if (await maybeInterceptUpstreamError(upstreamRes, writer)) {
+      return;
+    }
+
     const contentType =
       upstreamRes.headers.get("content-type") ?? "application/json";
 
@@ -829,6 +840,73 @@ function writeJsonError(
     JSON.stringify({ error: { type, message, ...(code ? { code } : {}) } }),
   );
   writer.end();
+}
+
+// Patterns indicating the user's TokenBoss balance is empty (account-level,
+// not model-level). The matching is intentionally lexical rather than
+// status-code based because newapi/one-api gateways translate provider errors
+// into Chinese before we see them, and direct upstreams use varied English.
+//
+// Covered:
+// - newapi default:        用户额度不足
+// - generic Chinese:       余额不足 / 余额已用完 / 余额耗尽 / 额度不足 /
+//                           配额不足 / 配额已用完 / 配额用完 / 欠费
+// - generic English:       insufficient balance/quota/funds/credit
+// - Anthropic direct:      "Your credit balance is too low"
+//
+// Deliberately NOT matching `剩余额度` alone — it appears as a status field
+// (`剩余额度: $50`) in non-error contexts and would risk false positives.
+const ACCOUNT_BALANCE_EMPTY_PATTERN =
+  /用户额度不足|额度不足|余额(不足|已用完|耗尽)|配额(不足|已?用完)|欠费|insufficient.*(balance|quota|funds|credit)|credit.*balance.*(low|empty)/i;
+
+const FRIENDLY_BALANCE_EMPTY_MESSAGE =
+  "余额已用完，充值后继续 → https://tokenboss.co/console";
+
+/**
+ * Inspect a 4xx upstream response and either rewrite it to a friendly
+ * insufficient-balance message or pass the original status + body through.
+ *
+ * Returns true if the response was fully written to `writer`; the caller
+ * should `return` immediately. Returns false for non-4xx responses, in
+ * which case the caller's normal streaming/aggregation path runs.
+ *
+ * Why 402: account-level "no credits" is semantically Payment Required, and
+ * most clients (Codex CLI, Claude Code) won't wrap it in a 5-attempt
+ * `Reconnecting...` loop the way they do for 403/5xx — users see the message
+ * immediately instead of waiting two minutes for the agent to give up.
+ */
+export async function maybeInterceptUpstreamError(
+  upstreamRes: Response,
+  writer: StreamWriter,
+): Promise<boolean> {
+  if (upstreamRes.status < 400 || upstreamRes.status >= 500) {
+    return false;
+  }
+  let bodyText: string;
+  try {
+    bodyText = await upstreamRes.text();
+  } catch {
+    return false;
+  }
+  if (ACCOUNT_BALANCE_EMPTY_PATTERN.test(bodyText)) {
+    writer.writeHead(402, { "content-type": "application/json" });
+    writer.write(
+      JSON.stringify({
+        error: {
+          type: "insufficient_balance",
+          message: FRIENDLY_BALANCE_EMPTY_MESSAGE,
+        },
+      }),
+    );
+    writer.end();
+    return true;
+  }
+  const contentType =
+    upstreamRes.headers.get("content-type") ?? "application/json";
+  writer.writeHead(upstreamRes.status, { "content-type": contentType });
+  writer.write(bodyText);
+  writer.end();
+  return true;
 }
 
 // ---------- mock helpers ----------
