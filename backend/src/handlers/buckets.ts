@@ -100,13 +100,14 @@ export async function listBucketsHandler(
     .map((s) => synthesize(s, userId as string, planIdMap, user.createdAt))
     .filter((b): b is SyntheticBucket => b !== null);
 
-  // Topup bucket = whatever newapi.user.quota has beyond the sum of active
-  // subscription remainings. It's the user's wallet — credits redeemed via
-  // /api/user/topup that aren't bound to any subscription. Only emitted
-  // when there's an actual positive balance, so dashboards don't flash
-  // "$0 充值余额" for users who've never topped up.
+  // Topup bucket = user's wallet (newapi.user.quota), credited via redemption
+  // codes from settled topup orders. Tracked INDEPENDENTLY of subscription
+  // accounting — subscription consumption hits sub.amount_used, wallet
+  // consumption hits user.quota; the two don't mix. Only emit when there's
+  // an actual positive balance, so dashboards don't flash "$0 充值余额"
+  // for users who've never topped up.
   if (nu) {
-    const topupBucket = synthesizeTopupBucket(nu, subs, userId, user.createdAt);
+    const topupBucket = synthesizeTopupBucket(nu, userId, user.createdAt);
     if (topupBucket) buckets.push(topupBucket);
   }
 
@@ -114,29 +115,21 @@ export async function listBucketsHandler(
 }
 
 /**
- * Derive the user's topup wallet remaining by subtracting active-subscription
- * remainings from newapi.user.quota (which aggregates both). Returns null
- * when the residual is ≤ 0 — never emit a 0-balance bucket.
+ * The user's wallet (topup) remaining IS newapi.user.quota — they are the
+ * same value. Subscription quota is tracked separately on the subscription
+ * record (amount_total / amount_used) and consumed against that record, not
+ * against user.quota. Wallet credits from redemption codes (settled topup
+ * orders) accumulate in user.quota and are spent down from there.
+ *
+ * Returns null when the wallet is below 1¢, so dashboards don't flash
+ * "$0 充值余额" for users who've never topped up.
  */
 function synthesizeTopupBucket(
   nu: NewapiUser,
-  subs: NewapiSubscription[],
   userId: string,
   userCreatedAt: string,
 ): SyntheticBucket | null {
-  const totalBalanceUsd = newapiQuotaToUsd(Math.max(0, nu.quota));
-  const activeSubRemainingUsd = subs
-    .filter((s) => s.status === "active")
-    .reduce((sum, s) => {
-      const total = newapiQuotaToUsd(s.amount_total);
-      const used = newapiQuotaToUsd(s.amount_used);
-      return sum + Math.max(0, total - used);
-    }, 0);
-
-  // Floating-point slop guard: newapiQuotaToUsd does integer / 500_000, so
-  // exact-equality residuals can land at ~1e-12. Treat anything below 1¢ as
-  // zero — wallet credits less than that aren't worth surfacing in the UI.
-  const topupRemainingUsd = totalBalanceUsd - activeSubRemainingUsd;
+  const topupRemainingUsd = newapiQuotaToUsd(Math.max(0, nu.quota));
   if (topupRemainingUsd < 0.01) return null;
 
   return {
