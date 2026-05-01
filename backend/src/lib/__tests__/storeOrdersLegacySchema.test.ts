@@ -9,7 +9,7 @@
  * orders ('topup'), so plan and topup INSERTs go through the same path
  * regardless of whether the DB schema has been re-created.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
