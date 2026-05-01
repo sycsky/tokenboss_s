@@ -619,11 +619,11 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
 // ---------- Public API — Orders ----------
 
 export async function createOrder(rec: OrderRecord): Promise<void> {
-  // planId column is kept for back-compat / rollback. Derive from skuType
-  // when the order is a plan_* SKU; null for topup.
-  const legacyPlanId = rec.skuType.startsWith('plan_')
-    ? rec.skuType.replace(/^plan_/, '')
-    : null;
+  // Legacy `planId` column. Production DBs predate the schema change that
+  // made it nullable (CREATE TABLE IF NOT EXISTS no-ops on existing tables),
+  // so we always write a non-null value derived from skuType:
+  //   plan_plus → 'plus' / plan_super → 'super' / plan_ultra → 'ultra' / topup → 'topup'
+  const legacyPlanId = rec.skuType.replace(/^plan_/, '');
   db.prepare(`
     INSERT INTO orders
       (orderId, userId, planId, skuType, topupAmountUsd, settleStatus,
