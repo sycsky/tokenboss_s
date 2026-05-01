@@ -202,7 +202,7 @@ export default function Plans() {
             to take. Frame is: 你 [doing what] · 要 [need] —— [what we
             give you]. The two sections together act as a fork in the road. */}
         <p className="mb-5 max-w-[640px] text-[13.5px] text-text-secondary leading-relaxed">
-          你做 Vibe Coding，要满血模型稳定输出 ——
+          让 Claude Code、Codex 这类 Agent 帮你 Vibe Coding ——
           我们给你折扣价直连，按调用付费。
         </p>
 
@@ -267,7 +267,7 @@ export default function Plans() {
             what] · 要 [need] —— [what we give you]. Mechanism specifics
             still live in each card's [i] tooltip. */}
         <p className="mb-5 max-w-[640px] text-[13.5px] text-text-secondary leading-relaxed">
-          你跑 Agent，要最高性价比 ——
+          让 OpenClaw、Hermes 这类 Agent 帮你跑生活决策、办公 ——
           我们多渠道智能路由帮你省，按真实跑通付费。
         </p>
 
