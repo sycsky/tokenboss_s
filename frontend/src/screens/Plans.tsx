@@ -151,25 +151,32 @@ export default function Plans() {
       {isLoggedIn ? <AppNav /> : <TopNav />}
 
       <main className="max-w-[1080px] mx-auto px-6 md:px-14 py-12 md:py-20">
-        {/* Hero — eyebrow + h1 + (currency switcher AND payment badges in
-            a single right-aligned cluster). Payment badges live up here so
-            users see "what can I pay with" the moment they're deciding,
-            not buried in a footer. Mobile: cluster wraps to a second line
-            via flex-wrap on small screens. */}
+        {/* Hero — eyebrow on the left, currency control + payment annotation
+            on the right. Earlier the PayBadges sat as ink-stamped pills on
+            the same row as the CurrencySwitcher, which made them look like
+            three peer controls — but only the switcher is interactive.
+            Restructured so the switcher stays a stamp pill and the payment
+            methods become a small color-dot annotation BELOW it. Visual
+            hierarchy now matches the logical one (switcher = control;
+            methods = readout that follows from its value). */}
         <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
           <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-ink-3 font-bold">
             PRICING · 套餐
           </div>
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            {currency === 'rmb' ? (
-              <PayBadge dotColor="#1677FF" label="支付宝" />
-            ) : (
-              <>
-                <PayBadge dotColor="#26A17B" label="USDT" />
-                <PayBadge dotColor="#2775CA" label="USDC" />
-              </>
-            )}
+          <div className="flex flex-col items-end gap-1.5">
             <CurrencySwitcher />
+            <div className="flex items-center gap-2 font-mono text-[10.5px] text-ink-3 leading-none">
+              <span>支持</span>
+              {currency === 'rmb' ? (
+                <PayBadge dotColor="#1677FF" label="支付宝" />
+              ) : (
+                <>
+                  <PayBadge dotColor="#26A17B" label="USDT" />
+                  <span aria-hidden="true" className="text-ink-4">·</span>
+                  <PayBadge dotColor="#2775CA" label="USDC" />
+                </>
+              )}
+            </div>
           </div>
         </div>
         <h1 className="font-sans text-[40px] md:text-[56px] font-extrabold leading-[1.05] tracking-tight mb-5">
@@ -377,6 +384,15 @@ export default function Plans() {
   );
 }
 
+/**
+ * Compact "supported payment method" annotation. Was a heavy stamp pill
+ * (border + shadow + bg) that read as a button — now a lightweight
+ * color-dot + label so it sits naturally as Switcher's sub-annotation
+ * without competing with actual interactive controls.
+ *
+ * Font/size/color inherit from the parent annotation row so the badge
+ * row reads as one continuous line.
+ */
 function PayBadge({
   dotColor,
   label,
@@ -387,20 +403,14 @@ function PayBadge({
   hint?: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-bg border-2 border-ink rounded shadow-[2px_2px_0_0_#1C1917]">
+    <span className="inline-flex items-center gap-1 leading-none">
       <span
-        className="w-2 h-2 rounded-full"
+        className="w-2 h-2 rounded-full flex-shrink-0"
         style={{ backgroundColor: dotColor }}
         aria-hidden
       />
-      <span className="font-mono text-[11px] font-bold text-ink leading-none">
-        {label}
-      </span>
-      {hint && (
-        <span className="font-mono text-[10px] text-ink-3 leading-none">
-          {hint}
-        </span>
-      )}
+      <span className="text-ink-2 font-medium">{label}</span>
+      {hint && <span className="text-ink-4">{hint}</span>}
     </span>
   );
 }
