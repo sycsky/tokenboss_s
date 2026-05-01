@@ -190,12 +190,22 @@ export default function Plans() {
             the right of the section title so the assurance copy is in
             scope when the user reads about the topup product, not
             tucked away in the page footer. */}
-        <div className="flex items-center justify-between gap-4 flex-wrap mb-5">
+        <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
           <SectionHeader num="01" cn="充值" en="Pay as you go" size="lg" />
           <span className="font-mono text-[11px] text-ink-3 tracking-tight">
             充值不退 · 永久可用
           </span>
         </div>
+
+        {/* Scenario one-liner — second-person voice ("你做 X") so users can
+            self-identify against the 套餐 line below and decide which lane
+            to take. Frame is: 你 [doing what] · 要 [need] —— [what we
+            give you]. The two sections together act as a fork in the road. */}
+        <p className="mb-5 max-w-[640px] text-[13.5px] text-text-secondary leading-relaxed">
+          你做 Vibe Coding，要满血模型稳定输出 ——
+          官方原价直连，按调用付费。
+        </p>
+
         <div
           className={
             'flex flex-col md:flex-row md:items-center md:justify-between gap-5 ' +
@@ -252,11 +262,13 @@ export default function Plans() {
           </span>
         </div>
 
-        {/* Multi-channel rate switching — one-liner. Specifics live in
-            each card's [i] tooltip; no need to over-explain in body copy. */}
+        {/* Scenario one-liner — paired with 01 充值's intro to act as a fork
+            in the road for the user. Same second-person frame: 你 [doing
+            what] · 要 [need] —— [what we give you]. Mechanism specifics
+            still live in each card's [i] tooltip. */}
         <p className="mb-5 max-w-[640px] text-[13.5px] text-text-secondary leading-relaxed">
-          同一个模型背后接多条渠道，系统自动挑最便宜的那条跑 ——
-          你只为真实跑通的渠道付费。
+          你跑 Agent，要最高性价比 ——
+          多渠道智能路由，按真实跑通付费。
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
