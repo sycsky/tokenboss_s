@@ -203,7 +203,7 @@ export default function Plans() {
             give you]. The two sections together act as a fork in the road. */}
         <p className="mb-5 max-w-[640px] text-[13.5px] text-text-secondary leading-relaxed">
           你做 Vibe Coding，要满血模型稳定输出 ——
-          官方原价直连，按调用付费。
+          我们给你折扣价直连，按调用付费。
         </p>
 
         <div
@@ -268,7 +268,7 @@ export default function Plans() {
             still live in each card's [i] tooltip. */}
         <p className="mb-5 max-w-[640px] text-[13.5px] text-text-secondary leading-relaxed">
           你跑 Agent，要最高性价比 ——
-          多渠道智能路由，按真实跑通付费。
+          我们多渠道智能路由帮你省，按真实跑通付费。
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
