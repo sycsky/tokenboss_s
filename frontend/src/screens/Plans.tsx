@@ -63,22 +63,57 @@ export default function Plans() {
     ULTRA_DROP.preemptMinuteCST,
   );
 
-  // CTA for the 3 paid tiers. Priority chain:
-  //   1. anonymous          → "免费开始 →"     → /register
-  //   2. logged in, has paid → "联系客服"      → ContactSalesModal
-  //      (paid lockout wins over sold-out — existing customers still
-  //       see their actual state, not a misleading "下次开放" countdown)
-  //   3. logged in, sold out → countdown / "抢购中…" → detail page
-  //   4. logged in, can buy  → "立即开通 →"   → /billing/pay
-  const tierCta = (plan: 'plus' | 'super' | 'ultra', soldOut?: boolean) => {
+  // CTA for the 3 paid tiers. Returns null to suppress the button
+  // entirely (used for tiers below the user's current paid plan — no
+  // meaningful action to offer there, and showing "已订阅" on every card
+  // makes the page feel locked-down). Priority chain:
+  //   1. anonymous            → "免费开始 →"        → /register
+  //   2. logged in, paid:
+  //      · this card === current tier → "续费 →"   → ContactSalesModal(renew)
+  //      · this card  >  current tier → "升级 →"   → ContactSalesModal(upgrade)
+  //         (sold-out wins — countdown still shows for sold-out higher tiers
+  //          so users see the real marketing state, not contact-sales)
+  //      · this card  <  current tier → null (no button rendered)
+  //   3. logged in, no plan:
+  //      · sold out  → countdown
+  //      · can buy   → "立即开通 →"
+  const TIER_RANK: Record<'plus' | 'super' | 'ultra', number> = {
+    plus: 1,
+    super: 2,
+    ultra: 3,
+  };
+  const tierCta = (
+    plan: 'plus' | 'super' | 'ultra',
+    soldOut?: boolean,
+  ): { text: string; onClick: () => void } | null => {
     if (!isLoggedIn) return { text: '免费开始 →', onClick: goRegister };
+
     if (paidSku) {
-      const isUltra = paidSku === 'plan_ultra';
-      return {
-        text: isUltra ? '已订阅 · 联系客服续费' : '已订阅 · 联系客服调整',
-        onClick: () => setContactReason(isUltra ? 'renew' : 'upgrade'),
-      };
+      // paidSku is 'plan_plus' | 'plan_super' | 'plan_ultra'
+      const currentTier = paidSku.replace('plan_', '') as 'plus' | 'super' | 'ultra';
+
+      if (plan === currentTier) {
+        return { text: '续费 →', onClick: () => setContactReason('renew') };
+      }
+      if (TIER_RANK[plan] < TIER_RANK[currentTier]) {
+        // Lower tier than the user already has — no action to offer.
+        return null;
+      }
+      // Higher tier. Sold-out marketing state takes priority over the
+      // upgrade contact-sales path (a paid super user looking at ultra
+      // should still see the daily-drop countdown).
+      if (soldOut) {
+        return {
+          text:
+            ultraPhase === 'transitioning'
+              ? 'SUPER 抢购中…'
+              : `下次开放 ${ultraCountdown}`,
+          onClick: () => goPay(plan),
+        };
+      }
+      return { text: '升级 →', onClick: () => setContactReason('upgrade') };
     }
+
     if (soldOut) {
       return {
         text:
@@ -99,6 +134,13 @@ export default function Plans() {
   const std = STANDARD_RATE[currency];
   const [plus, sup, ultra] = TIERS;
 
+  // Pre-compute per-card CTA so each TierCard call site is just a
+  // straight prop wire-up, and we don't re-derive the cta on every
+  // render of the 3 cards.
+  const plusCta = tierCta('plus', plus.soldOut);
+  const superCta = tierCta('super', sup.soldOut);
+  const ultraCta = tierCta('ultra', ultra.soldOut);
+
   return (
     <div className="min-h-screen bg-bg">
       {/* Logged-in users keep the product chrome (AppNav with avatar) so
@@ -109,12 +151,26 @@ export default function Plans() {
       {isLoggedIn ? <AppNav /> : <TopNav />}
 
       <main className="max-w-[1080px] mx-auto px-6 md:px-14 py-12 md:py-20">
-        {/* Hero — Slock-pixel eyebrow + bold one-line h1 + currency switcher right-aligned */}
-        <div className="flex items-start justify-between gap-4 mb-3">
+        {/* Hero — eyebrow + h1 + (currency switcher AND payment badges in
+            a single right-aligned cluster). Payment badges live up here so
+            users see "what can I pay with" the moment they're deciding,
+            not buried in a footer. Mobile: cluster wraps to a second line
+            via flex-wrap on small screens. */}
+        <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
           <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-ink-3 font-bold">
             PRICING · 套餐
           </div>
-          <CurrencySwitcher />
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {currency === 'rmb' ? (
+              <PayBadge dotColor="#1677FF" label="支付宝" />
+            ) : (
+              <>
+                <PayBadge dotColor="#26A17B" label="USDT" />
+                <PayBadge dotColor="#2775CA" label="USDC" />
+              </>
+            )}
+            <CurrencySwitcher />
+          </div>
         </div>
         <h1 className="font-sans text-[40px] md:text-[56px] font-extrabold leading-[1.05] tracking-tight mb-5">
           一份钱，多个 Agent 共用。
@@ -123,8 +179,16 @@ export default function Plans() {
           {currency === 'usd' ? '美元' : '人民币'} 付款，按调用额度计费。
         </p>
 
-        {/* 01 Standard — Slock-pixel pay-as-you-go */}
-        <SectionHeader num="01" cn="标准价" en="Pay as you go" size="lg" className="mb-5" />
+        {/* 01 Topup — Slock-pixel pay-as-you-go. Refund clause sits to
+            the right of the section title so the assurance copy is in
+            scope when the user reads about the topup product, not
+            tucked away in the page footer. */}
+        <div className="flex items-center justify-between gap-4 flex-wrap mb-5">
+          <SectionHeader num="01" cn="充值" en="Pay as you go" size="lg" />
+          <span className="font-mono text-[11px] text-ink-3 tracking-tight">
+            充值不退 · 永久可用
+          </span>
+        </div>
         <div
           className={
             'flex flex-col md:flex-row md:items-center md:justify-between gap-5 ' +
@@ -173,8 +237,13 @@ export default function Plans() {
           ) : null}
         </div>
 
-        {/* 02 Membership */}
-        <SectionHeader num="02" cn="套餐" en="Membership" size="lg" className="mb-3" />
+        {/* 02 Membership — refund clause to the right, mirroring 01 layout. */}
+        <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
+          <SectionHeader num="02" cn="套餐" en="Membership" size="lg" />
+          <span className="font-mono text-[11px] text-ink-3 tracking-tight">
+            24h 内不满意可退款 · 按实付，不含赠送
+          </span>
+        </div>
 
         {/* Multi-channel rate switching — one-liner. Specifics live in
             each card's [i] tooltip; no need to over-explain in body copy. */}
@@ -191,9 +260,11 @@ export default function Plans() {
             totalUsd={plus.totalQuota}
             dailyCap={plus.dailyCap}
             models={plus.models}
-            ctaText={tierCta('plus', plus.soldOut).text}
-            onCtaClick={tierCta('plus', plus.soldOut).onClick}
+            ctaText={plusCta?.text}
+            onCtaClick={plusCta?.onClick}
             ctaVariant={plus.soldOut ? 'muted' : 'secondary'}
+            banner="副驾玩家"
+            bannerVariant="subtle"
             tooltipPanel={
               <TierTooltip
                 models={['GPT-5.5 · 5.4 · 5.4-mini']}
@@ -212,10 +283,12 @@ export default function Plans() {
             totalUsd={sup.totalQuota}
             dailyCap={sup.dailyCap}
             models={sup.models}
-            ctaText={tierCta('super', sup.soldOut).text}
-            onCtaClick={tierCta('super', sup.soldOut).onClick}
+            ctaText={superCta?.text}
+            onCtaClick={superCta?.onClick}
             ctaVariant={sup.soldOut ? 'muted' : 'primary'}
             featured={!sup.soldOut}
+            banner="主驾玩家"
+            bannerVariant="strong"
             ctaHelper={
               sup.soldOut
                 ? undefined
@@ -239,18 +312,20 @@ export default function Plans() {
             totalUsd={ultra.totalQuota}
             dailyCap={ultra.dailyCap}
             models={ultra.models}
-            ctaText={tierCta('ultra', ultra.soldOut).text}
-            onCtaClick={tierCta('ultra', ultra.soldOut).onClick}
+            ctaText={ultraCta?.text}
+            onCtaClick={ultraCta?.onClick}
             ctaVariant={ultra.soldOut ? 'muted' : 'secondary'}
-            soldOutBanner={
+            dimmed={ultra.soldOut}
+            banner={
               ultra.soldOut
                 ? ultraPhase === 'before'
                   ? `今日 ${ULTRA_DROP.slotsPerDay} 席即将开放 · Super 优先`
                   : ultraPhase === 'transitioning'
                   ? `Super 正在抢购今日 ${ULTRA_DROP.slotsPerDay} 席…`
                   : `今日 ${ULTRA_DROP.slotsPerDay} 席已抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
-                : undefined
+                : '自动驾驶'
             }
+            bannerVariant="dark"
             ctaHelper={
               ultra.soldOut ? '通常 1 分钟内抢完' : undefined
             }
@@ -288,26 +363,9 @@ export default function Plans() {
           </p>
         </div>
 
-        {/* Buyer-assurance footer — payment methods + refund policy live
-            together as "what happens when you click 立即开通". Payment
-            badges are currency-aware so users see the methods that match
-            the currency they switched to at the top. */}
-        <div className="flex items-center gap-2.5 flex-wrap mb-3">
-          <span className="font-mono text-[10.5px] tracking-[0.16em] uppercase text-ink-3 font-bold">
-            支持支付
-          </span>
-          {currency === 'rmb' ? (
-            <PayBadge dotColor="#1677FF" label="支付宝" />
-          ) : (
-            <>
-              <PayBadge dotColor="#26A17B" label="USDT" />
-              <PayBadge dotColor="#2775CA" label="USDC" />
-            </>
-          )}
-        </div>
-        <div className="font-mono text-[11.5px] text-ink-3 tracking-tight max-w-[640px] leading-relaxed">
-          调用按真实渠道费率 · 套餐 24h 不满意可退款（按实付，不含赠送）· 充值不退但永久可用
-        </div>
+        {/* (Payment methods + refund policy moved up to the section
+            headers — see PRICING hero cluster + each SectionHeader's
+            right slot. Footer noise removed.) */}
       </main>
 
       <ContactSalesModal
