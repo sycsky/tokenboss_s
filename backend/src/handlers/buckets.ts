@@ -22,12 +22,18 @@ import type {
 
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { getUser } from "../lib/store.js";
-import { newapi, newapiQuotaToUsd, NewapiError, type NewapiSubscription } from "../lib/newapi.js";
+import {
+  newapi,
+  newapiQuotaToUsd,
+  NewapiError,
+  type NewapiSubscription,
+  type NewapiUser,
+} from "../lib/newapi.js";
 import { getNewapiPlanId } from "../lib/plans.js";
 
 interface SyntheticBucket {
   id: string;
-  skuType: "trial" | "plan_plus" | "plan_super" | "plan_ultra";
+  skuType: "trial" | "plan_plus" | "plan_super" | "plan_ultra" | "topup";
   amountUsd: number;
   dailyCapUsd: number | null;
   dailyRemainingUsd: number | null;
@@ -38,7 +44,8 @@ interface SyntheticBucket {
   modelPool: "eco_only" | "all";
   /** ISO of next 24h quota reset, taken from newapi's subscription
    *  next_reset_time (only set for plans whose quota_reset_period is
-   *  daily/weekly/etc). null for trial (never resets). */
+   *  daily/weekly/etc). null for trial (never resets) and for topup
+   *  (wallet credits don't expire / reset). */
   nextResetAt: string | null;
 }
 
@@ -62,25 +69,94 @@ export async function listBucketsHandler(
     return jsonResponse(200, { buckets: [] });
   }
 
-  let subs: NewapiSubscription[] = [];
-  try {
-    subs = await newapi.listUserSubscriptions(user.newapiUserId);
-  } catch (err) {
-    if (err instanceof NewapiError) {
-      console.warn(`[buckets] listUserSubscriptions failed: ${err.message}`);
-    } else {
-      console.warn(`[buckets] listUserSubscriptions failed: ${(err as Error).message}`);
-    }
-    return jsonResponse(200, { buckets: [] });
+  // Two newapi calls in parallel — they're independent and the latency is
+  // user-facing (every dashboard load). allSettled lets each one fail on
+  // its own without nuking the other: a flaky listSubs still surfaces the
+  // topup balance, and a flaky getUser still surfaces the active sub.
+  const [subsRes, nuRes] = await Promise.allSettled([
+    newapi.listUserSubscriptions(user.newapiUserId),
+    newapi.getUser(user.newapiUserId),
+  ]);
+
+  if (subsRes.status === "rejected") {
+    const err = subsRes.reason;
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.warn(`[buckets] listUserSubscriptions failed: ${msg}`);
+  }
+  if (nuRes.status === "rejected") {
+    const err = nuRes.reason;
+    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+    console.warn(`[buckets] getUser failed: ${msg}`);
   }
 
+  const subs: NewapiSubscription[] =
+    subsRes.status === "fulfilled" ? subsRes.value : [];
+  const nu: NewapiUser | null =
+    nuRes.status === "fulfilled" ? nuRes.value : null;
+
   const planIdMap = buildPlanIdMap();
-  const buckets = subs
+  const buckets: SyntheticBucket[] = subs
     .filter((s) => s.status === "active")
     .map((s) => synthesize(s, userId as string, planIdMap, user.createdAt))
     .filter((b): b is SyntheticBucket => b !== null);
 
+  // Topup bucket = whatever newapi.user.quota has beyond the sum of active
+  // subscription remainings. It's the user's wallet — credits redeemed via
+  // /api/user/topup that aren't bound to any subscription. Only emitted
+  // when there's an actual positive balance, so dashboards don't flash
+  // "$0 充值余额" for users who've never topped up.
+  if (nu) {
+    const topupBucket = synthesizeTopupBucket(nu, subs, userId, user.createdAt);
+    if (topupBucket) buckets.push(topupBucket);
+  }
+
   return jsonResponse(200, { buckets });
+}
+
+/**
+ * Derive the user's topup wallet remaining by subtracting active-subscription
+ * remainings from newapi.user.quota (which aggregates both). Returns null
+ * when the residual is ≤ 0 — never emit a 0-balance bucket.
+ */
+function synthesizeTopupBucket(
+  nu: NewapiUser,
+  subs: NewapiSubscription[],
+  userId: string,
+  userCreatedAt: string,
+): SyntheticBucket | null {
+  const totalBalanceUsd = newapiQuotaToUsd(Math.max(0, nu.quota));
+  const activeSubRemainingUsd = subs
+    .filter((s) => s.status === "active")
+    .reduce((sum, s) => {
+      const total = newapiQuotaToUsd(s.amount_total);
+      const used = newapiQuotaToUsd(s.amount_used);
+      return sum + Math.max(0, total - used);
+    }, 0);
+
+  // Floating-point slop guard: newapiQuotaToUsd does integer / 500_000, so
+  // exact-equality residuals can land at ~1e-12. Treat anything below 1¢ as
+  // zero — wallet credits less than that aren't worth surfacing in the UI.
+  const topupRemainingUsd = totalBalanceUsd - activeSubRemainingUsd;
+  if (topupRemainingUsd < 0.01) return null;
+
+  return {
+    id: `bk_topup_${nu.id}_${userId}`,
+    skuType: "topup",
+    amountUsd: topupRemainingUsd,
+    // Wallet credits don't have a daily cap / reset; the whole balance is
+    // available indefinitely until consumed.
+    dailyCapUsd: null,
+    dailyRemainingUsd: null,
+    totalRemainingUsd: topupRemainingUsd,
+    // No single "started at" — topup is cumulative. Use account creation as
+    // a stable, monotonic anchor so the UI can still render a date.
+    startedAt: userCreatedAt,
+    // Never expires — credits sit in newapi.user.quota until spent.
+    expiresAt: null,
+    modeLock: null,
+    modelPool: "all",
+    nextResetAt: null,
+  };
 }
 
 /**
