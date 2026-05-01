@@ -175,21 +175,38 @@ export default function OrderStatus() {
           <Row label="渠道">
             <span>{CHANNEL_LABEL[order.channel] ?? order.channel}</span>
           </Row>
-          {isTopup(order) && order.topupAmountUsd != null && (
-            <Row label="到账">
-              <span className="font-mono">${order.topupAmountUsd.toFixed(2)}</span>
+          {/* Topup: split "what you paid" from "what was credited" — they
+              differ when paying USDT (1 USDT → $7 credited per spec). Plan
+              orders keep the simpler single-amount line below. */}
+          {isTopup(order) ? (
+            <>
+              <Row label="实付">
+                <span className="font-mono">
+                  {order.channel === 'epusdt' && order.amountActual
+                    ? `${order.amountActual.toFixed(4)} USDT`
+                    : `${order.currency === 'USD' ? '$' : '¥'}${order.amount.toFixed(2)}`}
+                </span>
+              </Row>
+              {order.topupAmountUsd != null && (
+                <Row label="到账">
+                  <span className="font-mono font-bold">
+                    ${order.topupAmountUsd.toFixed(2)} 美金
+                  </span>
+                </Row>
+              )}
+            </>
+          ) : (
+            <Row label="金额">
+              <span className="font-mono">
+                {order.currency === 'USD' ? '$' : '¥'}{order.amount.toFixed(2)}
+              </span>
+              {order.channel === 'epusdt' && order.amountActual ? (
+                <span className="ml-2 font-mono text-[12px] text-text-secondary">
+                  ≈ {order.amountActual.toFixed(4)} USDT
+                </span>
+              ) : null}
             </Row>
           )}
-          <Row label="金额">
-            <span className="font-mono">
-              {order.currency === 'USD' ? '$' : '¥'}{order.amount.toFixed(2)}
-            </span>
-            {order.channel === 'epusdt' && order.amountActual ? (
-              <span className="ml-2 font-mono text-[12px] text-text-secondary">
-                ≈ {order.amountActual.toFixed(4)} USDT
-              </span>
-            ) : null}
-          </Row>
           {order.paidAt && (
             <Row label="支付时间">
               <span className="font-mono text-[12px]">{new Date(order.paidAt).toLocaleString()}</span>
