@@ -138,12 +138,15 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
                   disabled={isCopying}
                   aria-label="复制完整 key"
                   className={
-                    'flex-shrink-0 px-2 py-1.5 bg-white border-2 border-ink rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-ink ' +
+                    'flex-shrink-0 px-2 py-1.5 border-2 rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase ' +
                     'shadow-[2px_2px_0_0_#1C1917] ' +
                     'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
                     'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
                     'disabled:opacity-50 disabled:cursor-not-allowed ' +
-                    'transition-all'
+                    'transition-all ' +
+                    (isCopied
+                      ? 'bg-accent border-accent text-white'
+                      : 'bg-white border-ink text-ink')
                   }
                 >
                   {isCopying ? '…' : isCopied ? '✓' : <CopyIcon />}

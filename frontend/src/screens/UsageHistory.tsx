@@ -13,6 +13,34 @@ const selectCls =
   'shadow-[2px_2px_0_0_#1C1917] focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] ' +
   'focus:shadow-[1px_1px_0_0_#1C1917] transition-all cursor-pointer';
 
+const WEEKDAY_CN = ['日', '一', '二', '三', '四', '五', '六'];
+
+/**
+ * Render a record's timestamp with day-of-week awareness so a scrolling user
+ * can tell "today vs yesterday vs last Tuesday" at a glance.
+ *
+ *   today       → "今天 14:30"
+ *   yesterday   → "昨天 14:30"   (calendar-yesterday, not 24h ago)
+ *   <7 days     → "周三 14:30"
+ *   older       → "5月1日 14:30"
+ *
+ * Uses local calendar boundaries (toDateString) rather than fixed-hour
+ * windows to match the user's mental model — a record from 02:00 today is
+ * "今天" even if it was logged 22 hours ago.
+ */
+function formatRecordTime(iso: string): string {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return `今天 ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${time}`;
+  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
+  if (diffDays >= 0 && diffDays < 7) return `周${WEEKDAY_CN[d.getDay()]} ${time}`;
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${time}`;
+}
+
 export default function UsageHistory() {
   const [data, setData] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
   const [balance, setBalance] = useState(0);
@@ -120,7 +148,7 @@ export default function UsageHistory() {
                   <UsageRow
                     key={r.id}
                     variant="desktop"
-                    time={new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    time={formatRecordTime(r.createdAt)}
                     eventType={r.eventType}
                     model={formatModelName(r.model)}
                     // chat-completions line: r.source non-null (worst case 'other')

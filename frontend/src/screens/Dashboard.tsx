@@ -353,6 +353,12 @@ export default function Dashboard() {
             <div className="flex flex-col gap-3 sm:gap-3.5 min-w-0">
               {subBucket ? (
                 <>
+                  {/* Headline row: 今日剩 + tier chip + days + subscription
+                      action button. Action lives here (not below the
+                      progress bar) so the LEFT zone doesn't end with an
+                      orphan button floating on the orange field — it
+                      belongs visually grouped with the rest of the sub
+                      info. Mobile: column stack. */}
                   <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
                     <div className="flex items-baseline gap-3 flex-wrap">
                       <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
@@ -380,13 +386,52 @@ export default function Dashboard() {
                             : `本月还 ${subDaysRemaining} 天`}
                       </span>
                     </div>
+
+                    {/* Subscription-side action(s). 充值额度 link only shown
+                        when there's no wallet card yet (first-topup entry).
+                        No ml-auto — the button sits at natural gap distance
+                        from the chip/days, keeping the headline row visually
+                        compact and left-aligned. The right-side empty space
+                        becomes "breathing room" rather than an awkward gap
+                        with an isolated button floating in it. */}
+                    {isTrial ? (
+                      <Link
+                        to="/pricing"
+                        className={
+                          slockBtn('secondary') +
+                          ' w-full text-center sm:w-auto'
+                        }
+                      >
+                        选个套餐 →
+                      </Link>
+                    ) : (
+                      <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
+                        {!topupBucket && (
+                          <Link
+                            to="/billing/topup"
+                            className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
+                          >
+                            充值额度
+                          </Link>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setContactReason('renew')}
+                          className={slockBtn('secondary') + ' flex-1 sm:flex-none'}
+                        >
+                          续费 →
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Mini progress bar — same logic as before, just scoped to
-                      the LEFT zone width so it doesn't bleed under the
-                      wallet card on desktop. */}
+                  {/* Mini progress bar — pushed to the BOTTOM of the LEFT
+                      zone with mt-auto so the zone gets visual rhythm
+                      (headline top + progress bottom) instead of all
+                      content piling up at the top. Mirrors the wallet
+                      card's "headline + button" top/bottom structure. */}
                   {periodTotal > 0 && !noActivity && (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 mt-auto">
                       <div className="flex-1 h-2.5 bg-black/30 border border-white/30 rounded overflow-hidden">
                         <div
                           className={`h-full ${periodFillColor} transition-all duration-300`}
@@ -396,38 +441,6 @@ export default function Dashboard() {
                       <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
                         剩 {Math.round(periodRemainingPct)}%
                       </span>
-                    </div>
-                  )}
-
-                  {/* Subscription-side action(s). 充值额度 link only shown
-                      when there's no wallet card yet (first-topup entry). */}
-                  {isTrial ? (
-                    <Link
-                      to="/pricing"
-                      className={
-                        slockBtn('secondary') +
-                        ' w-full text-center sm:w-auto sm:self-start mt-1'
-                      }
-                    >
-                      选个套餐 →
-                    </Link>
-                  ) : (
-                    <div className="flex items-center gap-3 sm:gap-4 mt-1 flex-wrap">
-                      {!topupBucket && (
-                        <Link
-                          to="/billing/topup"
-                          className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
-                        >
-                          充值额度
-                        </Link>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setContactReason('renew')}
-                        className={slockBtn('secondary') + ' flex-1 sm:flex-none sm:ml-auto'}
-                      >
-                        续费 →
-                      </button>
                     </div>
                   )}
                 </>
@@ -618,9 +631,15 @@ export default function Dashboard() {
             {/* divider */}
             <div className="my-4 border-t-2 border-ink/10" />
 
-            {/* API KEY sub-section */}
-            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
-              API KEY
+            {/* API KEY sub-section. The right-side BaseUrlChip surfaces the
+                OpenAI-compatible endpoint so a user copying their key on the
+                same screen also sees the URL they need to paste it into —
+                avoids a trip to /install/manual just to find the base URL. */}
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D]">
+                API KEY
+              </span>
+              <BaseUrlChip />
             </div>
             <APIKeyList
               keys={keys}
@@ -657,6 +676,50 @@ export default function Dashboard() {
         onDeleted={handleDeleted}
       />
     </div>
+  );
+}
+
+/**
+ * Compact one-click copy of the OpenAI-compatible base URL. Lives next to
+ * the API KEY label so a user who has just copied their key also has the
+ * other half of the config (base URL) visible and grabbable in one move.
+ *
+ * accent-color flash on copy mirrors APIKeyList's copy button so the
+ * "did it work?" feedback is consistent across the whole screen.
+ */
+function BaseUrlChip() {
+  const url = 'https://api.tokenboss.co/v1';
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — silently no-op; the URL is visible inline */
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label="复制 base URL"
+      className={
+        'flex-shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded border-2 ' +
+        'font-mono text-[10px] tracking-tight transition-colors ' +
+        (copied
+          ? 'bg-accent border-accent text-white'
+          : 'bg-white border-ink text-ink hover:bg-bg')
+      }
+    >
+      <span className="font-mono">{copied ? '✓ 已复制' : 'api.tokenboss.co/v1'}</span>
+      {!copied && (
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <rect x="3.5" y="3.5" width="6" height="7" rx="1" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M2 7.5V2.5C2 2.22 2.22 2 2.5 2H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )}
+    </button>
   );
 }
 
