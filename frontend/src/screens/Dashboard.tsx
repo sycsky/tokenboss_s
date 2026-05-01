@@ -134,7 +134,10 @@ export default function Dashboard() {
         dashboardCache.buckets = b;
       }),
       // Recent-call list + balance hero totals — keep small.
-      api.getUsage({ limit: 4 }).then((r) => {
+      // limit 5 — five rows ≈ the height of the right-side 接入 panel,
+      // so the two columns end at roughly the same baseline without
+      // tricks like flex-1 stretching or scrolling overflow.
+      api.getUsage({ limit: 5 }).then((r) => {
         setUsage(r);
         dashboardCache.usage = r;
       }),
@@ -335,7 +338,7 @@ export default function Dashboard() {
             }
           />
         ) : (
-        <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5">
+        <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5 overflow-hidden">
           {/* Single-column hero with sectioned content:
                 · Subscription section — headline + tier + days + 续费,
                   followed by the progress bar (when there's activity).
@@ -465,41 +468,43 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ===== WALLET SECTION (only when there's wallet balance) =====
-              Separated by a dashed rule so the visual grouping is clear:
-              "this is a different bucket of money, with its own action."
-              Lime-stamp label color is the wallet's persistent visual
-              anchor — also picked up by the 充值 button on the right. */}
+          {/* ===== WALLET BAR — full-bleed dark band at the hero bottom.
+              Negative margins on left/right/bottom make the panel span
+              the full hero width (eating the hero's own padding) and
+              flush against the rounded bottom corners. Hero has
+              overflow-hidden so the bar gets clipped to the rounded
+              shape automatically — no need to mirror border-radius
+              here. The black band gives the wallet its own visual
+              territory: subscription on top (orange), wallet on
+              bottom (ink), separated by their inherent color contrast
+              instead of an explicit divider line. */}
           {topupBucket && (
-            <>
-              <div className="my-4 sm:my-5 border-t-2 border-dashed border-white/30" />
-              <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
-                <div className="flex items-baseline gap-3 flex-wrap">
-                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold text-lime-stamp">
-                    钱包余额
-                  </span>
-                  <span className="font-mono text-[28px] sm:text-[32px] font-bold leading-none">
-                    <span className="text-[14px] sm:text-[16px] opacity-70 align-top mr-0.5">$</span>
-                    {(topupBucket.totalRemainingUsd ?? 0).toFixed(2)}
-                  </span>
-                </div>
-                <Link
-                  to="/billing/topup"
-                  className={
-                    'inline-flex items-center justify-center gap-1.5 ' +
-                    'border-2 border-ink bg-lime-stamp text-lime-stamp-ink ' +
-                    'rounded-md font-bold tracking-tight whitespace-nowrap ' +
-                    'px-5 py-2.5 md:px-6 md:py-3 text-[14px] md:text-[15px] ' +
-                    'shadow-[3px_3px_0_0_#1C1917] ' +
-                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-                    'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-                    'transition-all w-full sm:w-auto sm:ml-auto text-center'
-                  }
-                >
-                  充值 →
-                </Link>
+            <div className="mt-4 sm:mt-5 -mx-5 sm:-mx-7 -mb-4 sm:-mb-5 bg-ink border-t-2 border-ink px-5 py-3 sm:px-7 sm:py-3.5 flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold text-lime-stamp">
+                  钱包余额
+                </span>
+                <span className="font-mono text-[26px] sm:text-[30px] font-bold leading-none text-white">
+                  <span className="text-[13px] sm:text-[15px] opacity-70 align-top mr-0.5">$</span>
+                  {(topupBucket.totalRemainingUsd ?? 0).toFixed(2)}
+                </span>
               </div>
-            </>
+              <Link
+                to="/billing/topup"
+                className={
+                  'inline-flex items-center justify-center gap-1.5 ' +
+                  'border-2 border-lime-stamp bg-lime-stamp text-lime-stamp-ink ' +
+                  'rounded-md font-bold tracking-tight whitespace-nowrap ' +
+                  'px-5 py-2.5 text-[14px] ' +
+                  'shadow-[2px_2px_0_0_#365314] ' +
+                  'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#365314] ' +
+                  'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#365314] ' +
+                  'transition-all w-full sm:w-auto sm:ml-auto text-center'
+                }
+              >
+                充值 →
+              </Link>
+            </div>
           )}
         </section>
         )}
@@ -544,10 +549,10 @@ export default function Dashboard() {
                 </div>
               </section>
 
-              {/* Recent usage — moved out of the side col so the right
-                  side stays purely "接入 / AGENTS / API KEY". The single
-                  "查看全部 →" on this section's header replaces the
-                  prior separate "查看完整用量" link under the stat grid. */}
+              {/* Recent usage — 5 rows is calibrated to roughly match
+                  the right-side 接入 panel's height on desktop, so the
+                  two columns end at the same baseline without ad-hoc
+                  flex/scroll mechanics. */}
               <section>
                 <SectionLabel
                   action={
@@ -559,7 +564,7 @@ export default function Dashboard() {
                   最近使用
                 </SectionLabel>
                 <div className={`${card} overflow-hidden`}>
-                  {usage.records?.slice(0, 4).map((r) => (
+                  {usage.records?.slice(0, 5).map((r) => (
                     <UsageRow
                       key={r.id}
                       variant="mobile"
