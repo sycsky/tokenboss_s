@@ -113,6 +113,22 @@ function resolvePublicBaseUrl(event: APIGatewayProxyEventV2): string | null {
   return `${proto}://${host}`;
 }
 
+/**
+ * Resolve the frontend origin used when redirecting users back from the
+ * payment gateway (the /billing/success?orderId=... route is a React Router
+ * route on the frontend, NOT an API endpoint).
+ *
+ * When backend and frontend share a domain, the fallback to PUBLIC_BASE_URL
+ * works. When they're split (api.tokenboss.co vs tokenboss.co), set
+ * PUBLIC_FRONTEND_BASE_URL=https://tokenboss.co or paid users will be
+ * redirected to api.tokenboss.co/billing/success which 404s on the API.
+ */
+function resolveFrontendBaseUrl(event: APIGatewayProxyEventV2): string | null {
+  const fromEnv = process.env.PUBLIC_FRONTEND_BASE_URL;
+  if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  return resolvePublicBaseUrl(event);
+}
+
 function newOrderId(): string {
   // tb_ord_<24 hex> = 31 chars total — epusdt caps order_id at 32.
   return `tb_ord_${crypto.randomBytes(12).toString("hex")}`;
@@ -272,9 +288,14 @@ export const createOrderHandler = async (
       currency,
       skuLabel,
       notifyUrl: `${baseUrl}/v1/billing/webhook/${channel}`,
+      // notifyUrl uses backend domain (webhook hits the API). redirectUrl uses
+      // frontend domain — /billing/success is a React Router route on the
+      // frontend, NOT an API endpoint. When PUBLIC_FRONTEND_BASE_URL is unset,
+      // resolveFrontendBaseUrl falls back to PUBLIC_BASE_URL (legacy single-
+      // domain setup). On split-domain deploys, the env MUST be set.
       redirectUrl: typeof body.redirectUrl === "string"
         ? body.redirectUrl
-        : `${baseUrl}/billing/success?orderId=${orderId}`,
+        : `${resolveFrontendBaseUrl(event) ?? baseUrl}/billing/success?orderId=${orderId}`,
     });
   } catch (err) {
     const status =
