@@ -130,8 +130,34 @@ export default function UsageHistory() {
           </select>
         </div>
 
-        {/* Table */}
-        <div className={`${card} overflow-hidden mb-5`}>
+        {/* Mobile list — below `lg` the desktop 5-column table doesn't fit
+            a phone-width screen; show the same data as a vertically-stacked
+            card list using UsageRow's mobile variant. `showSourceOnMobile`
+            keeps attribution visible on this page (unlike Dashboard's
+            "最近使用" which intentionally hides source for density). */}
+        <div className={`${card} overflow-hidden mb-5 lg:hidden`}>
+          {data.records?.length > 0 ? (
+            data.records.map((r) => (
+              <UsageRow
+                key={r.id}
+                variant="mobile"
+                showSourceOnMobile
+                time={formatRecordTime(r.createdAt)}
+                eventType={r.eventType}
+                model={formatModelName(r.model)}
+                source={r.source ? formatSource(r.source) : (r.keyHint ?? undefined)}
+                amountUsd={r.amountUsd}
+              />
+            ))
+          ) : (
+            <div className="text-center text-[#A89A8D] text-[13px] p-8 font-mono">
+              暂无使用记录 · 试着用一次 Agent，再回来这里看
+            </div>
+          )}
+        </div>
+
+        {/* Desktop table */}
+        <div className={`${card} overflow-hidden mb-5 hidden lg:block`}>
           <table className="w-full">
             <thead>
               <tr className="bg-ink text-bg border-b-2 border-ink">

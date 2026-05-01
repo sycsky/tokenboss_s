@@ -10,6 +10,10 @@ export interface UsageRowProps {
    *  so the backend can keep storing magnitudes and the UI owns presentation. */
   amountUsd: number;
   variant?: 'mobile' | 'desktop';
+  /** Mobile-only: whether to render `source` as a secondary chip after the
+   *  type pill. Off by default so Dashboard's compact "最近使用" rows stay
+   *  visually dense; UsageHistory's full mobile list opts in. */
+  showSourceOnMobile?: boolean;
 }
 
 // Each event type carries a "stamp" pill (matching Slock-pixel — solid fill +
@@ -29,26 +33,32 @@ const TYPE_STYLES: Record<UsageEventType, {
   refund:  { pill: 'bg-bg text-ink border-2 border-ink', amount: 'text-[#A89A8D]', label: '退款', sign: '+' },
 };
 
-export function UsageRow({ time, eventType, source, model, amountUsd, variant = 'desktop' }: UsageRowProps) {
+export function UsageRow({ time, eventType, source, model, amountUsd, variant = 'desktop', showSourceOnMobile = false }: UsageRowProps) {
   const styles = TYPE_STYLES[eventType];
   const amount = `${styles.sign}$${Math.abs(amountUsd).toFixed(6)}`;
   if (variant === 'mobile') {
-    // Compact list rows (Dashboard "最近使用") — drop the `source` line
-    // here for visual density. The desktop variant in /console/history
-    // keeps source as its own column so users can still see attribution
-    // when they need it.
+    // Compact list rows. Time auto-sizes (whitespace-nowrap) so longer
+    // formats like "今天 14:30" or "5月1日 14:30" fit; older code passed
+    // short "9:41" strings and the 48px hard-cap was just enough — once
+    // UsageHistory started shipping day-aware timestamps that no longer
+    // held. Dashboard's "最近使用" still passes `HH:mm`, so it stays
+    // visually narrow there. `source` is opt-in for the same reason —
+    // Dashboard wants visual density, UsageHistory wants attribution.
     return (
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b-2 border-ink/10 last:border-b-0">
-        <div className="font-mono text-[10.5px] text-[#A89A8D] w-12 flex-shrink-0">{time}</div>
+        <div className="font-mono text-[10.5px] text-[#A89A8D] flex-shrink-0 whitespace-nowrap">{time}</div>
         <div className="flex-1 min-w-0">
           {model && <div className="text-[12.5px] font-semibold text-ink truncate">{model}</div>}
-          <div className="flex items-center gap-1.5 mt-0.5">
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <span className={`font-mono text-[9.5px] font-bold tracking-wider uppercase px-1.5 py-px rounded ${styles.pill}`}>
               {styles.label}
             </span>
+            {showSourceOnMobile && source && (
+              <span className="font-mono text-[10px] text-[#A89A8D] truncate">{source}</span>
+            )}
           </div>
         </div>
-        <div className={`font-mono text-[12px] font-bold ${styles.amount}`}>{amount}</div>
+        <div className={`font-mono text-[12px] font-bold flex-shrink-0 ${styles.amount}`}>{amount}</div>
       </div>
     );
   }
