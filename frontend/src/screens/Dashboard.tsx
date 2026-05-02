@@ -653,18 +653,23 @@ export default function Dashboard() {
         onClose={closeReveal}
         created={justCreated}
       />
-      <DeleteKeyModal
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        target={deleteTarget}
-        onDeleted={handleDeleted}
-      />
       <AllKeysModal
         open={allKeysOpen}
         onClose={() => setAllKeysOpen(false)}
         keys={keys}
         keyStats={keyStats}
         onDeleteClick={setDeleteTarget}
+      />
+      {/* DeleteKeyModal renders LAST so its backdrop sits on top of any
+          other modal that might be open behind it (e.g. AllKeysModal,
+          when the user clicked a row's delete button from inside it).
+          Without this order, the confirmation appears trapped behind the
+          parent modal and looks like nothing happened on click. */}
+      <DeleteKeyModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        target={deleteTarget}
+        onDeleted={handleDeleted}
       />
     </div>
   );

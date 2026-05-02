@@ -507,15 +507,15 @@ export function DeleteKeyModal({
       await api.deleteKey(target.keyId);
       onDeleted();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : `吊销失败: ${(err as Error).message}`);
+      setError(err instanceof ApiError ? err.message : `删除失败: ${(err as Error).message}`);
       setSubmitting(false);
     }
   }
 
   return (
-    <ModalShell open={open} onClose={onClose} tag="DELETE" title="吊销这把 Key？">
+    <ModalShell open={open} onClose={onClose} tag="DELETE" title="删除这把 Key？">
       <div className="text-[13.5px] text-[#6B5E52] mb-2 leading-relaxed">
-        正在使用这把 Key 的 Agent 会立即停止工作 · 无法恢复。
+        删除后此 Key 将永久消失，正在使用它的客户端会立即停止工作 · 无法恢复。
       </div>
       <div className="bg-bg border-2 border-ink rounded-md px-3 py-2 mb-4">
         <div className="font-mono text-[10.5px] tracking-[0.14em] uppercase text-[#A89A8D] font-bold mb-0.5">
@@ -560,7 +560,7 @@ export function DeleteKeyModal({
             'transition-all'
           }
         >
-          {submitting ? '吊销中…' : '吊销'}
+          {submitting ? '删除中…' : '永久删除'}
         </button>
       </div>
     </ModalShell>
