@@ -86,7 +86,11 @@ export default function UsageHistory() {
   }, [dateRange, currentPage]);
 
   const totalCalls = data.totals?.calls ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalCalls / PAGE_SIZE));
+  // `records` is the merged total (consume + reset rows) — what the
+  // table actually renders. Falls back to `calls` for old backends
+  // that haven't shipped the merged-total field yet.
+  const totalRecords = data.totals?.records ?? totalCalls;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
   const isFirstPage = currentPage <= 1;
   const isLastPage = currentPage >= totalPages;
   const recordsOnPage = data.records?.length ?? 0;
@@ -247,7 +251,7 @@ export default function UsageHistory() {
         <div className="flex justify-between items-center flex-wrap gap-3">
           <div className="font-mono text-[12px] text-[#6B5E52]">
             显示第 <span className="text-ink font-bold">{startIdx} 至 {endIdx}</span> 条，共{' '}
-            <span className="text-ink font-bold">{totalCalls}</span> 条记录
+            <span className="text-ink font-bold">{totalRecords}</span> 条记录
           </div>
           <div className="flex gap-1.5">
             <PageBtn disabled={isFirstPage} onClick={() => setCurrentPage(1)}>首页</PageBtn>

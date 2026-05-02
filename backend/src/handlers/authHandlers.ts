@@ -33,6 +33,7 @@ import {
   createEmailVerifyToken,
   consumeEmailVerifyToken,
   consumeVerificationCode,
+  bumpUserTokenVersion,
   getUser,
   getUserIdByEmail,
   markEmailVerified,
@@ -325,7 +326,7 @@ export const loginHandler = async (
     return jsonError(401, "authentication_error", "Invalid email or password.", "bad_credentials");
   }
 
-  const token = signSession(user.userId);
+  const token = signSession(user.userId, user.tokenVersion ?? 0);
   return jsonResponse(200, {
     token,
     user: await buildUserProfile(user),
@@ -367,7 +368,7 @@ export const verifyEmailHandler = async (
     return jsonError(404, "not_found", "Account not found.", "user_missing");
   }
 
-  const sessionToken = signSession(user.userId);
+  const sessionToken = signSession(user.userId, user.tokenVersion ?? 0);
   return jsonResponse(200, {
     token: sessionToken,
     user: await buildUserProfile(user),
@@ -428,6 +429,33 @@ export const meHandler = async (
     return jsonError(auth.status, "authentication_error", auth.message, auth.code);
   }
   return jsonResponse(200, { user: await buildUserProfile(auth.user) });
+};
+
+// ---------- POST /v1/auth/logout ----------
+
+/**
+ * Invalidate every session token currently in circulation for the caller
+ * by bumping `users.tokenVersion`. Stateless JWTs have no server-side
+ * revocation list; bumping the embedded `tv` claim's expected value is
+ * how we get logout-everywhere semantics without paying for a session
+ * table on every request.
+ *
+ * Idempotent: a second call still bumps the counter, but the first call
+ * already invalidated all existing tokens. We don't 401 on a stale
+ * token here — if the client thinks it's logging out, we let it.
+ * Returns 200 even when the bearer is missing/expired; logout should
+ * never appear to fail to the user.
+ */
+export const logoutHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const authHeader =
+    event.headers?.authorization ?? event.headers?.Authorization ?? undefined;
+  const auth = await verifySessionHeader(authHeader);
+  if (!isAuthFailure(auth)) {
+    bumpUserTokenVersion(auth.userId);
+  }
+  return jsonResponse(200, { ok: true });
 };
 
 // ---------- POST /v1/auth/send-code ----------
@@ -547,7 +575,7 @@ export async function verifyCodeHandler(
     return jsonResponse(500, { error: "user_missing_after_verify" });
   }
 
-  const token = signSession(userId);
+  const token = signSession(userId, finalUser.tokenVersion ?? 0);
   return jsonResponse(200, {
     token,
     user: await buildUserProfile(finalUser),

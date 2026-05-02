@@ -70,7 +70,7 @@ interface AuthContextValue extends AuthState {
    * Returns the full AuthResponse (includes `isNew` flag for new accounts).
    */
   loginWithCode: (email: string, code: string) => Promise<import("./api.js").AuthResponse>;
-  logout: () => void;
+  logout: () => Promise<void>;
   /** Re-fetch the profile (e.g. after a chat call changes the balance). */
   refresh: () => Promise<void>;
 }
@@ -176,9 +176,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res;
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Clear local state synchronously FIRST so the UI flips to "logged
+    // out" instantly and a network failure can't leave the JWT sitting
+    // in localStorage. Capture the token before clearing — api.logout
+    // needs it explicitly because the storage is already empty.
+    const token = getStoredSession();
     setStoredSession(null);
     setState({ user: null, token: null });
+    if (!token) return;
+    // Fire-and-forget the server-side revoke (bumps tokenVersion). We
+    // don't await it: the user has already perceived "logged out", and
+    // a slow/failed call shouldn't block them. Errors are swallowed.
+    api.logout(token).catch(() => {
+      /* server-side revoke failed — local cleanup already done */
+    });
   }, []);
 
   const refresh = useCallback(async () => {

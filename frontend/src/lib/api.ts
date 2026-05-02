@@ -246,8 +246,12 @@ export interface HourlyUsage {
 export interface UsageDetailResponse {
   records: UsageRecord[];
   /** Totals over the active window. Backend defaults to rolling 30d
-   *  when `from` isn't passed; clients label this as "近 30 天". */
-  totals: { consumed: number; calls: number };
+   *  when `from` isn't passed; clients label this as "近 30 天".
+   *  `calls` counts consume events only (UI: "X 次调用"). `records`
+   *  is the merged total including reset/expire rows and is what the
+   *  pagination UI should divide by — optional for backwards compat
+   *  with pre-fix backends; fall back to `calls` if absent. */
+  totals: { consumed: number; calls: number; records?: number };
   hourly24h: HourlyUsage[];
 }
 
@@ -355,6 +359,23 @@ export const api = {
       method: "POST",
       body: { email, password },
       token: null,
+    });
+  },
+  /**
+   * Server-side logout — bumps the user's tokenVersion so every JWT in
+   * circulation (including this one and any other browser/device that
+   * still has it) stops verifying on the next request. The frontend
+   * still needs to clear localStorage afterwards.
+   *
+   * Pass `token` explicitly when the caller has already cleared the
+   * stored session and would otherwise send an empty Authorization
+   * header (which the backend treats as "no logout to perform").
+   */
+  logout(token?: string): Promise<{ ok: true }> {
+    return request<{ ok: true }>("/v1/auth/logout", {
+      method: "POST",
+      body: {},
+      ...(token !== undefined ? { token } : {}),
     });
   },
   verifyEmail(token: string): Promise<AuthResponse> {

@@ -6,13 +6,28 @@
  * the business layer; the newapi instance handles the actual LLM routing,
  * metering, and quota enforcement.
  *
- * Auth: newapi's admin routes accept `Authorization: <access_token>` header
- * (no "Bearer" prefix). The access token is generated once in the newapi
- * dashboard → user icon → "Generate Access Token".
+ * Auth (two modes; admin-session is preferred):
+ *
+ *   1. Admin session  — `NEWAPI_ADMIN_USERNAME` + `NEWAPI_ADMIN_PASSWORD`.
+ *      We call `/api/user/login` ourselves, cache the cookie, and refresh
+ *      automatically when newapi returns 401. This is the recommended path
+ *      because passwords don't get invalidated when an admin clicks
+ *      "regenerate access token" or when the newapi DB is recreated.
+ *
+ *   2. Legacy access token — `NEWAPI_ADMIN_TOKEN`. Generated once via the
+ *      newapi dashboard → user icon → "Generate Access Token". Sent as
+ *      `Authorization: <token>` (no "Bearer" prefix). Convenient but
+ *      brittle: rotates every time someone clicks regenerate, and gets
+ *      wiped on any newapi DB reset (Zeabur deploy without a volume).
+ *
+ *   Backend prefers admin session if both are configured.
  *
  * Env vars:
- *   NEWAPI_BASE_URL    — e.g. http://localhost:3001 (no trailing slash)
- *   NEWAPI_ADMIN_TOKEN — admin access token from newapi dashboard
+ *   NEWAPI_BASE_URL        — e.g. http://localhost:3001 (no trailing slash)
+ *   NEWAPI_ADMIN_USERNAME  — admin user's login name (preferred)
+ *   NEWAPI_ADMIN_PASSWORD  — admin user's password   (preferred)
+ *   NEWAPI_ADMIN_TOKEN     — legacy access token     (fallback only)
+ *   NEWAPI_ADMIN_USER_ID   — only used by token mode; defaults to "1"
  */
 
 // ---------- Config ----------
@@ -45,24 +60,47 @@ function nfetch(url: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-function getConfig(): { baseUrl: string; token: string; userId: string } {
+function getBaseUrl(): string {
   const baseUrl = process.env.NEWAPI_BASE_URL?.replace(/\/+$/, "");
-  const token = process.env.NEWAPI_ADMIN_TOKEN;
-  if (!baseUrl || !token) {
-    throw new Error(
-      "newapi not configured. Set NEWAPI_BASE_URL and NEWAPI_ADMIN_TOKEN.",
-    );
+  if (!baseUrl) {
+    throw new Error("newapi not configured. Set NEWAPI_BASE_URL.");
   }
-  // newapi admin endpoints require the caller's user ID in a header alongside
-  // the access token. Defaults to "1" (root admin); override via env if the
-  // access token belongs to a different admin user.
-  const userId = process.env.NEWAPI_ADMIN_USER_ID ?? "1";
-  return { baseUrl, token, userId };
+  return baseUrl;
 }
 
-/** True when NEWAPI_BASE_URL + NEWAPI_ADMIN_TOKEN are both set. */
+type AdminAuthMode =
+  | { kind: "session"; username: string; password: string }
+  | { kind: "token"; token: string; userId: string };
+
+/**
+ * Pick the admin auth strategy from env. Session (username+password) is
+ * preferred over the legacy access token because passwords don't get
+ * silently invalidated by dashboard clicks or DB resets.
+ */
+function getAdminAuthMode(): AdminAuthMode {
+  const username = process.env.NEWAPI_ADMIN_USERNAME;
+  const password = process.env.NEWAPI_ADMIN_PASSWORD;
+  if (username && password) {
+    return { kind: "session", username, password };
+  }
+  const token = process.env.NEWAPI_ADMIN_TOKEN;
+  if (token) {
+    const userId = process.env.NEWAPI_ADMIN_USER_ID ?? "1";
+    return { kind: "token", token, userId };
+  }
+  throw new Error(
+    "newapi admin auth not configured. Set NEWAPI_ADMIN_USERNAME + NEWAPI_ADMIN_PASSWORD (preferred) or NEWAPI_ADMIN_TOKEN.",
+  );
+}
+
+/** True when NEWAPI_BASE_URL is set AND we have at least one admin
+ *  credential set (username+password OR legacy token). */
 export function isNewapiConfigured(): boolean {
-  return !!(process.env.NEWAPI_BASE_URL && process.env.NEWAPI_ADMIN_TOKEN);
+  if (!process.env.NEWAPI_BASE_URL) return false;
+  if (process.env.NEWAPI_ADMIN_USERNAME && process.env.NEWAPI_ADMIN_PASSWORD) {
+    return true;
+  }
+  return !!process.env.NEWAPI_ADMIN_TOKEN;
 }
 
 // ---------- Error ----------
@@ -130,7 +168,7 @@ async function req<T>(
   body?: unknown,
   query?: Record<string, string | number | undefined>,
 ): Promise<T> {
-  const { baseUrl, token, userId } = getConfig();
+  const baseUrl = getBaseUrl();
   const url = new URL(path, baseUrl);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
@@ -138,38 +176,49 @@ async function req<T>(
     }
   }
 
-  const headers: Record<string, string> = {
-    authorization: token,
-    "new-api-user": userId,
-  };
-  if (body !== undefined) headers["content-type"] = "application/json";
+  // Try once with the cached admin auth; on 401 (cookie expired,
+  // newapi restarted, etc.), invalidate the cache and retry exactly
+  // once with fresh credentials. We don't loop further — a second
+  // 401 means real misconfiguration that the operator needs to fix.
+  let attempt = 0;
+  while (true) {
+    const auth = await buildAdminAuthHeaders();
+    const headers: Record<string, string> = { ...auth.headers };
+    if (body !== undefined) headers["content-type"] = "application/json";
 
-  let res: Response;
-  try {
-    res = await nfetch(url.toString(), {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch (err) {
-    throw new NewapiError(0, `newapi unreachable: ${(err as Error).message}`);
+    let res: Response;
+    try {
+      res = await nfetch(url.toString(), {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      throw new NewapiError(0, `newapi unreachable: ${(err as Error).message}`);
+    }
+
+    if (res.status === 401 && attempt === 0) {
+      auth.invalidate();
+      attempt += 1;
+      continue;
+    }
+
+    const text = await res.text();
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      /* non-JSON */
+    }
+
+    if (!res.ok || parsed.success === false) {
+      const msg =
+        (parsed.message as string) ?? `HTTP ${res.status}: ${text.slice(0, 200)}`;
+      throw new NewapiError(res.status || 500, msg);
+    }
+
+    return (parsed.data ?? parsed) as T;
   }
-
-  const text = await res.text();
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    /* non-JSON */
-  }
-
-  if (!res.ok || parsed.success === false) {
-    const msg =
-      (parsed.message as string) ?? `HTTP ${res.status}: ${text.slice(0, 200)}`;
-    throw new NewapiError(res.status || 500, msg);
-  }
-
-  return (parsed.data ?? parsed) as T;
 }
 
 // ---------- Types ----------
@@ -283,6 +332,102 @@ interface CachedSession {
 
 const sessionCache = new Map<string, CachedSession>();
 
+// Reserved cache key for the admin user's own session. Distinct from any
+// real username so it can't collide (real usernames are derived from
+// userId.slice(2), all hex). Same TTL/eviction rules as user sessions.
+const ADMIN_SESSION_KEY = "__tokenboss_admin__";
+
+/**
+ * Log in as the configured admin user (NEWAPI_ADMIN_USERNAME +
+ * NEWAPI_ADMIN_PASSWORD) and return the session cookie + admin's
+ * newapi userId. Cached like user sessions; pass `force=true` to skip
+ * the cache, which req() does after a 401 to recover from cookie
+ * expiry without surfacing the failure to callers.
+ *
+ * Throws if either env var is unset OR if the resulting account isn't
+ * actually admin-roled (newapi's role>=10 means admin); this surfaces
+ * misconfiguration loudly instead of silently making admin endpoints
+ * 403 later.
+ */
+async function adminLogin(force = false): Promise<{ cookie: string; userId: number }> {
+  const cached = sessionCache.get(ADMIN_SESSION_KEY);
+  if (!force && cached && cached.expiresAt > Date.now()) {
+    return { cookie: cached.cookie, userId: cached.userId };
+  }
+  const username = process.env.NEWAPI_ADMIN_USERNAME;
+  const password = process.env.NEWAPI_ADMIN_PASSWORD;
+  if (!username || !password) {
+    throw new NewapiError(
+      500,
+      "adminLogin called but NEWAPI_ADMIN_USERNAME/PASSWORD not set",
+    );
+  }
+  const baseUrl = getBaseUrl();
+  const res = await nfetch(`${baseUrl}/api/user/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const parsed = await readJsonResponse<{
+    success?: boolean;
+    message?: string;
+    data?: { id?: number; role?: number };
+  }>(res, "adminLogin");
+  if (!res.ok || !parsed.success || !parsed.data?.id) {
+    throw new NewapiError(
+      res.status || 500,
+      parsed.message ?? `admin login failed for ${username}`,
+    );
+  }
+  if (parsed.data.role !== undefined && parsed.data.role < 10) {
+    throw new NewapiError(
+      403,
+      `NEWAPI_ADMIN_USERNAME='${username}' is not an admin (role=${parsed.data.role}). Admin endpoints will fail; aborting.`,
+    );
+  }
+  const setCookie = res.headers.get("set-cookie");
+  const cookie = setCookie?.split(";")[0];
+  if (!cookie) {
+    throw new NewapiError(500, "admin login succeeded but no Set-Cookie returned");
+  }
+  sessionCache.set(ADMIN_SESSION_KEY, {
+    cookie,
+    userId: parsed.data.id,
+    expiresAt: Date.now() + SESSION_TTL_MS,
+  });
+  return { cookie, userId: parsed.data.id };
+}
+
+/**
+ * Build the headers needed to authenticate as admin against newapi for
+ * the configured mode. Returns both the headers and a callback that
+ * invalidates whatever credential was used (cookie cache for session
+ * mode; no-op for token mode), so callers can react to 401 by retrying
+ * once with fresh credentials.
+ */
+async function buildAdminAuthHeaders(): Promise<{
+  headers: Record<string, string>;
+  invalidate: () => void;
+}> {
+  const mode = getAdminAuthMode();
+  if (mode.kind === "token") {
+    return {
+      headers: { authorization: mode.token, "new-api-user": mode.userId },
+      invalidate: () => {
+        /* No client-side recovery for an invalidated access token —
+         * the operator has to set a new one in env and restart. */
+      },
+    };
+  }
+  const sess = await adminLogin();
+  return {
+    headers: { cookie: sess.cookie, "new-api-user": String(sess.userId) },
+    invalidate: () => {
+      sessionCache.delete(ADMIN_SESSION_KEY);
+    },
+  };
+}
+
 // ---------- Public API ----------
 
 export const newapi = {
@@ -380,14 +525,14 @@ export const newapi = {
     name: string;
     quotaUsd: number;
   }): Promise<string> {
-    const { baseUrl, token, userId } = getConfig();
+    const baseUrl = getBaseUrl();
+    const auth = await buildAdminAuthHeaders();
     const name = [...input.name].slice(0, 20).join(""); // rune-correct, matches Go's utf8.RuneCountInString cap (see redemption.go:68)
     const quota = usdToNewapiQuota(input.quotaUsd);
     const res = await nfetch(`${baseUrl}/api/redemption`, {
       method: "POST",
       headers: {
-        authorization: token,
-        "new-api-user": userId,
+        ...auth.headers,
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -447,7 +592,7 @@ export const newapi = {
     if (!input.force && cached && cached.expiresAt > Date.now()) {
       return { cookie: cached.cookie, userId: cached.userId };
     }
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const res = await nfetch(`${baseUrl}/api/user/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -498,7 +643,7 @@ export const newapi = {
     models?: string[];
     group?: string;
   }): Promise<{ tokenId: number; apiKey: string }> {
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const userHeaders: Record<string, string> = {
       cookie: input.session.cookie,
       "new-api-user": String(input.session.userId),
@@ -629,7 +774,7 @@ export const newapi = {
     cookie: string;
     userId: number;
   }, code: string): Promise<{ quotaAdded: number }> {
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const res = await nfetch(`${baseUrl}/api/user/topup`, {
       method: "POST",
       headers: {
@@ -662,7 +807,7 @@ export const newapi = {
     cookie: string;
     userId: number;
   }, tokenId: number): Promise<string> {
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const res = await nfetch(`${baseUrl}/api/token/${tokenId}/key`, {
       method: "POST",
       headers: {
@@ -695,7 +840,7 @@ export const newapi = {
     cookie: string;
     userId: number;
   }): Promise<NewapiToken[]> {
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const res = await nfetch(`${baseUrl}/api/token/?p=0&size=100`, {
       headers: {
         cookie: session.cookie,
@@ -729,7 +874,7 @@ export const newapi = {
     session: { cookie: string; userId: number },
     tokenId: number,
   ): Promise<void> {
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const res = await nfetch(`${baseUrl}/api/token/${tokenId}`, {
       method: "DELETE",
       headers: {
@@ -884,7 +1029,7 @@ export const newapi = {
 
   /** Check if the newapi instance is reachable. */
   async status(): Promise<Record<string, unknown>> {
-    const { baseUrl } = getConfig();
+    const baseUrl = getBaseUrl();
     const res = await nfetch(`${baseUrl}/api/status`);
     return (await res.json()) as Record<string, unknown>;
   },

@@ -55,6 +55,14 @@ export interface UserRecord {
    * quota into newapi. Null for free users (no reset cycle).
    */
   quotaNextResetAt?: string;
+  /**
+   * Monotonically increasing counter embedded in session JWTs (`tv` claim).
+   * Bumped by /v1/auth/logout — any token issued before the bump fails
+   * verification (verifySessionHeader compares claims.tv to this value).
+   * Defaults to 0 for fresh accounts; only set on records loaded from
+   * the DB. New users don't need to populate it on putUser().
+   */
+  tokenVersion?: number;
 }
 
 export type UserPlan = "trial" | "plus" | "super" | "ultra";
@@ -140,7 +148,8 @@ export function init(): void {
       subscriptionStartedAt  TEXT,
       subscriptionExpiresAt  TEXT,
       dailyQuotaUsd          REAL,
-      quotaNextResetAt       TEXT
+      quotaNextResetAt       TEXT,
+      tokenVersion           INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
@@ -173,6 +182,9 @@ export function init(): void {
     }
     if (!have.has("quotaNextResetAt")) {
       db.exec(`ALTER TABLE users ADD COLUMN quotaNextResetAt TEXT`);
+    }
+    if (!have.has("tokenVersion")) {
+      db.exec(`ALTER TABLE users ADD COLUMN tokenVersion INTEGER NOT NULL DEFAULT 0`);
     }
     // V3 cleanup: any pre-V3 row with plan='free' is migrated to NULL
     // (= no active subscription). 'free' is removed from the UserPlan
@@ -387,6 +399,7 @@ function rowToUser(row: Record<string, unknown>): UserRecord {
     subscriptionExpiresAt: (row.subscriptionExpiresAt as string) ?? undefined,
     dailyQuotaUsd: (row.dailyQuotaUsd as number) ?? undefined,
     quotaNextResetAt: (row.quotaNextResetAt as string) ?? undefined,
+    tokenVersion: (row.tokenVersion as number) ?? 0,
   };
 }
 
@@ -427,11 +440,11 @@ export function putUser(rec: UserRecord): void {
     INSERT OR REPLACE INTO users
       (userId, displayName, email, phone, passwordHash, createdAt, emailVerified,
        newapiUserId, newapiPassword, plan, subscriptionStartedAt, subscriptionExpiresAt,
-       dailyQuotaUsd, quotaNextResetAt)
+       dailyQuotaUsd, quotaNextResetAt, tokenVersion)
     VALUES
       (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified,
        @newapiUserId, @newapiPassword, @plan, @subscriptionStartedAt, @subscriptionExpiresAt,
-       @dailyQuotaUsd, @quotaNextResetAt)
+       @dailyQuotaUsd, @quotaNextResetAt, @tokenVersion)
   `).run({
     userId: rec.userId,
     displayName: rec.displayName ?? null,
@@ -447,6 +460,7 @@ export function putUser(rec: UserRecord): void {
     subscriptionExpiresAt: rec.subscriptionExpiresAt ?? null,
     dailyQuotaUsd: rec.dailyQuotaUsd ?? null,
     quotaNextResetAt: rec.quotaNextResetAt ?? null,
+    tokenVersion: rec.tokenVersion ?? 0,
   });
 }
 
@@ -500,6 +514,24 @@ export function setUserPlan(
     dailyQuotaUsd: patch.dailyQuotaUsd ?? null,
     quotaNextResetAt: patch.quotaNextResetAt ?? null,
   });
+}
+
+// ---------- Public API — Session token version ----------
+
+/**
+ * Atomically increment the user's tokenVersion. Returns the new value.
+ * Logout calls this so that any JWT carrying the old `tv` claim fails
+ * verification on its next request — effectively a "log out all devices".
+ */
+export function bumpUserTokenVersion(userId: string): number {
+  const row = db
+    .prepare(
+      `UPDATE users SET tokenVersion = tokenVersion + 1
+       WHERE userId = ?
+       RETURNING tokenVersion AS tv`,
+    )
+    .get(userId) as { tv: number } | undefined;
+  return row?.tv ?? 0;
 }
 
 // ---------- Public API — API Key Index ----------
