@@ -92,6 +92,23 @@ import {
 } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
 import { startSubscriptionPoller } from "./lib/subscriptionPoller.js";
+import { extractBearerToken } from "./lib/auth.js";
+import { verifySession } from "./lib/authTokens.js";
+
+/** Best-effort userId extractor for Sentry context. Pure sync — uses
+ *  the JWT verifier (no DB call) and swallows any error. Returns
+ *  undefined when the request isn't authenticated or the token is
+ *  invalid; the goal is enrichment, not auth. */
+function userIdFromAuthHeader(authHeader: string | undefined): string | undefined {
+  try {
+    const token = extractBearerToken(authHeader);
+    if (!token) return undefined;
+    const claims = verifySession(token);
+    return claims?.sub ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 type LambdaHandler = (
   event: APIGatewayProxyEventV2,
@@ -327,8 +344,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     );
   } catch (err) {
     console.error(`[local] handler error on ${method} ${pathname}:`, err);
+    const userId = userIdFromAuthHeader(
+      event.headers?.authorization ?? event.headers?.Authorization,
+    );
     Sentry.captureException(err, {
       tags: { route: `${method} ${pathname}` },
+      user: userId ? { id: userId } : undefined,
     });
     res.writeHead(500, { "content-type": "application/json", ...CORS_HEADERS });
     res.end(
@@ -470,8 +491,12 @@ async function handleChatStream(
     }
   } catch (err) {
     console.error(`[local] stream*Core error on ${pathname}:`, err);
+    const userId = userIdFromAuthHeader(
+      event.headers?.authorization ?? event.headers?.Authorization,
+    );
     Sentry.captureException(err, {
       tags: { route: `STREAM ${pathname}` },
+      user: userId ? { id: userId } : undefined,
     });
     if (!headWritten) {
       res.writeHead(500, { "content-type": "application/json" });

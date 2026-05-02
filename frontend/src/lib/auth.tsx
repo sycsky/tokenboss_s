@@ -15,6 +15,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import * as Sentry from "@sentry/react";
 
 import {
   ApiError,
@@ -60,6 +61,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: undefined, // still hydrating
     token: getStoredSession(),
   }));
+
+  // Sync the current user to Sentry whenever auth state changes —
+  // sets / clears the user context so issues track "affected users"
+  // accurately across login, logout, and silent token expiry. We
+  // only send the userId (no email / no displayName) to keep PII
+  // out of error reports — userId is enough to look the user up
+  // server-side if support actually needs to reach them.
+  useEffect(() => {
+    if (state.user) {
+      Sentry.setUser({ id: state.user.userId });
+    } else {
+      // Sentry.setUser(null) clears the user context — used for both
+      // explicit logout and the "still hydrating / not signed in"
+      // states. Repeated calls are cheap (no-op when already null).
+      Sentry.setUser(null);
+    }
+  }, [state.user?.userId]);
 
   // On mount: if we have a stored token, fetch /me to validate it and
   // load the profile. If no token, short-circuit to "not signed in".
