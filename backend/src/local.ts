@@ -64,6 +64,7 @@ import {
   type StreamWriter,
 } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
+import { startSubscriptionPoller } from "./lib/subscriptionPoller.js";
 
 type LambdaHandler = (
   event: APIGatewayProxyEventV2,
@@ -473,12 +474,14 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 /**
- * Subscription expiry / quota reset is handled entirely by newapi (V3
- * "newapi-as-truth"): when a subscription's `end_time` passes, newapi
- * marks the record as cancelled and rolls the user's `group` back to
- * "default" automatically. TokenBoss has no cron — `/v1/buckets` reads
- * subscription state live from newapi on each request.
+ * Subscription expiry / `end_time` rollover is handled by newapi (V3
+ * "newapi-as-truth"). TokenBoss adds one piece of cron-flavored work
+ * on top: snapshot every active subscription's `(amount_total,
+ * amount_used)` every 5 minutes so /console/history can render the
+ * "expire / reset" event pair newapi itself doesn't log. See
+ * `./lib/subscriptionPoller.ts`.
  */
+startSubscriptionPoller();
 
 server.listen(PORT, () => {
   console.log(`[local] TokenBoss backend listening on http://localhost:${PORT}`);

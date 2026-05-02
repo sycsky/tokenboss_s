@@ -28,7 +28,13 @@ import type {
 } from "aws-lambda";
 
 import { isAuthFailure, verifySessionHeader } from "../lib/auth.js";
-import { getUser, getAttributionsForJoin, type AttributionRecord } from "../lib/store.js";
+import {
+  getUser,
+  getAttributionsForJoin,
+  listResetSnapshots,
+  type AttributionRecord,
+  type SubscriptionSnapshot,
+} from "../lib/store.js";
 import { newapi, newapiQuotaToUsd, type NewapiLogEntry } from "../lib/newapi.js";
 
 // ---------- Helpers ----------
@@ -68,10 +74,10 @@ function newapiUsername(userId: string): string {
 }
 
 interface UsageRecordShape {
-  id: number;
+  id: number | string;
   userId: string;
   bucketId: string | null;
-  eventType: "consume";
+  eventType: "consume" | "reset" | "expire";
   amountUsd: number;
   model: string | null;
   source: string | null;
@@ -216,15 +222,6 @@ export const usageHandler = async (
   }
   const username = newapiUsername(userId);
 
-  // Probe newapi for non-consume log types (topup / manage / system /
-  // sub-reset) once per process. Goal: see if reset events live in
-  // newapi-side logs (cheap to consume) before building our own
-  // tracking. Drop once a pattern is identified.
-  if (!_newapiLogTypesProbed) {
-    _newapiLogTypesProbed = true;
-    void probeNewapiLogTypes(username);
-  }
-
   const qs = event.queryStringParameters ?? {};
   const startTs = isoToTimestamp(qs.from);
   const endTs = isoToTimestamp(qs.to);
@@ -350,8 +347,29 @@ export const usageHandler = async (
   });
   const pageItems = pageRes.items ?? [];
   const sourceByEntryId = attachSourcesToLogEntries(userId, pageItems);
-  const records = pageItems.map((entry) =>
+  const consumeRecords = pageItems.map((entry) =>
     mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
+  );
+
+  // Synthesize subscription reset/expire records from the snapshot table
+  // so /console/history shows the periodic "作废 + 重置" pair newapi
+  // doesn't log natively. Window matches the consume window so the merge
+  // stays time-coherent. listResetSnapshots returns ONLY rows with
+  // resetExpiredUsd set (= rows that detected a reset), so we don't
+  // double-count ordinary observation snapshots.
+  const resetSnapshots = listResetSnapshots(
+    userId,
+    startTs ? new Date(startTs * 1000).toISOString() : undefined,
+    endTs ? new Date(endTs * 1000).toISOString() : undefined,
+  );
+  const resetRecords = resetSnapshots.flatMap(snapshotToRecords);
+
+  // Merge + sort newest-first. consumeRecords are already paginated by
+  // newapi so they're at most `limit` long; reset rows in a normal
+  // window are ≤ 30 (one per day for monthly, one per cycle for others).
+  // No re-pagination needed at this size.
+  const records = [...consumeRecords, ...resetRecords].sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
   );
 
   // Pull the full window for totals + hourly chart. Reasonable cap.
@@ -429,38 +447,47 @@ function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
 }
 
-// ---------- newapi log type probe (one-shot diagnostic) ----------
+// ---------- Reset / expire event synthesis ----------
 
-/** Latched so we only emit one round of probe samples per process boot,
- *  not on every /v1/usage request. Set once in getUsageHandler. */
-let _newapiLogTypesProbed = false;
-
-/** Probe newapi /api/log for non-consume log types we don't currently
- *  consume — topup (1), manage (3), system (4), and any extras (5).
- *  Goal is to see whether subscription-reset events land in any of
- *  these natively (saves us from building local reset tracking).
- *  Logs first 3 entries per type so we can see field shapes from the
- *  Zeabur log explorer. Drop once we know which type holds resets. */
-async function probeNewapiLogTypes(username: string): Promise<void> {
-  for (const type of [1, 3, 4, 5]) {
-    try {
-      const res = await newapi.getLogs({ username, type, per_page: 5 });
-      console.info(
-        `[newapi-log-probe] type=${type} username=${username} total=${res.total}`,
-        {
-          sample: res.items.slice(0, 3).map((e) => ({
-            ts: e.created_at,
-            type: e.type,
-            content: typeof e.content === 'string' ? e.content.slice(0, 200) : e.content,
-            model: e.model_name,
-            quota: e.quota,
-          })),
-        },
-      );
-    } catch (err) {
-      console.warn(
-        `[newapi-log-probe] type=${type} failed: ${(err as Error).message}`,
-      );
-    }
-  }
+/** Convert one detected reset snapshot into the (expire, reset) record
+ *  pair that the UI renders. The expire record is timestamped 1ms
+ *  EARLIER than the reset record so a DESC-by-createdAt sort puts
+ *  reset above expire — that puts the "+ new cycle" notification
+ *  visually on top, matching the user's mental order ("作废了 X，
+ *  然后给了 Y"). */
+function snapshotToRecords(
+  snap: SubscriptionSnapshot,
+): UsageRecordShape[] {
+  if (snap.resetExpiredUsd === null) return [];
+  const resetMs = new Date(snap.observedAt).getTime();
+  const tier = snap.planTier;
+  const tierLabel = tier ? `${tier} 周期` : null;
+  return [
+    {
+      id: `reset-${snap.id}`,
+      userId: snap.userId,
+      bucketId: null,
+      eventType: 'reset',
+      amountUsd: round6(snap.amountTotalUsd),
+      model: null,
+      source: null,
+      keyHint: tierLabel,
+      tokensIn: null,
+      tokensOut: null,
+      createdAt: new Date(resetMs).toISOString(),
+    },
+    {
+      id: `expire-${snap.id}`,
+      userId: snap.userId,
+      bucketId: null,
+      eventType: 'expire',
+      amountUsd: round6(snap.resetExpiredUsd),
+      model: null,
+      source: null,
+      keyHint: tierLabel,
+      tokensIn: null,
+      tokensOut: null,
+      createdAt: new Date(resetMs - 1).toISOString(),
+    },
+  ];
 }

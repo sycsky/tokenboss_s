@@ -208,7 +208,10 @@ export interface BucketsResponse {
 }
 
 export interface UsageRecord {
-  id: number;
+  /** Numeric for newapi consume rows (newapi log entry id), prefixed
+   *  string for synthesized rows (e.g. "reset-123" / "expire-123" from
+   *  subscription snapshot detection). React keys handle either fine. */
+  id: number | string;
   userId: string;
   bucketId: string | null;
   eventType: "consume" | "reset" | "expire" | "topup" | "refund";
