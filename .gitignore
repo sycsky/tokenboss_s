@@ -20,8 +20,11 @@ vendor/
 *.png
 !frontend/src/assets/**/*.png
 
-# SQLite dev DB + WAL/SHM (schema is recreated at startup via store.ts init())
+# SQLite dev DB + WAL/SHM (schema is recreated at startup via store.ts init()).
+# Match both `backend/data/*.db` (when started from backend dir) and root-level
+# `data/*.db` (when started from repo root with relative SQLITE_PATH).
 backend/data/*.db
+data/*.db
 *.db-shm
 *.db-wal
 
