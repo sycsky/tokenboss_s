@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { api, ApiError, type ProxyKeySummary } from '../lib/api';
+import type { ProxyKeySummary } from '../lib/api';
+import { isExpired, expiryLabel } from '../lib/keyExpiry';
 
 export interface KeyStats {
   callCount: number;
@@ -12,7 +12,7 @@ export interface APIKeyListProps {
   keys: ProxyKeySummary[];
   /** Error string from the parent's load attempt, if any. */
   loadError: string | null;
-  /** Map of last-4-chars-of-key → derived stats, computed from /v1/usage. */
+  /** Map of key label → derived stats, computed from /v1/usage. */
   keyStats: Map<string, KeyStats>;
   /** Click on `+ 创建` — parent opens CreateKeyModal. */
   onCreateClick: () => void;
@@ -21,40 +21,16 @@ export interface APIKeyListProps {
 }
 
 /**
- * Inline list of the user's TokenBoss proxy keys. Replaces the older
- * "管理 Key →" link that pushed users to a separate /console/keys page.
+ * Inline list of the user's TokenBoss proxy keys. Each row shows label,
+ * masked key, expiry label, usage stats, and a delete button.
  *
- * Each row shows: name → masked key + per-row copy → created date with
- * activity footer (when /v1/usage stats exist for the key). The copy
- * button calls `revealKey` server-side then writes the plaintext to
- * the clipboard, so the user never needs to leave this page to grab
- * a key on a fresh machine.
- *
- * Create / delete go through modals the parent owns, opened via the
- * `onCreateClick` / `onDeleteClick` callbacks. Keeping the modals at
- * the parent lets Dashboard refresh after success without prop-drilling
- * a `reload` ref through this component.
+ * NOTE: there is no "copy" affordance here on purpose. The plaintext
+ * is shown exactly once (at create time, in RevealKeyModal); after that
+ * the only place it survives is the per-device localStorage cache, used
+ * by Dashboard's install spell. If a user needs the plaintext on a new
+ * device, they create a new key.
  */
 export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteClick }: APIKeyListProps) {
-  const [copyingId, setCopyingId] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [copyError, setCopyError] = useState<string | null>(null);
-
-  async function handleCopy(k: ProxyKeySummary) {
-    setCopyError(null);
-    setCopyingId(k.keyId);
-    try {
-      const { key } = await api.revealKey(k.keyId);
-      await navigator.clipboard.writeText(key);
-      setCopiedId(k.keyId);
-      setTimeout(() => setCopiedId((id) => (id === k.keyId ? null : id)), 1500);
-    } catch (err) {
-      setCopyError(err instanceof ApiError ? err.message : `复制失败: ${(err as Error).message}`);
-    } finally {
-      setCopyingId(null);
-    }
-  }
-
   return (
     <div>
       {loadError && (
@@ -76,12 +52,6 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
         + 创建 API Key
       </button>
 
-      {copyError && (
-        <div className="font-mono text-[11px] bg-red-soft text-red-ink border-2 border-ink rounded px-2 py-1 mb-2">
-          {copyError}
-        </div>
-      )}
-
       {keys.length === 0 && (
         <div className="font-mono text-[11px] text-[#A89A8D] py-2 text-center">
           还没有 Key · 点上面 + 创建 一个
@@ -89,13 +59,9 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
       )}
 
       {keys.map((k, i) => {
-        // The backend aggregates usage by newapi's `token_name` (the user-
-        // given key label, e.g. "default"), so the lookup key here must be
-        // the same label, not a slice of the masked-key string. See the
-        // shapeKeyStats comment in Dashboard.tsx for the full story.
         const stats = keyStats.get(k.label || 'default');
-        const isCopying = copyingId === k.keyId;
-        const isCopied = copiedId === k.keyId;
+        const expired = isExpired(k);
+        const dotClass = k.disabled || expired ? 'bg-[#A89A8D]' : 'bg-lime-stamp';
         return (
           <div
             key={k.keyId}
@@ -104,15 +70,25 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
             <div className="flex items-center justify-between mb-1.5 gap-2">
               <span className="text-[12.5px] font-bold text-ink flex items-center gap-1.5 min-w-0">
                 <span
-                  className={`w-2 h-2 border-2 border-ink rounded-full flex-shrink-0 ${k.disabled ? 'bg-red-ink' : 'bg-lime-stamp'}`}
+                  className={`w-2 h-2 border-2 border-ink rounded-full flex-shrink-0 ${dotClass}`}
                 />
                 <span className="truncate">{k.label || 'default'}</span>
               </span>
-              {!k.disabled ? (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {expired && (
+                  <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
+                    已过期
+                  </span>
+                )}
+                {!expired && k.disabled && (
+                  <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
+                    已吊销
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => onDeleteClick(k)}
-                  aria-label={`吊销 ${k.label || 'default'}`}
+                  aria-label={`删除 ${k.label || 'default'}`}
                   className={
                     'flex-shrink-0 w-6 h-6 inline-flex items-center justify-center border-2 border-ink rounded ' +
                     'text-ink hover:bg-red-soft hover:text-red-ink transition-colors'
@@ -120,42 +96,19 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
                 >
                   <TrashIcon />
                 </button>
-              ) : (
-                <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D] flex-shrink-0">
-                  已吊销
-                </span>
-              )}
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5">
               <span className="flex-1 min-w-0 font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate">
                 {k.key}
               </span>
-              {!k.disabled && (
-                <button
-                  type="button"
-                  onClick={() => handleCopy(k)}
-                  disabled={isCopying}
-                  aria-label="复制完整 key"
-                  className={
-                    'flex-shrink-0 px-2 py-1.5 border-2 rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase ' +
-                    'shadow-[2px_2px_0_0_#1C1917] ' +
-                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-                    'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-                    'disabled:opacity-50 disabled:cursor-not-allowed ' +
-                    'transition-all ' +
-                    (isCopied
-                      ? 'bg-accent border-accent text-white'
-                      : 'bg-white border-ink text-ink')
-                  }
-                >
-                  {isCopying ? '…' : isCopied ? '✓' : <CopyIcon />}
-                </button>
-              )}
             </div>
 
             <div className="font-mono text-[10px] text-[#A89A8D] mt-1 flex items-center justify-between gap-2">
-              <span>创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')}</span>
+              <span>
+                创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')} · {expiryLabel(k)}
+              </span>
               {stats ? (
                 <span className="text-ink-2">
                   {timeAgo(stats.lastUsedAt)} · {stats.callCount} 次 · ${stats.totalSpent.toFixed(6)}
@@ -168,17 +121,6 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
         );
       })}
     </div>
-  );
-}
-
-function CopyIcon() {
-  // 12×12 stroke icon — matches the 2-square copy glyph SkillBoss uses,
-  // sized down to fit the 24×24 stamp button.
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="6" height="7" rx="1" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M2 7.5V2.5C2 2.22 2.22 2 2.5 2H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
   );
 }
 
