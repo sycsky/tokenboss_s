@@ -265,15 +265,26 @@ export default function Dashboard() {
   // see the cache-miss CTA — the selection would keep landing on the
   // old uncached row.
   const usable = (k: typeof keys[number]) => !k.disabled && !isExpired(k);
+  // Build the per-key plaintext map ONCE — both defaultKey selection and
+  // APIKeyList rendering need to know which keyIds are cached.
+  const cachedPlaintexts = (() => {
+    const map = new Map<string, string>();
+    if (!user?.email) return map;
+    for (const k of keys) {
+      const plain = getCachedKey(user.email, String(k.keyId));
+      if (plain) map.set(String(k.keyId), plain);
+    }
+    return map;
+  })();
   const hasCache = (k: typeof keys[number]) =>
-    !!user?.email && !!getCachedKey(user.email, k.keyId);
+    cachedPlaintexts.has(String(k.keyId));
   const defaultKey =
     keys.find((k) => k.label === 'default' && usable(k) && hasCache(k)) ??
     keys.find((k) => usable(k) && hasCache(k)) ??
     keys.find((k) => k.label === 'default' && usable(k)) ??
     keys.find(usable);
   const cachedDefaultPlain =
-    user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
+    defaultKey ? cachedPlaintexts.get(String(defaultKey.keyId)) ?? null : null;
   // The install spell is conceptually two lines: the setup command and
   // the API key. On cache hit, line 2 is the real plaintext (no quotes
   // because it's the literal env value). On cache miss we keep the line
@@ -635,27 +646,9 @@ export default function Dashboard() {
                 💾 本地缓存 · 退出登录后将消失
               </p>
             )}
-
-            {defaultKey && !cachedDefaultPlain && (
-              <div className="mt-2 border-2 border-ink rounded-md bg-amber-50 p-3 text-[12.5px] leading-relaxed">
-                <div className="font-bold text-ink mb-1">📍 这台设备没有该 Key 的本地缓存</div>
-                <div className="text-[#6B5E52] mb-2">
-                  为了你的安全，明文不能在新设备上重新查看。
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCreateOpen(true)}
-                  className={
-                    'px-3 py-1.5 bg-ink text-white font-bold text-[12px] border-2 border-ink rounded ' +
-                    'shadow-[2px_2px_0_0_#E8692A] ' +
-                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
-                    'transition-all'
-                  }
-                >
-                  为这台设备创建一个新 Key
-                </button>
-              </div>
-            )}
+            {/* Cache miss state intentionally has NO extra CTA here —
+                the 「+ 创建 API Key」 button below is the same action.
+                Avoiding the duplicate keeps the panel tight. */}
             <Link
               to="/install/manual"
               className="block mt-2.5 font-mono text-[11px] text-[#A89A8D] hover:text-ink transition-colors"
@@ -680,6 +673,7 @@ export default function Dashboard() {
               keys={keys}
               loadError={keysError}
               keyStats={keyStats}
+              cachedPlaintexts={cachedPlaintexts}
               onCreateClick={() => setCreateOpen(true)}
               onDeleteClick={setDeleteTarget}
             />

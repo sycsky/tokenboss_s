@@ -57,13 +57,20 @@ describe('Dashboard install spell — cache hit / miss', () => {
 
     renderDashboard();
 
+    // Plaintext appears in TWO places now: the install spell (`TOKENBOSS_API_KEY=sk-...`)
+    // AND the list row's value box (cached rows render plaintext + Copy).
     await waitFor(() => {
-      expect(screen.getByText(/sk-PLAINTEXT-XYZ/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/TOKENBOSS_API_KEY=sk-PLAINTEXT-XYZ/),
+      ).toBeInTheDocument();
     });
     expect(screen.getByText(/本地缓存 · 退出登录后将消失/)).toBeInTheDocument();
+    // The list row also shows the bare plaintext + a 复制 button.
+    expect(screen.getAllByText(/sk-PLAINTEXT-XYZ/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByLabelText('复制 default')).toBeInTheDocument();
   });
 
-  it('renders masked + CTA when cache miss for the default key', async () => {
+  it('cache miss shows the placeholder, no CTA (the bottom + 创建 button is the action)', async () => {
     vi.spyOn(apiModule.api, 'listKeys').mockResolvedValue({
       keys: [
         {
@@ -79,17 +86,21 @@ describe('Dashboard install spell — cache hit / miss', () => {
 
     renderDashboard();
 
+    // Spell shows the placeholder line, not a real plaintext.
     await waitFor(() => {
-      expect(screen.getByText(/这台设备没有该 Key 的本地缓存/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/TOKENBOSS_API_KEY="<your-api-key>"/),
+      ).toBeInTheDocument();
     });
-    expect(screen.getByText('为这台设备创建一个新 Key')).toBeInTheDocument();
-    expect(screen.queryByText(/sk-PLAINTEXT/)).toBeNull();
-    // The install spell stays two-line shape: line 2 is a quoted
-    // placeholder, NOT the masked plaintext. Placeholder is obvious
-    // enough that no one will skim-paste it into a config and 401.
-    expect(screen.getByText(/TOKENBOSS_API_KEY="<your-api-key>"/)).toBeInTheDocument();
-    // And no masked-but-real-looking sk-... should appear in the spell.
+    // No "缓存 miss" amber CTA — that block was removed; the existing
+    // "+ 创建 API Key" button below covers the same action.
+    expect(screen.queryByText(/这台设备没有该 Key 的本地缓存/)).toBeNull();
+    expect(screen.queryByText('为这台设备创建一个新 Key')).toBeNull();
+    // No sk- shaped value in the spell line.
     expect(screen.queryByText(/TOKENBOSS_API_KEY=sk-/)).toBeNull();
+    // Row shows masked, no Copy button on the key row itself.
+    expect(screen.getByText('sk-•••a4c2')).toBeInTheDocument();
+    expect(screen.queryByLabelText('复制 default')).toBeNull();
   });
 
   it('skips disabled and expired keys when picking the default', async () => {
@@ -126,7 +137,9 @@ describe('Dashboard install spell — cache hit / miss', () => {
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByText(/sk-PLAINTEXT-GOOD/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/TOKENBOSS_API_KEY=sk-PLAINTEXT-GOOD/),
+      ).toBeInTheDocument();
     });
   });
 
@@ -184,9 +197,12 @@ describe('Dashboard install spell — cache hit / miss', () => {
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByText(/sk-PLAINTEXT-FRESH/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/TOKENBOSS_API_KEY=sk-PLAINTEXT-FRESH/),
+      ).toBeInTheDocument();
     });
-    // Cache-miss CTA should NOT be visible — we have a usable cached key.
+    // The cache-miss CTA was removed entirely — the bottom + 创建 button
+    // is the action. So this assertion is for "no CTA at all".
     expect(screen.queryByText(/这台设备没有该 Key 的本地缓存/)).toBeNull();
   });
 });

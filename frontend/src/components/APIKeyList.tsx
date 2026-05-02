@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ProxyKeySummary } from '../lib/api';
 import { isExpired, expiryLabel } from '../lib/keyExpiry';
 
@@ -14,6 +15,14 @@ export interface APIKeyListProps {
   loadError: string | null;
   /** Map of key label → derived stats, computed from /v1/usage. */
   keyStats: Map<string, KeyStats>;
+  /**
+   * Per-keyId plaintext from the local cache (set by parent via
+   * `getCachedKey`). Rows whose keyId is in this map render the full
+   * plaintext value + a copy button. Rows NOT in the map render the
+   * masked value with no copy affordance — there is no way for the
+   * platform to surface plaintext on those rows.
+   */
+  cachedPlaintexts: Map<string, string>;
   /** Click on `+ 创建` — parent opens CreateKeyModal. */
   onCreateClick: () => void;
   /** Click on the trash icon — parent opens DeleteKeyModal pre-loaded with `target`. */
@@ -24,13 +33,35 @@ export interface APIKeyListProps {
  * Inline list of the user's TokenBoss proxy keys. Each row shows label,
  * masked key, expiry label, usage stats, and a delete button.
  *
- * NOTE: there is no "copy" affordance here on purpose. The plaintext
- * is shown exactly once (at create time, in RevealKeyModal); after that
- * the only place it survives is the per-device localStorage cache, used
- * by Dashboard's install spell. If a user needs the plaintext on a new
- * device, they create a new key.
+ * Plaintext + copy button only appear for rows whose keyId is in
+ * `cachedPlaintexts` (i.e., the user saw / saved this key on this
+ * device). For uncached rows the platform shows a masked value and
+ * intentionally offers no way to retrieve the plaintext — the only
+ * way to use a key on a new device is to create a new one.
  */
-export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteClick }: APIKeyListProps) {
+export function APIKeyList({
+  keys,
+  loadError,
+  keyStats,
+  cachedPlaintexts,
+  onCreateClick,
+  onDeleteClick,
+}: APIKeyListProps) {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  async function handleCopy(keyId: string, plaintext: string) {
+    try {
+      await navigator.clipboard.writeText(plaintext);
+      setCopiedId(keyId);
+      setTimeout(
+        () => setCopiedId((id) => (id === keyId ? null : id)),
+        1500,
+      );
+    } catch {
+      /* clipboard blocked — user can long-press to select on mobile */
+    }
+  }
+
   return (
     <div>
       {loadError && (
@@ -62,6 +93,9 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
         const stats = keyStats.get(k.label || 'default');
         const expired = isExpired(k);
         const dotClass = k.disabled || expired ? 'bg-[#A89A8D]' : 'bg-lime-stamp';
+        const plaintext = cachedPlaintexts.get(String(k.keyId));
+        const canCopy = !!plaintext && !expired && !k.disabled;
+        const isCopied = copiedId === String(k.keyId);
         return (
           <div
             key={k.keyId}
@@ -101,8 +135,27 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
 
             <div className="flex items-center gap-1.5">
               <span className="flex-1 min-w-0 font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate">
-                {k.key}
+                {plaintext ?? k.key}
               </span>
+              {canCopy && (
+                <button
+                  type="button"
+                  onClick={() => handleCopy(String(k.keyId), plaintext!)}
+                  aria-label={`复制 ${k.label || 'default'}`}
+                  className={
+                    'flex-shrink-0 px-2 py-1.5 border-2 rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase ' +
+                    'shadow-[2px_2px_0_0_#1C1917] ' +
+                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+                    'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+                    'transition-all ' +
+                    (isCopied
+                      ? 'bg-accent border-accent text-white'
+                      : 'bg-white border-ink text-ink')
+                  }
+                >
+                  {isCopied ? '✓' : <CopyIcon />}
+                </button>
+              )}
             </div>
 
             <div className="font-mono text-[10px] text-[#A89A8D] mt-1 flex items-center justify-between gap-2">
@@ -121,6 +174,15 @@ export function APIKeyList({ keys, loadError, keyStats, onCreateClick, onDeleteC
         );
       })}
     </div>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="6" height="7" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2 7.5V2.5C2 2.22 2.22 2 2.5 2H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
 
