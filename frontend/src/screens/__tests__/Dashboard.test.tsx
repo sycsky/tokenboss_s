@@ -84,6 +84,12 @@ describe('Dashboard install spell — cache hit / miss', () => {
     });
     expect(screen.getByText('为这台设备创建一个新 Key')).toBeInTheDocument();
     expect(screen.queryByText(/sk-PLAINTEXT/)).toBeNull();
+    // The install spell stays two-line shape: line 2 is a quoted
+    // placeholder, NOT the masked plaintext. Placeholder is obvious
+    // enough that no one will skim-paste it into a config and 401.
+    expect(screen.getByText(/TOKENBOSS_API_KEY="<your-api-key>"/)).toBeInTheDocument();
+    // And no masked-but-real-looking sk-... should appear in the spell.
+    expect(screen.queryByText(/TOKENBOSS_API_KEY=sk-/)).toBeNull();
   });
 
   it('skips disabled and expired keys when picking the default', async () => {

@@ -274,15 +274,16 @@ export default function Dashboard() {
     keys.find(usable);
   const cachedDefaultPlain =
     user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
-  // Only render the env line when we have actual plaintext from cache.
-  // On cache miss we deliberately suppress it — the masked value (e.g.
-  // sk-•••a4c2) reads like a real env line and could be skim-pasted into
-  // a client config that would then 401. The amber CTA below is the
-  // only path forward in that state.
+  // The install spell is conceptually two lines: the setup command and
+  // the API key. On cache hit, line 2 is the real plaintext (no quotes
+  // because it's the literal env value). On cache miss we keep the line
+  // but show a quoted placeholder — the visual two-line shape stays
+  // intact, and the angle brackets make it obvious this isn't a real
+  // value (preventing skim-paste-into-config that would 401).
   const spellExtra =
     defaultKey && cachedDefaultPlain
       ? `TOKENBOSS_API_KEY=${cachedDefaultPlain}`
-      : undefined;
+      : `TOKENBOSS_API_KEY="<your-api-key>"`;
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
   // routes through here in v1 since there's no self-checkout yet.
