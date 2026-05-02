@@ -145,12 +145,8 @@ export default function Settings() {
             onClick={() => setRedeemOpen(true)}
           />
           <ActionCard
-            title="联系客服"
-            hint="微信 / 工单 · 工作日 9-21"
-          />
-          <ActionCard
             title="退出登录"
-            hint="下次需重新输入邮箱与密码"
+            hint="下次需用邮箱验证码重新登录"
             danger
             onClick={logout}
           />
