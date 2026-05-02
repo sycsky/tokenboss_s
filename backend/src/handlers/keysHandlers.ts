@@ -237,43 +237,6 @@ export const createKeyHandler = async (
   }
 };
 
-// ---------- GET /v1/keys/{keyId}/reveal ----------
-
-export const revealKeyHandler = async (
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> => {
-  const auth = await requireSession(event);
-  if (isAuthFailure(auth)) {
-    return jsonError(auth.status, "authentication_error", auth.message, auth.code);
-  }
-  const guard = requireNewapiLink(auth);
-  if (guard) return guard;
-
-  const rawId = event.pathParameters?.keyId;
-  const tokenId = rawId ? Number(rawId) : NaN;
-  if (!Number.isFinite(tokenId)) {
-    return jsonError(400, "invalid_request_error", "Missing or invalid key id in path.");
-  }
-
-  try {
-    const session = await newapi.loginUser({
-      username: newapiUsername(auth.userId),
-      password: auth.user.newapiPassword as string,
-    });
-    // No second listUserTokens ownership check: the session cookie above
-    // is scoped to this user, and newapi's reveal endpoint enforces that
-    // the token belongs to the authenticated session — it returns
-    // 403/404 for tokens owned by another user. The previous extra list
-    // call was defense-in-depth that doubled our newapi roundtrips on
-    // every reveal; on a rate-limited upstream this was the dominant
-    // source of 429s during /console mounts.
-    const key = await newapi.revealToken(session, tokenId);
-    return jsonResponse(200, { keyId: tokenId, key });
-  } catch (err) {
-    return handleNewapiError(err);
-  }
-};
-
 // ---------- DELETE /v1/keys/{keyId} ----------
 
 export const deleteKeyHandler = async (

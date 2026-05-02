@@ -157,3 +157,10 @@ describe('GET /v1/keys', () => {
     expect(body.keys[0].expiresAt).toBe(new Date(1900000000 * 1000).toISOString());
   });
 });
+
+describe('GET /v1/keys/{keyId}/reveal', () => {
+  it('handler is no longer exported', async () => {
+    const mod = await import('../keysHandlers.js');
+    expect((mod as any).revealKeyHandler).toBeUndefined();
+  });
+});

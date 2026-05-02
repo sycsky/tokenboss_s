@@ -70,7 +70,6 @@ import {
   createKeyHandler,
   deleteKeyHandler,
   listKeysHandler,
-  revealKeyHandler,
 } from "./handlers/keysHandlers.js";
 import { modelsHandler } from "./handlers/modelsHandler.js";
 import {
@@ -149,7 +148,6 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/me", handler: meHandler },
   { method: "GET", path: "/v1/keys", handler: listKeysHandler },
   { method: "POST", path: "/v1/keys", handler: createKeyHandler },
-  { method: "GET", path: "/v1/keys/{keyId}/reveal", handler: revealKeyHandler },
   { method: "DELETE", path: "/v1/keys/{keyId}", handler: deleteKeyHandler },
   { method: "GET", path: "/v1/usage", handler: usageHandler },
   { method: "GET", path: "/v1/buckets", handler: listBucketsHandler as LambdaHandler },
