@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../auth';
 import { setCachedKey, getCachedKey } from '../keyCache';
 import * as apiModule from '../api';
+import { ApiError } from '../api';
 
 beforeEach(() => {
   localStorage.clear();
@@ -70,5 +71,36 @@ describe('auth logout — clears tb_key_v1 cache for the current user', () => {
     expect(getCachedKey('bob@x.com', 'k-bob')).toBe('sk-B');
     // Session token also cleared.
     expect(localStorage.getItem('tb_session')).toBeNull();
+  });
+
+  it('mount-time 401 (expired stored token) clears tb_key_v1 cache via tb_last_email', async () => {
+    // Simulate the user returning after their JWT expired. /v1/me will
+    // 401 immediately, BEFORE state.user has been hydrated. The mount
+    // path must read tb_last_email to know whose cache to nuke.
+    vi.spyOn(apiModule.api, 'me').mockRejectedValue(
+      new ApiError(401, undefined, 'Unauthorized'),
+    );
+
+    // Stored session + last email + cache entries (the persistent state
+    // a real returning user would have on disk after a previous login).
+    localStorage.setItem('tb_session', 'expired-token');
+    localStorage.setItem('tb_last_email', 'alice@x.com');
+    setCachedKey('alice@x.com', 'k-alice-1', 'sk-A1');
+    setCachedKey('alice@x.com', 'k-alice-2', 'sk-A2');
+    setCachedKey('bob@x.com', 'k-bob', 'sk-B');
+
+    const captured: any = {};
+    render(harness(captured));
+
+    // Mount runs /v1/me which 401s — the catch block should wipe the
+    // cache for tb_last_email's user, then clear the session + email keys.
+    await waitFor(() => {
+      expect(localStorage.getItem('tb_session')).toBeNull();
+    });
+
+    expect(getCachedKey('alice@x.com', 'k-alice-1')).toBeNull();
+    expect(getCachedKey('alice@x.com', 'k-alice-2')).toBeNull();
+    expect(getCachedKey('bob@x.com', 'k-bob')).toBe('sk-B');
+    expect(localStorage.getItem('tb_last_email')).toBeNull();
   });
 });

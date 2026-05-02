@@ -254,9 +254,24 @@ export default function Dashboard() {
   //
   // The bottom API KEY list rows still reveal-on-click (see APIKeyList)
   // since those serve management, not the always-on copy spell.
+  // Pick the key the install spell will use. We prefer one whose plaintext
+  // is cached locally — that's the only kind the spell can actually display
+  // (post-Task-3, plaintext is never re-fetchable from the server). When
+  // no cached key exists, fall back to label=default → any usable key, so
+  // the cache-miss branch below can render its CTA.
+  //
+  // Without the cached-first preference, a user with an old uncached
+  // `default` who creates a fresh replacement (now cached) would still
+  // see the cache-miss CTA — the selection would keep landing on the
+  // old uncached row.
+  const usable = (k: typeof keys[number]) => !k.disabled && !isExpired(k);
+  const hasCache = (k: typeof keys[number]) =>
+    !!user?.email && !!getCachedKey(user.email, k.keyId);
   const defaultKey =
-    keys.find((k) => k.label === 'default' && !k.disabled && !isExpired(k)) ??
-    keys.find((k) => !k.disabled && !isExpired(k));
+    keys.find((k) => k.label === 'default' && usable(k) && hasCache(k)) ??
+    keys.find((k) => usable(k) && hasCache(k)) ??
+    keys.find((k) => k.label === 'default' && usable(k)) ??
+    keys.find(usable);
   const cachedDefaultPlain =
     user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
   // Only render the env line when we have actual plaintext from cache.

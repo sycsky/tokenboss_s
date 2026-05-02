@@ -147,4 +147,40 @@ describe('Dashboard install spell — cache hit / miss', () => {
     });
     expect(keyCache.getCachedKey('alice@x.com', 'k-survive')).toBe('sk-A');
   });
+
+  it('prefers a cached non-default key over an uncached default (post-rebuild scenario)', async () => {
+    // The user has an old `default` whose plaintext was lost on this
+    // browser, AND a freshly-created replacement (cached). The spell
+    // should render the FRESH key — not block on the stale default.
+    vi.spyOn(apiModule.api, 'listKeys').mockResolvedValue({
+      keys: [
+        {
+          keyId: 'k-old-default',
+          key: 'sk-•••oldd',
+          label: 'default',
+          createdAt: '2026-04-01T00:00:00Z',
+          disabled: false,
+          expiresAt: null,
+        },
+        {
+          keyId: 'k-fresh',
+          key: 'sk-•••newx',
+          label: 'this-device',
+          createdAt: '2026-05-02T00:00:00Z',
+          disabled: false,
+          expiresAt: null,
+        },
+      ],
+    });
+    keyCache.setCachedKey('alice@x.com', 'k-fresh', 'sk-PLAINTEXT-FRESH');
+    // Note: NO cache for k-old-default — that's the pre-fix bug scenario.
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/sk-PLAINTEXT-FRESH/)).toBeInTheDocument();
+    });
+    // Cache-miss CTA should NOT be visible — we have a usable cached key.
+    expect(screen.queryByText(/这台设备没有该 Key 的本地缓存/)).toBeNull();
+  });
 });
