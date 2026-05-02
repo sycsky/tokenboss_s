@@ -4,6 +4,20 @@ import { sendCodeHandler, verifyCodeHandler } from '../authHandlers.js';
 import { init, getUser, getUserIdByEmail, putUser } from '../../lib/store.js';
 import * as emailService from '../../lib/emailService.js';
 
+vi.mock('../../lib/newapi.js', async (orig) => {
+  const real = await orig<typeof import('../../lib/newapi.js')>();
+  return {
+    ...real,
+    newapi: {
+      ...real.newapi,
+      provisionUser: vi.fn().mockResolvedValue({ newapiUserId: 99 }),
+      bindSubscription: vi.fn().mockResolvedValue(undefined),
+      loginUser: vi.fn().mockResolvedValue({ cookie: 'sid=test' }),
+      createAndRevealToken: vi.fn().mockResolvedValue({ tokenId: 1, apiKey: 'sk-test' }),
+    },
+  };
+});
+
 beforeEach(() => {
   process.env.SQLITE_PATH = ':memory:';
   process.env.EMAIL_PROVIDER = 'console';
@@ -178,5 +192,30 @@ describe('POST /v1/auth/verify-code', () => {
     // After 5 failures the original code must be invalidated (consumed=1).
     const r = await verifyCodeHandler({ body: JSON.stringify({ email: 'brute@test.com', code: realCode }) } as any) as APIGatewayProxyStructuredResultV2;
     expect(r.statusCode).toBe(401);
+  });
+
+  it('does NOT auto-create a default API key on first signup', async () => {
+    // Enable the newapi path so isNewapiConfigured() returns true.
+    const origBase = process.env.NEWAPI_BASE_URL;
+    const origToken = process.env.NEWAPI_ADMIN_TOKEN;
+    process.env.NEWAPI_BASE_URL = 'http://newapi.test';
+    process.env.NEWAPI_ADMIN_TOKEN = 'admin-token';
+
+    const { newapi } = await import('../../lib/newapi.js');
+    const createSpy = newapi.createAndRevealToken as unknown as ReturnType<typeof vi.fn>;
+    createSpy.mockClear();
+
+    const code = await getCodeForEmail('nokey@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'nokey@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body!).isNew).toBe(true);
+
+    expect(createSpy).not.toHaveBeenCalled();
+
+    // Restore env.
+    process.env.NEWAPI_BASE_URL = origBase;
+    process.env.NEWAPI_ADMIN_TOKEN = origToken;
   });
 });
