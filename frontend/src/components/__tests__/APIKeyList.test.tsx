@@ -174,4 +174,40 @@ describe('APIKeyList', () => {
     expect(screen.queryByLabelText(/复制/)).toBeNull();
     vi.useRealTimers();
   });
+
+  it('expired/disabled rows show the MASKED value, not the cached plaintext', () => {
+    const cached = new Map<string, string>([['k1', 'sk-CACHED-BUT-DEAD']]);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-13T12:00:00Z'));
+    const past = new Date('2026-05-01T12:00:00Z').toISOString();
+    const { rerender } = render(
+      <APIKeyList
+        keys={[baseKey({ expiresAt: past })]}
+        loadError={null}
+        keyStats={new Map()}
+        cachedPlaintexts={cached}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+      />,
+    );
+    // Expired row falls back to the masked `sk-•••a4c2` even though
+    // cache still has the plaintext.
+    expect(screen.getByText('sk-•••a4c2')).toBeInTheDocument();
+    expect(screen.queryByText('sk-CACHED-BUT-DEAD')).toBeNull();
+
+    rerender(
+      <APIKeyList
+        keys={[baseKey({ disabled: true })]}
+        loadError={null}
+        keyStats={new Map()}
+        cachedPlaintexts={cached}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+      />,
+    );
+    // Disabled row also falls back to mask.
+    expect(screen.getByText('sk-•••a4c2')).toBeInTheDocument();
+    expect(screen.queryByText('sk-CACHED-BUT-DEAD')).toBeNull();
+    vi.useRealTimers();
+  });
 });

@@ -135,7 +135,11 @@ export function APIKeyList({
 
             <div className="flex items-center gap-1.5">
               <span className="flex-1 min-w-0 font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate">
-                {plaintext ?? k.key}
+                {/* Show plaintext only when this key is BOTH cached AND
+                    usable. Expired/disabled rows fall back to the mask
+                    even if cache still has them — there's no point
+                    leaking a dead value into the DOM. */}
+                {canCopy ? plaintext : k.key}
               </span>
               {canCopy && (
                 <button

@@ -167,6 +167,53 @@ describe('Dashboard install spell — cache hit / miss', () => {
     expect(keyCache.getCachedKey('alice@x.com', 'k-survive')).toBe('sk-A');
   });
 
+  it('sweeps cache entries for expired AND disabled keys (cache is dead weight)', async () => {
+    // Use real-time dates relative to NOW so we don't fight fake timers
+    // with @testing-library's waitFor (which polls in real time).
+    const pastIso = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    vi.spyOn(apiModule.api, 'listKeys').mockResolvedValue({
+      keys: [
+        {
+          keyId: 'k-good',
+          key: 'sk-•••f00d',
+          label: 'default',
+          createdAt: '2026-04-15T00:00:00Z',
+          disabled: false,
+          expiresAt: null,
+        },
+        {
+          keyId: 'k-expired',
+          key: 'sk-•••0aab',
+          label: 'old',
+          createdAt: '2026-03-01T00:00:00Z',
+          disabled: false,
+          expiresAt: pastIso,
+        },
+        {
+          keyId: 'k-disabled',
+          key: 'sk-•••dead',
+          label: 'admin-killed',
+          createdAt: '2026-04-15T00:00:00Z',
+          disabled: true,
+          expiresAt: null,
+        },
+      ],
+    });
+    keyCache.setCachedKey('alice@x.com', 'k-good', 'sk-A');
+    keyCache.setCachedKey('alice@x.com', 'k-expired', 'sk-EXPIRED-PLAINTEXT');
+    keyCache.setCachedKey('alice@x.com', 'k-disabled', 'sk-DISABLED-PLAINTEXT');
+
+    renderDashboard();
+
+    // Expired and disabled cache entries get nuked alongside orphans.
+    await waitFor(() => {
+      expect(keyCache.getCachedKey('alice@x.com', 'k-expired')).toBeNull();
+    });
+    expect(keyCache.getCachedKey('alice@x.com', 'k-disabled')).toBeNull();
+    // The good one survives.
+    expect(keyCache.getCachedKey('alice@x.com', 'k-good')).toBe('sk-A');
+  });
+
   it('prefers a cached non-default key over an uncached default (post-rebuild scenario)', async () => {
     // The user has an old `default` whose plaintext was lost on this
     // browser, AND a freshly-created replacement (cached). The spell

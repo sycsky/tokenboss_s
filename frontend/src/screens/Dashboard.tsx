@@ -122,9 +122,23 @@ export default function Dashboard() {
       setKeys(r.keys);
       dashboardCache.keys = r.keys;
       setKeysError(null);
-      // Drop any cached plaintext for keyIds that aren't in the list —
-      // those keys were deleted (possibly from another device).
-      sweepCachedKeys(user?.email, new Set(r.keys.map((k) => String(k.keyId))));
+      // Drop cached plaintext for any keyId that's NOT a usable key
+      // anymore — covers three states:
+      //   1. Key deleted (possibly from another device) → not in r.keys
+      //   2. Key expired (newapi auto-disables on expiry) → in r.keys
+      //      but isExpired(k) === true
+      //   3. Key disabled by newapi (admin / quota) → in r.keys but
+      //      k.disabled === true
+      // In all three cases the cached plaintext is dead weight at best,
+      // and we'd rather not keep it lingering in localStorage.
+      sweepCachedKeys(
+        user?.email,
+        new Set(
+          r.keys
+            .filter((k) => !k.disabled && !isExpired(k))
+            .map((k) => String(k.keyId)),
+        ),
+      );
     } catch (e) {
       setKeysError((e as Error).message);
     }
