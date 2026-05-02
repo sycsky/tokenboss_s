@@ -148,6 +148,7 @@ export const listKeysHandler = async (
         label: t.name,
         createdAt: new Date(t.created_time * 1000).toISOString(),
         disabled: t.status !== 1,
+        expiresAt: t.expired_time === -1 ? null : new Date(t.expired_time * 1000).toISOString(),
       })),
     });
   } catch (err) {
@@ -172,6 +173,26 @@ export const createKeyHandler = async (
   const rawLabel = typeof body.label === "string" ? body.label.trim() : "";
   const label = rawLabel ? rawLabel.slice(0, 64) : "default";
 
+  // expiresInDays: integer >= 1, or omitted/null = permanent.
+  let expiredTime = -1;
+  let expiresAtISO: string | null = null;
+  if (body.expiresInDays !== undefined && body.expiresInDays !== null) {
+    if (
+      typeof body.expiresInDays !== "number" ||
+      !Number.isInteger(body.expiresInDays) ||
+      body.expiresInDays < 1
+    ) {
+      return jsonError(
+        400,
+        "invalid_request_error",
+        "expiresInDays must be a positive integer or null.",
+      );
+    }
+    const seconds = Math.floor(Date.now() / 1000) + body.expiresInDays * 86400;
+    expiredTime = seconds;
+    expiresAtISO = new Date(seconds * 1000).toISOString();
+  }
+
   try {
     const session = await newapi.loginUser({
       username: newapiUsername(auth.userId),
@@ -181,6 +202,7 @@ export const createKeyHandler = async (
       session,
       name: label,
       unlimited_quota: true,
+      expired_time: expiredTime,
     });
     // Index the raw key's hash so chatProxyCore can resolve sk-xxx → userId
     // without storing the plaintext or hitting newapi on every request.
@@ -207,6 +229,7 @@ export const createKeyHandler = async (
       label,
       createdAt: new Date().toISOString(),
       disabled: false,
+      expiresAt: expiresAtISO,
     });
   } catch (err) {
     return handleNewapiError(err);
