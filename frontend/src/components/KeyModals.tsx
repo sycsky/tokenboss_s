@@ -126,6 +126,8 @@ export function CreateKeyModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Expiry as days-from-now. '' = permanent (default), or a positive int.
+  const [expiresInDays, setExpiresInDays] = useState<string>('');
 
   // Reset on each open + autofocus.
   useEffect(() => {
@@ -133,6 +135,7 @@ export function CreateKeyModal({
     setLabel('');
     setError(null);
     setSubmitting(false);
+    setExpiresInDays('');  // NEW
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [open]);
 
@@ -141,7 +144,11 @@ export function CreateKeyModal({
     setSubmitting(true);
     setError(null);
     try {
-      const created = await api.createKey({ label: label.trim() || undefined });
+      const days = expiresInDays.trim();
+      const created = await api.createKey({
+        label: label.trim() || undefined,
+        ...(days ? { expiresInDays: Number(days) } : {}),
+      });
       onCreated(created);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : `创建失败: ${(err as Error).message}`);
@@ -169,6 +176,29 @@ export function CreateKeyModal({
             'transition-all placeholder:text-[#A89A8D]'
           }
         />
+
+        <label
+          htmlFor="key-expires"
+          className="block font-mono text-[10.5px] tracking-[0.16em] uppercase text-[#A89A8D] font-bold mt-4 mb-2"
+        >
+          有效期
+        </label>
+        <select
+          id="key-expires"
+          value={expiresInDays}
+          onChange={(e) => setExpiresInDays(e.target.value)}
+          className={
+            'w-full px-3.5 py-2.5 bg-white border-2 border-ink rounded text-[14px] text-ink ' +
+            'shadow-[2px_2px_0_0_#1C1917] ' +
+            'focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] focus:shadow-[1px_1px_0_0_#1C1917] ' +
+            'transition-all'
+          }
+        >
+          <option value="">永久不过期（默认）</option>
+          <option value="30">30 天</option>
+          <option value="7">7 天</option>
+          <option value="1">24 小时</option>
+        </select>
 
         {error && (
           <div className="mt-3 font-mono text-[12px] bg-red-soft text-red-ink border-2 border-ink rounded px-3 py-2">
