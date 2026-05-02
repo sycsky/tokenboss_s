@@ -148,6 +148,8 @@ export interface ProxyKeySummary {
   label?: string;
   createdAt: string;
   disabled?: boolean;
+  /** ISO timestamp when the key auto-expires. null = never expires. */
+  expiresAt: string | null;
 }
 
 export interface CreatedProxyKey {
@@ -157,6 +159,8 @@ export interface CreatedProxyKey {
   label?: string;
   createdAt: string;
   disabled?: boolean;
+  /** ISO timestamp when the key auto-expires. null = never expires. */
+  expiresAt: string | null;
 }
 
 export interface UsageRecordView {
@@ -390,7 +394,7 @@ export const api = {
   listKeys(): Promise<{ keys: ProxyKeySummary[] }> {
     return request<{ keys: ProxyKeySummary[] }>("/v1/keys");
   },
-  createKey(input: { label?: string }): Promise<CreatedProxyKey> {
+  createKey(input: { label?: string; expiresInDays?: number | null }): Promise<CreatedProxyKey> {
     return request<CreatedProxyKey>("/v1/keys", { method: "POST", body: input });
   },
   deleteKey(keyId: string): Promise<{ ok: true }> {
