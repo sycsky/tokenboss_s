@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 
-// v1.0 placeholders — swap when actual sales channels are live.
-const WECHAT_ID = 'tokenboss_sales';
-const EMAIL = 'sales@tokenboss.co';
+// v1.0: email-only. v1.1 will add a Telegram bot.
+const EMAIL = 'kairos@tokenboss.co';
 
 export interface ContactSalesModalProps {
   open: boolean;
@@ -14,7 +13,10 @@ export interface ContactSalesModalProps {
 /**
  * Contact-sales modal — v1.0 has no self-checkout, so every paid action
  * (upgrade / renew / topup) goes through manual contact. Slock-pixel
- * card centered on a dimmed ink overlay; copy-able WeChat + email rows.
+ * card centered on a dimmed ink overlay; copy-able email row.
+ *
+ * v1.0 channels: email only. v1.1 will add a Telegram bot for faster
+ * turnaround.
  */
 export function ContactSalesModal({ open, onClose, reason = 'general' }: ContactSalesModalProps) {
   // Lock body scroll + ESC-to-close while open.
@@ -46,12 +48,12 @@ export function ContactSalesModal({ open, onClose, reason = 'general' }: Contact
     : '联系客服';
   const body =
     reason === 'upgrade'
-      ? 'v1.0 暂未开放自助升级，加微信或发邮件聊聊你的用量，给你最合适的方案。'
+      ? 'v1.0 暂未开放自助升级，发邮件聊聊你的用量，给你最合适的方案。'
       : reason === 'renew'
-        ? 'v1.0 暂未开放自助续费，加微信或发邮件，我们手动给你延期。'
+        ? 'v1.0 暂未开放自助续费，发邮件，我们手动给你延期。'
         : reason === 'topup'
-          ? 'v1.0 暂未开放自助充值，加微信或发邮件，我们手动加额度。'
-          : '加微信或发邮件，我们尽快回你。';
+          ? 'v1.0 暂未开放自助充值，发邮件，我们手动加额度。'
+          : '发邮件，我们尽快回你。';
 
   return (
     <div
@@ -77,8 +79,6 @@ export function ContactSalesModal({ open, onClose, reason = 'general' }: Contact
         </h2>
         <p className="text-[13.5px] text-[#6B5E52] mb-5 leading-relaxed">{body}</p>
 
-        <ContactRow label="微信" value={WECHAT_ID} />
-        <div className="my-3 border-t-2 border-ink/10" />
         <ContactRow label="邮箱" value={EMAIL} />
 
         <button

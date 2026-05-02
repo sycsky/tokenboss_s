@@ -30,7 +30,13 @@ import type {
 } from "aws-lambda";
 
 import { isAuthFailure, verifySessionHeader } from "../lib/auth.js";
-import { getUser, getAttributionsForJoin, type AttributionRecord } from "../lib/store.js";
+import {
+  getUser,
+  getAttributionsForJoin,
+  listResetSnapshots,
+  type AttributionRecord,
+  type SubscriptionSnapshot,
+} from "../lib/store.js";
 import { newapi, newapiQuotaToUsd, type NewapiLogEntry } from "../lib/newapi.js";
 
 // ---------- Helpers ----------
@@ -70,10 +76,10 @@ function newapiUsername(userId: string): string {
 }
 
 interface UsageRecordShape {
-  id: number;
+  id: number | string;
   userId: string;
   bucketId: string | null;
-  eventType: "consume";
+  eventType: "consume" | "reset" | "expire";
   amountUsd: number;
   model: string | null;
   source: string | null;
@@ -147,30 +153,99 @@ function isoToTimestamp(iso: string | undefined): number | undefined {
   return Number.isFinite(d) ? Math.floor(d / 1000) : undefined;
 }
 
+/** Default lookback when no `from` is provided. Always "last 30 days"
+ *  for every user (sub or not, new or old) — picked over per-cycle
+ *  windows because:
+ *    - One rule, zero branches.
+ *    - Stable across sub resets (no "where did my history go?" jump
+ *      when the cycle rolls over).
+ *    - Matches industry convention (Stripe / Vercel / GitHub all
+ *      default to 近 30 天).
+ *  Hero "今日剩" still reads from newapi sub state so cycle-accurate
+ *  numbers exist where they matter; this window is for the trend
+ *  cards, not for billing accounting. */
+const DEFAULT_LOOKBACK_DAYS = 30;
+function defaultStartTs(): number {
+  return Math.floor((Date.now() - DEFAULT_LOOKBACK_DAYS * 86400 * 1000) / 1000);
+}
+
 interface FetchAllParams {
   username: string;
   start_timestamp?: number;
   end_timestamp?: number;
-  per_page?: number;
 }
 
-/** Pull every consume entry for `username` in the given window. Caps at 5000. */
+// In-memory cache for fetchAllConsumeLogs — a typical dashboard load
+// fires this twice per user (once for totals/hourly, once for keyHint
+// aggregation), and dashboards refresh on focus / poll on a timer, so
+// hits compound. 60s TTL is short enough that "totals don't update for
+// a minute" is acceptable trend-view UX (hero "今日剩" reads sub state
+// directly, not this cache, so billing accuracy is unaffected).
+//
+// Per-process cache only — no Redis, no cross-instance sharing. Each
+// zeabur replica warms its own cache; eventual consistency is fine.
+// FIFO eviction at CACHE_MAX_ENTRIES bounds memory: ~500 KB/user × 200
+// users ≈ 100 MB worst case.
+interface CacheEntry {
+  expiresAt: number;
+  data: NewapiLogEntry[];
+}
+const consumeLogCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60_000;
+const CACHE_MAX_ENTRIES = 200;
+
+function cacheKeyFor(p: FetchAllParams): string {
+  return `${p.username}|${p.start_timestamp ?? ''}|${p.end_timestamp ?? ''}`;
+}
+
+/** Test-only: drop the in-memory cache so cases stay isolated. */
+export function _clearConsumeLogCacheForTests(): void {
+  consumeLogCache.clear();
+}
+
+/** Pull every consume entry for `username` in the given window. Caps at 5000.
+ *  Results are cached per (username, window) for 60s — see CacheEntry. */
 async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]> {
-  const perPage = Math.min(p.per_page ?? 1000, 1000);
+  const key = cacheKeyFor(p);
+  const now = Date.now();
+  const cached = consumeLogCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  // newapi's /api/log/ silently caps `size` at 100 server-side regardless
+  // of what we request. The previous "items.length < requestedPerPage"
+  // EOF check therefore always tripped on page 0 (100 < 1000), so totals
+  // and the hourly chart silently froze at the first 100 entries — the
+  // exact symptom users hit ("调用次数停在 100"). Drive the loop off the
+  // response's own `total` instead, with a hard cap to bound memory /
+  // request count for power users.
+  const PER_PAGE = 100;
+  const HARD_CAP_RECORDS = 5000;
+  const HARD_CAP_PAGES = Math.ceil(HARD_CAP_RECORDS / PER_PAGE);
   const all: NewapiLogEntry[] = [];
-  for (let page = 0; page < 5; page++) {
+  for (let page = 0; page < HARD_CAP_PAGES; page++) {
     const res = await newapi.getLogs({
       page,
-      per_page: perPage,
+      per_page: PER_PAGE,
       type: 2, // consume only
       username: p.username,
       start_timestamp: p.start_timestamp,
       end_timestamp: p.end_timestamp,
     });
     const items = res?.items ?? [];
+    if (items.length === 0) break;
     all.push(...items);
-    if (items.length < perPage) break;
+    const total = typeof res?.total === 'number' ? res.total : undefined;
+    if (total !== undefined && all.length >= total) break;
+    if (all.length >= HARD_CAP_RECORDS) break;
   }
+
+  if (consumeLogCache.size >= CACHE_MAX_ENTRIES) {
+    // FIFO eviction — Map preserves insertion order, so the first key is
+    // the oldest. Strict LRU isn't worth the bookkeeping for a 60s TTL.
+    const oldest = consumeLogCache.keys().next().value;
+    if (oldest !== undefined) consumeLogCache.delete(oldest);
+  }
+  consumeLogCache.set(key, { expiresAt: now + CACHE_TTL_MS, data: all });
   return all;
 }
 
@@ -208,7 +283,9 @@ export const usageHandler = async (
   const username = newapiUsername(userId);
 
   const qs = event.queryStringParameters ?? {};
-  const startTs = isoToTimestamp(qs.from);
+  // Default window = rolling 30d. Client may override via `from` (e.g.
+  // UsageHistory's 24h fetch).
+  const startTs = isoToTimestamp(qs.from) ?? defaultStartTs();
   const endTs = isoToTimestamp(qs.to);
 
   // ----- Aggregation mode -----
@@ -332,8 +409,29 @@ export const usageHandler = async (
   });
   const pageItems = pageRes.items ?? [];
   const sourceByEntryId = attachSourcesToLogEntries(userId, pageItems);
-  const records = pageItems.map((entry) =>
+  const consumeRecords = pageItems.map((entry) =>
     mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
+  );
+
+  // Synthesize subscription reset/expire records from the snapshot table
+  // so /console/history shows the periodic "作废 + 重置" pair newapi
+  // doesn't log natively. Window matches the consume window so the merge
+  // stays time-coherent. listResetSnapshots returns ONLY rows with
+  // resetExpiredUsd set (= rows that detected a reset), so we don't
+  // double-count ordinary observation snapshots.
+  const resetSnapshots = listResetSnapshots(
+    userId,
+    startTs ? new Date(startTs * 1000).toISOString() : undefined,
+    endTs ? new Date(endTs * 1000).toISOString() : undefined,
+  );
+  const resetRecords = resetSnapshots.flatMap(snapshotToRecords);
+
+  // Merge + sort newest-first. consumeRecords are already paginated by
+  // newapi so they're at most `limit` long; reset rows in a normal
+  // window are ≤ 30 (one per day for monthly, one per cycle for others).
+  // No re-pagination needed at this size.
+  const records = [...consumeRecords, ...resetRecords].sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
   );
 
   // Pull the full window for totals + hourly chart. Reasonable cap.
@@ -358,13 +456,22 @@ export const usageHandler = async (
 
 // ---------- Hourly chart helpers ----------
 
-function emptyHourly24h(): { hour: string; consumed: number }[] {
+// Hour-bucket shape returned to the client. `hour` (UTC string) is kept
+// for backward compatibility with older bundles, but `hourStartMs` is
+// the canonical field — the frontend converts it to the user's local
+// timezone with `new Date(hourStartMs).getHours()` so the chart's X
+// axis matches the user's wall clock, not the server's UTC.
+type HourBucket = { hour: string; hourStartMs: number; consumed: number };
+
+function emptyHourly24h(): HourBucket[] {
   const now = new Date();
-  const out: { hour: string; consumed: number }[] = [];
+  const out: HourBucket[] = [];
   for (let i = 23; i >= 0; i--) {
     const hourStart = new Date(now.getTime() - i * 3600e3);
+    hourStart.setUTCMinutes(0, 0, 0);
     out.push({
       hour: `${hourStart.getUTCHours().toString().padStart(2, "0")}:00`,
+      hourStartMs: hourStart.getTime(),
       consumed: 0,
     });
   }
@@ -373,9 +480,9 @@ function emptyHourly24h(): { hour: string; consumed: number }[] {
 
 function buildHourly24h(
   entries: NewapiLogEntry[],
-): { hour: string; consumed: number }[] {
+): HourBucket[] {
   const now = Date.now();
-  const buckets: { hour: string; consumed: number }[] = [];
+  const buckets: HourBucket[] = [];
   for (let i = 23; i >= 0; i--) {
     const start = now - i * 3600e3;
     const hourStart = new Date(start);
@@ -391,6 +498,7 @@ function buildHourly24h(
     }
     buckets.push({
       hour: `${hourStart.getUTCHours().toString().padStart(2, "0")}:00`,
+      hourStartMs,
       consumed: round6(consumed),
     });
   }
@@ -399,4 +507,49 @@ function buildHourly24h(
 
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
+}
+
+// ---------- Reset / expire event synthesis ----------
+
+/** Convert one detected reset snapshot into the (expire, reset) record
+ *  pair that the UI renders. The expire record is timestamped 1ms
+ *  EARLIER than the reset record so a DESC-by-createdAt sort puts
+ *  reset above expire — that puts the "+ new cycle" notification
+ *  visually on top, matching the user's mental order ("作废了 X，
+ *  然后给了 Y"). */
+function snapshotToRecords(
+  snap: SubscriptionSnapshot,
+): UsageRecordShape[] {
+  if (snap.resetExpiredUsd === null) return [];
+  const resetMs = new Date(snap.observedAt).getTime();
+  const tier = snap.planTier;
+  const tierLabel = tier ? `${tier} 周期` : null;
+  return [
+    {
+      id: `reset-${snap.id}`,
+      userId: snap.userId,
+      bucketId: null,
+      eventType: 'reset',
+      amountUsd: round6(snap.amountTotalUsd),
+      model: null,
+      source: null,
+      keyHint: tierLabel,
+      tokensIn: null,
+      tokensOut: null,
+      createdAt: new Date(resetMs).toISOString(),
+    },
+    {
+      id: `expire-${snap.id}`,
+      userId: snap.userId,
+      bucketId: null,
+      eventType: 'expire',
+      amountUsd: round6(snap.resetExpiredUsd),
+      model: null,
+      source: null,
+      keyHint: tierLabel,
+      tokensIn: null,
+      tokensOut: null,
+      createdAt: new Date(resetMs - 1).toISOString(),
+    },
+  ];
 }

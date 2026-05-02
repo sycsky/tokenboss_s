@@ -254,7 +254,13 @@ export function init(): void {
     CREATE TABLE IF NOT EXISTS orders (
       orderId            TEXT PRIMARY KEY,
       userId             TEXT NOT NULL,
-      planId             TEXT,                      -- legacy; nullable now (back-compat for rollback)
+      -- Legacy column. Originally short name for the newapi subscription plan
+      -- ('plus'|'super'|'ultra') used at settle time to bind the user. Topup
+      -- orders have no newapi plan, but pre-2026-04-29 production tables were
+      -- created with NOT NULL and ALTER COLUMN isn't supported in SQLite — so
+      -- createOrder() writes the literal 'topup' as a placeholder. The real
+      -- discriminator is the skuType column below; nothing reads planId to decide flow.
+      planId             TEXT,
       skuType            TEXT,                      -- 'plan_plus'|'plan_super'|'plan_ultra'|'topup'
       topupAmountUsd     REAL,                      -- only set for skuType='topup'
       settleStatus       TEXT,                      -- 'settled'|'failed' for topup; null otherwise
@@ -319,6 +325,36 @@ export function init(): void {
     CREATE INDEX IF NOT EXISTS idx_attribution_user_time
       ON usage_attribution(userId, capturedAt DESC);
   `);
+
+  // Subscription quota snapshots — newapi auto-resets a sub's amount_used
+  // back to 0 every reset_period (daily for paid plans), but doesn't log
+  // those resets anywhere we can query (probed all log types — empty).
+  // We poll periodically and write a snapshot of (amount_total, amount_used)
+  // every cycle. When amount_used drops between two consecutive snapshots
+  // we know a reset just happened, and the prior cycle's leftover (the
+  // previous amountTotal − amountUsed) is the "expired" amount the user
+  // wants to see in /console/history.
+  //
+  // resetExpiredUsd is null on ordinary observation snapshots; non-null
+  // (≥ 0) on the snapshot that DETECTED the reset — that single row owns
+  // the "+X new / -Y expired" pair the UI emits as two events.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS subscription_snapshots (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId          TEXT NOT NULL,
+      subId           INTEGER NOT NULL,
+      observedAt      TEXT NOT NULL,
+      amountTotalUsd  REAL NOT NULL,
+      amountUsedUsd   REAL NOT NULL,
+      resetExpiredUsd REAL,
+      planTier        TEXT,
+      createdAt       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_subscription_snapshots_user_time
+      ON subscription_snapshots(userId, observedAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_subscription_snapshots_user_sub_time
+      ON subscription_snapshots(userId, subId, observedAt DESC);
+  `);
 }
 
 // Initialise on module load (production default path).
@@ -337,6 +373,11 @@ function deriveSkuType(skuType: string | undefined, planId: string | undefined):
   if (planId === 'plus') return 'plan_plus';
   if (planId === 'super') return 'plan_super';
   if (planId === 'ultra') return 'plan_ultra';
+  // 'topup' is the placeholder createOrder() writes for topup orders (see
+  // schema comment on `planId`). Never produced by real plan binding —
+  // keeping this branch makes the fallback honest about what values the
+  // legacy column can hold.
+  if (planId === 'topup') return 'topup';
   // Last-resort default: any other state means migration didn't fully run.
   // 'plan_plus' is the safest fallback (lowest privilege paid tier).
   return 'plan_plus';
@@ -651,11 +692,9 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
 // ---------- Public API — Orders ----------
 
 export async function createOrder(rec: OrderRecord): Promise<void> {
-  // planId column is kept for back-compat / rollback. Derive from skuType
-  // when the order is a plan_* SKU; null for topup.
-  const legacyPlanId = rec.skuType.startsWith('plan_')
-    ? rec.skuType.replace(/^plan_/, '')
-    : null;
+  // Legacy planId column — see schema comment above. Always non-null:
+  // plan_plus → 'plus' / plan_super → 'super' / plan_ultra → 'ultra' / topup → 'topup'.
+  const legacyPlanId = rec.skuType.replace(/^plan_/, '');
   db.prepare(`
     INSERT INTO orders
       (orderId, userId, planId, skuType, topupAmountUsd, settleStatus,
@@ -870,4 +909,130 @@ export function getAttributionsForJoin(
     )
     .all(userId, minCapturedAt, maxCapturedAt, ...models) as AttributionRow[];
   return rows.map(rowToAttribution);
+}
+
+// ---------- Public API — Subscription snapshots (reset detection) ----------
+
+export interface SubscriptionSnapshot {
+  id: number;
+  userId: string;
+  subId: number;
+  observedAt: string;
+  amountTotalUsd: number;
+  amountUsedUsd: number;
+  /** When non-null, this snapshot detected a reset and this is the
+   *  unused amount of the prior cycle that got zeroed out. */
+  resetExpiredUsd: number | null;
+  planTier: string | null;
+  createdAt: string;
+}
+
+interface SnapshotRow {
+  id: number;
+  userId: string;
+  subId: number;
+  observedAt: string;
+  amountTotalUsd: number;
+  amountUsedUsd: number;
+  resetExpiredUsd: number | null;
+  planTier: string | null;
+  createdAt: string;
+}
+
+function rowToSnapshot(row: SnapshotRow): SubscriptionSnapshot {
+  return { ...row };
+}
+
+/** Write a fresh snapshot for (user, sub). resetExpiredUsd is non-null
+ *  ONLY when the caller detected a reset (current amountUsed < previous
+ *  amountUsed) — the snapshot then doubles as the "reset event" for
+ *  history surfaces. */
+export function writeSubscriptionSnapshot(rec: {
+  userId: string;
+  subId: number;
+  observedAt: string;
+  amountTotalUsd: number;
+  amountUsedUsd: number;
+  resetExpiredUsd: number | null;
+  planTier: string | null;
+}): void {
+  db.prepare(
+    `INSERT INTO subscription_snapshots
+       (userId, subId, observedAt, amountTotalUsd, amountUsedUsd,
+        resetExpiredUsd, planTier, createdAt)
+     VALUES
+       (@userId, @subId, @observedAt, @amountTotalUsd, @amountUsedUsd,
+        @resetExpiredUsd, @planTier, @createdAt)`,
+  ).run({ ...rec, createdAt: new Date().toISOString() });
+}
+
+/** Most recent snapshot for (user, sub) — used by the poller to compare
+ *  current newapi state against last seen and decide whether a reset
+ *  just happened. Returns null when this is a brand new sub we've never
+ *  seen before. */
+export function getLastSubscriptionSnapshot(
+  userId: string,
+  subId: number,
+): SubscriptionSnapshot | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM subscription_snapshots
+        WHERE userId = ? AND subId = ?
+        ORDER BY observedAt DESC
+        LIMIT 1`,
+    )
+    .get(userId, subId) as SnapshotRow | undefined;
+  return row ? rowToSnapshot(row) : null;
+}
+
+/** All reset-detecting snapshots in the time window — these are the
+ *  rows usage history exposes as "expire / reset" event pairs. */
+export function listResetSnapshots(
+  userId: string,
+  fromIso?: string,
+  toIso?: string,
+): SubscriptionSnapshot[] {
+  const clauses = ['userId = ?', 'resetExpiredUsd IS NOT NULL'];
+  const args: unknown[] = [userId];
+  if (fromIso) {
+    clauses.push('observedAt >= ?');
+    args.push(fromIso);
+  }
+  if (toIso) {
+    clauses.push('observedAt <= ?');
+    args.push(toIso);
+  }
+  const rows = db
+    .prepare(
+      `SELECT * FROM subscription_snapshots
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY observedAt DESC`,
+    )
+    .all(...args) as SnapshotRow[];
+  return rows.map(rowToSnapshot);
+}
+
+/** All users with at least one prior subscription snapshot — used by
+ *  the poller as the seed list (we can't poll users we've never seen).
+ *  Plus we also need `getActiveUserIdsForPolling()` for cold-start
+ *  enrollment, but that one cuts across users + buckets and lives in
+ *  the subscription poller module. */
+export function listSnapshottedUsers(): string[] {
+  const rows = db
+    .prepare(`SELECT DISTINCT userId FROM subscription_snapshots`)
+    .all() as { userId: string }[];
+  return rows.map((r) => r.userId);
+}
+
+/** Every user whose newapi link is set — the poller cold-starts from
+ *  this list so brand-new accounts get tracked too, not just users who
+ *  already have a snapshot row. */
+export function listUsersWithNewapiLink(): { userId: string; newapiUserId: number }[] {
+  const rows = db
+    .prepare(
+      `SELECT userId, newapiUserId FROM users
+        WHERE newapiUserId IS NOT NULL`,
+    )
+    .all() as { userId: string; newapiUserId: number }[];
+  return rows;
 }

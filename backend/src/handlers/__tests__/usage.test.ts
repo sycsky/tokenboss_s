@@ -15,7 +15,7 @@ vi.mock('../../lib/newapi.js', async (orig) => {
 });
 
 import { init, putUser, insertAttribution, db } from '../../lib/store.js';
-import { usageHandler } from '../usageHandlers.js';
+import { usageHandler, _clearConsumeLogCacheForTests } from '../usageHandlers.js';
 import { newapi } from '../../lib/newapi.js';
 import { signSession } from '../../lib/authTokens.js';
 
@@ -33,6 +33,7 @@ beforeEach(() => {
     newapiUserId: 42,
   });
   getLogsMock.mockReset();
+  _clearConsumeLogCacheForTests();
 });
 
 function bearerFor(userId: string): string {
@@ -149,6 +150,101 @@ describe('usageHandler (newapi-backed)', () => {
     expect(body.groups).toHaveLength(1);
     expect(body.groups[0].groupKey).toBeNull();
     expect(body.groups[0].callCount).toBe(2);
+  });
+
+  // Default window = rolling 30d for every user (sub or not). Same
+  // logic for everyone — keeps server load bounded and gives a stable
+  // "近 30 天" trend that doesn't jump on sub reset.
+  it('defaults to rolling 30d when no `from` is provided', async () => {
+    getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
+    await usageHandler(makeEvt());
+
+    const expectedMin = Math.floor((Date.now() - 30 * 86400 * 1000) / 1000);
+    for (const call of getLogsMock.mock.calls) {
+      const ts = call[0].start_timestamp as number;
+      // Allow ±2s for clock skew between handler call and assertion.
+      expect(ts).toBeGreaterThanOrEqual(expectedMin - 2);
+      expect(ts).toBeLessThanOrEqual(expectedMin + 2);
+    }
+  });
+
+  // Explicit `from` from the client (e.g. UsageHistory's 24h window)
+  // must override the 30d default.
+  it('respects explicit `from` and skips the 30d default', async () => {
+    getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
+
+    const explicitFrom = '2026-05-01T00:00:00.000Z';
+    await usageHandler(makeEvt({ from: explicitFrom }));
+    const expectedTs = Math.floor(new Date(explicitFrom).getTime() / 1000);
+    for (const call of getLogsMock.mock.calls) {
+      expect(call[0].start_timestamp).toBe(expectedTs);
+    }
+  });
+
+  // 60s in-memory cache: a single dashboard load fires fetchAllConsumeLogs
+  // twice (once for totals/hourly, once for keyHint aggregation) — same
+  // window, same user, so the second call must hit the cache.
+  it('caches fetchAll results so the second handler call in the same window reuses them', async () => {
+    let callCount = 0;
+    getLogsMock.mockImplementation(async () => {
+      callCount++;
+      return { items: [logEntry({ id: callCount, quota: 50_000 })], total: 1, page: 0, page_size: 100 };
+    });
+
+    // First call: cache miss. Records mode triggers TWO getLogs calls
+    // (one for the records page, one inside fetchAll for totals).
+    await usageHandler(makeEvt());
+    const callsAfterFirst = callCount;
+    expect(callsAfterFirst).toBeGreaterThanOrEqual(2);
+
+    // Second call within TTL: records-page call still goes through (not
+    // cached), but the fetchAll call should be served from cache.
+    await usageHandler(makeEvt());
+    expect(callCount).toBe(callsAfterFirst + 1); // only +1, not +2
+  });
+
+  // Different windows must NOT share a cache slot — explicit `from`
+  // creates a different cache key from the default 30d window.
+  it('does not share cache across different `from` windows', async () => {
+    let callCount = 0;
+    getLogsMock.mockImplementation(async () => {
+      callCount++;
+      return { items: [], total: 0, page: 0, page_size: 100 };
+    });
+
+    await usageHandler(makeEvt());
+    const after30d = callCount;
+    await usageHandler(makeEvt({ from: '2026-04-01T00:00:00.000Z' }));
+    // Different window ⇒ different key ⇒ fetchAll re-runs.
+    expect(callCount).toBeGreaterThan(after30d + 1);
+  });
+
+  // Regression: newapi caps `size` at 100 server-side regardless of what
+  // we ask for. The old loop's "items.length < requestedPerPage" EOF
+  // check tripped on page 0 (100 < 1000), freezing totals at 100.
+  // Make sure we now paginate until res.total is satisfied.
+  it('totals.calls follows newapi total even when server caps page size at 100', async () => {
+    // Simulate a user with 250 entries while newapi caps each page at 100.
+    const TOTAL = 250;
+    const SERVER_CAP = 100;
+    const allEntries = Array.from({ length: TOTAL }, (_, i) =>
+      logEntry({ id: i + 1, quota: 10_000 }),
+    );
+    getLogsMock.mockImplementation(async (q: { page?: number; per_page?: number }) => {
+      const page = q.page ?? 0;
+      // newapi ignores per_page > 100 — clamp like the real server.
+      const size = Math.min(q.per_page ?? 50, SERVER_CAP);
+      const start = page * size;
+      const items = allEntries.slice(start, start + size);
+      return { items, total: TOTAL, page, page_size: size };
+    });
+
+    const res = (await usageHandler(makeEvt())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body!);
+    expect(body.totals.calls).toBe(TOTAL);
+    // 250 entries × 10_000 quota × $1 / 500_000 = $5.00
+    expect(body.totals.consumed).toBeCloseTo(250 * (10_000 / 500_000), 3);
   });
 });
 

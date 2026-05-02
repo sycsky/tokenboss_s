@@ -281,6 +281,8 @@ export default function Landing() {
             ctaText={tierCta.text}
             onCtaClick={tierCta.onClick}
             ctaVariant="secondary"
+            banner="副驾玩家"
+            bannerVariant="subtle"
           />
           <TierCard
             name={superTier.name}
@@ -293,6 +295,8 @@ export default function Landing() {
             onCtaClick={tierCta.onClick}
             ctaVariant="primary"
             featured
+            banner="主驾玩家"
+            bannerVariant="strong"
           />
           <TierCard
             name={ultraTier.name}
@@ -304,11 +308,13 @@ export default function Landing() {
             ctaText={ultraCta.text}
             onCtaClick={ultraCta.onClick}
             ctaVariant={ultraCta.variant}
-            soldOutBanner={
+            dimmed={ultraCta.soldOut}
+            banner={
               ultraCta.soldOut
                 ? `今日 ${ULTRA_DROP.slotsPerDay} 席已抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
-                : undefined
+                : '自动驾驶'
             }
+            bannerVariant="dark"
           />
         </div>
       </section>

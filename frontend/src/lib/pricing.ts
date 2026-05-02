@@ -86,13 +86,13 @@ export const STANDARD_RATE: Record<Currency, StandardRate> = {
   rmb: {
     unit: '¥1',
     quota: '$1',
-    minTopup: '充值 ¥50 起 · 永不过期 · 全模型解锁',
+    minTopup: '¥1 起充 · 永不过期 · 全模型解锁',
     trialPill: '$10 / 24h',
   },
   usd: {
     unit: '$1 USD',
     quota: '$7',
-    minTopup: '充值 $10 USD 起 = $70 调用额度 · 永不过期 · 全模型解锁',
+    minTopup: '$1 起充 = $7 调用额度 · 永不过期 · 全模型解锁',
     trialPill: '$10 / 24h',
   },
 };

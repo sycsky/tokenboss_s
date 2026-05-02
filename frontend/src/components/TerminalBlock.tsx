@@ -93,16 +93,19 @@ export function TerminalBlock({
       onClick={handleCopy}
       aria-label="copy command"
       className={
-        'font-mono text-[9.5px] sm:text-[10px] font-bold tracking-[0.14em] uppercase text-ink ' +
-        'bg-bg border-2 border-bg rounded ' +
+        'font-mono text-[9.5px] sm:text-[10px] font-bold tracking-[0.14em] uppercase ' +
+        'border-2 rounded ' +
         'px-2 py-0.5 sm:px-2.5 sm:py-1 ' +
         'shadow-[2px_2px_0_0_#E8692A] ' +
         'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
         'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#E8692A] ' +
-        'transition-all flex-shrink-0'
+        'transition-all flex-shrink-0 ' +
+        (copied
+          ? 'bg-accent border-accent text-white shadow-[2px_2px_0_0_#1C1917] hover:shadow-[1px_1px_0_0_#1C1917] active:shadow-[0_0_0_0_#1C1917]'
+          : 'bg-bg border-bg text-ink')
       }
     >
-      {resolving ? '…' : copied ? '已复制' : resolveError ? '重试' : 'COPY'}
+      {resolving ? '…' : copied ? '✓ 已复制' : resolveError ? '重试' : 'COPY'}
     </button>
   );
 

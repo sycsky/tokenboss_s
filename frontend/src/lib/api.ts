@@ -12,7 +12,7 @@
  */
 
 // Prefer build-time Vite env, fall back to runtime injection via /env.js (Docker entrypoint)
-declare global { interface Window { __ENV__?: { VITE_API_URL?: string; VITE_CHAT_URL?: string } } }
+declare global { interface Window { __ENV__?: { VITE_API_URL?: string; VITE_CHAT_URL?: string; VITE_SENTRY_DSN?: string } } }
 const API_URL =
   (import.meta.env.VITE_API_URL as string | undefined) ||
   window.__ENV__?.VITE_API_URL ||
@@ -208,7 +208,10 @@ export interface BucketsResponse {
 }
 
 export interface UsageRecord {
-  id: number;
+  /** Numeric for newapi consume rows (newapi log entry id), prefixed
+   *  string for synthesized rows (e.g. "reset-123" / "expire-123" from
+   *  subscription snapshot detection). React keys handle either fine. */
+  id: number | string;
   userId: string;
   bucketId: string | null;
   eventType: "consume" | "reset" | "expire" | "topup" | "refund";
@@ -225,12 +228,21 @@ export interface UsageRecord {
 }
 
 export interface HourlyUsage {
+  /** Legacy — UTC hour string like "08:00". Kept for backward compat;
+   *  new clients should prefer `hourStartMs` and convert to local
+   *  timezone on the client. */
   hour: string;
+  /** Epoch ms of the hour bucket's start. Lets the client render the
+   *  hour label in the user's local timezone (`new Date(hourStartMs)
+   *  .getHours()`) instead of getting the backend's UTC string. */
+  hourStartMs?: number;
   consumed: number;
 }
 
 export interface UsageDetailResponse {
   records: UsageRecord[];
+  /** Totals over the active window. Backend defaults to rolling 30d
+   *  when `from` isn't passed; clients label this as "近 30 天". */
   totals: { consumed: number; calls: number };
   hourly24h: HourlyUsage[];
 }

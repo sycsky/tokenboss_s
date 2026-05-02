@@ -88,17 +88,17 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Build a profile for API responses. `balance` is the user's total
- * spendable USD on newapi (`user.quota / 500_000` — newapi stores quota
- * in raw units where 500,000 = $1). It's an aggregate of subscription
- * remaining + any wallet top-up.
+ * Build a profile for API responses. `balance` is the user's wallet
+ * (topup) balance in USD — `newapi.user.quota / 500_000`, where 500,000
+ * raw units = $1. This is INDEPENDENT of subscription quota, which is
+ * tracked on the subscription record (amount_total / amount_used) and
+ * consumed against that record. Subscription remaining does NOT show up
+ * in `balance`.
  *
- * Fine-grained subscription state (current plan, expiry, period quota)
- * is intentionally NOT here — frontends call `/v1/buckets` for that and
- * compose with `balance` to show "total wallet" vs "today's allowance"
- * separately. Older versions of this function returned `quota - used`
- * which double-subtracted (newapi.user.quota is already remaining); fix
- * for that incident is to simply convert the raw remaining to USD.
+ * For UI: dashboards show "今日剩 (subscription)" using `/v1/buckets`
+ * data, and "钱包余额 (wallet)" using this `balance`. They are two
+ * separate buckets of money with different semantics — sub resets daily
+ * / monthly per the plan, wallet credits don't reset.
  */
 async function buildUserProfile(
   u: UserRecord,

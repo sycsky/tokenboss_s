@@ -178,33 +178,61 @@ fallback_model:
     id: 'codex',
     name: 'Codex CLI',
     homepage: 'https://github.com/openai/codex',
-    blurb: 'OpenAI 官方 CLI · 锁 0.80.0 版（TokenBoss 走 Chat Completions 协议，新版 Codex 砍了 chat wire_api 不再兼容）',
+    blurb: 'OpenAI 官方 CLI · 走 Responses API（TokenBoss 后端原生支持 /v1/responses，无需锁版本）',
     steps: [
       {
-        title: '1. 安装 Codex（锁 0.80.0 版）',
-        desc: <>需要 Node.js 18+。<strong>必须锁版本 <span className={codeChip}>@openai/codex@0.80.0</span></strong>——0.80 之后的 Codex 砍掉了 <span className={codeChip}>wire_api = "chat"</span> 配置项，强制走 OpenAI Responses API；TokenBoss 后端只暴露 Chat Completions（<span className={codeChip}>/v1/chat/completions</span>），新版 Codex 协议层接不上。等后端加 Responses API 端点后这一限制会移除。</>,
+        title: '1. 安装 Codex CLI',
+        desc: <>需要 Node.js 18+。装最新版即可（后端已经支持 Responses API）。</>,
         codeLabel: '终端',
-        code: 'npm install -g @openai/codex@0.80.0',
+        code: 'npm install -g @openai/codex',
       },
       {
-        title: '2. 编辑配置文件',
-        desc: <>把下面这段写到 <span className={codeChip}>~/.codex/config.toml</span>（TOML 格式，注意不是 JSON）。已有的别的 <span className={codeChip}>[model_providers.*]</span> 表保留，只新增 <span className={codeChip}>tokenboss</span> 这一表 + 修改顶层两行。</>,
+        title: '2. 创建配置目录',
+        desc: <>清理旧配置（如果之前装过别的 Codex provider），新建 <span className={codeChip}>~/.codex</span>。</>,
+        codeLabel: '终端',
+        code: `# 删除旧的配置目录（如果存在）
+rm -rf ~/.codex
+
+# 创建新的配置目录
+mkdir ~/.codex`,
+      },
+      {
+        title: '3. 创建 auth.json',
+        desc: <>把 <span className={codeChip}>{'<你的 TokenBoss key>'}</span> 替换成 <Link to="/console" className="text-accent font-semibold underline underline-offset-2">控制台</Link> 复制的密钥。</>,
+        codeLabel: '~/.codex/auth.json',
+        code: `cat > ~/.codex/auth.json << 'EOF'
+{
+  "OPENAI_API_KEY": "<你的 TokenBoss key>"
+}
+EOF`,
+      },
+      {
+        title: '4. 创建 config.toml',
+        desc: <>这段配置告诉 Codex 把请求发到 TokenBoss 的 Responses API 端点。</>,
         codeLabel: '~/.codex/config.toml',
-        code: `model_provider = "tokenboss"
+        code: `cat > ~/.codex/config.toml << 'EOF'
+model_provider = "tokenboss"
 model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+preferred_auth_method = "apikey"
 
 [model_providers.tokenboss]
-name = "TokenBoss"
+name = "tokenboss"
 base_url = "https://api.tokenboss.co/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "chat"`,
+wire_api = "responses"
+EOF`,
       },
       {
-        title: '3. 设置 OPENAI_API_KEY',
-        desc: <>Codex 从 <span className={codeChip}>OPENAI_API_KEY</span> 读 key（即使你的 key 是 TokenBoss 的）。写到 shell profile 让每次开终端都生效。</>,
-        codeLabel: '终端',
-        code: `echo 'export OPENAI_API_KEY=<你的 TokenBoss key>' >> ~/.zshrc   # 或 ~/.bashrc
-source ~/.zshrc`,
+        title: '5. 配置推理预算（可选）',
+        desc: (
+          <>
+            修改 <span className={codeChip}>model_reasoning_effort</span> 控制推理深度，重启 Codex 后生效：
+            <br />· <strong>high</strong> — 复杂算法、架构规划、疑难问题
+            <br />· <strong>medium</strong> — 常规开发、代码重构
+            <br />· <strong>low</strong> — 简单代码、快速问答
+          </>
+        ),
       },
     ],
     verify: {

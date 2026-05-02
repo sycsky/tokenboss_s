@@ -24,6 +24,33 @@ try {
   /* no .env.local — fine */
 }
 
+// Sentry must be initialised BEFORE any other imports so its instrumentation
+// can patch underlying modules (HTTP, undici, etc.). When SENTRY_DSN is
+// absent it's a no-op — no events sent, no perf overhead — so dev / CI
+// runs without DSN are clean. Production sets SENTRY_DSN in zeabur env.
+import * as Sentry from "@sentry/node";
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV ?? "production",
+    // Send 100% of errors. tracesSampleRate=0 → don't ship perf data
+    // (enables it later if we want timing breakdowns).
+    tracesSampleRate: 0,
+    // Strip out potentially-sensitive query strings from the issue URL
+    // grouping. Keeps errors deduped without leaking ?token=... etc.
+    beforeSend(event) {
+      if (event.request?.url) {
+        try {
+          const u = new URL(event.request.url);
+          event.request.url = `${u.origin}${u.pathname}`;
+        } catch { /* malformed URL — leave as-is */ }
+      }
+      return event;
+    },
+  });
+  console.log("[sentry] initialised");
+}
+
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { join, normalize, resolve as pathResolve, sep } from "node:path";
@@ -65,6 +92,24 @@ import {
   type StreamWriter,
 } from "./lib/chatProxyCore.js";
 import { putUser } from "./lib/store.js";
+import { startSubscriptionPoller } from "./lib/subscriptionPoller.js";
+import { extractBearerToken } from "./lib/auth.js";
+import { verifySession } from "./lib/authTokens.js";
+
+/** Best-effort userId extractor for Sentry context. Pure sync — uses
+ *  the JWT verifier (no DB call) and swallows any error. Returns
+ *  undefined when the request isn't authenticated or the token is
+ *  invalid; the goal is enrichment, not auth. */
+function userIdFromAuthHeader(authHeader: string | undefined): string | undefined {
+  try {
+    const token = extractBearerToken(authHeader);
+    if (!token) return undefined;
+    const claims = verifySession(token);
+    return claims?.sub ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 type LambdaHandler = (
   event: APIGatewayProxyEventV2,
@@ -81,7 +126,20 @@ interface Route {
   handler: LambdaHandler;
 }
 
+/** Lightweight liveness probe for external uptime monitors (Healthchecks
+ *  / UptimeRobot). Returns 200 fast — no DB call, no upstream check —
+ *  so a probe failure means the process literally isn't accepting
+ *  connections, not that some downstream is slow. We don't want a
+ *  flaky newapi to cause our uptime monitor to page. */
+const healthzHandler: LambdaHandler = async () => ({
+  statusCode: 200,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ status: "ok", t: new Date().toISOString() }),
+});
+
+
 const routes: Route[] = [
+  { method: "GET", path: "/healthz", handler: healthzHandler },
   { method: "GET", path: "/hello", handler: helloHandler as LambdaHandler },
   { method: "POST", path: "/v1/auth/register", handler: registerHandler },
   { method: "POST", path: "/v1/auth/login", handler: loginHandler },
@@ -288,6 +346,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     );
   } catch (err) {
     console.error(`[local] handler error on ${method} ${pathname}:`, err);
+    const userId = userIdFromAuthHeader(
+      event.headers?.authorization ?? event.headers?.Authorization,
+    );
+    Sentry.captureException(err, {
+      tags: { route: `${method} ${pathname}` },
+      user: userId ? { id: userId } : undefined,
+    });
     res.writeHead(500, { "content-type": "application/json", ...CORS_HEADERS });
     res.end(
       JSON.stringify({
@@ -428,6 +493,13 @@ async function handleChatStream(
     }
   } catch (err) {
     console.error(`[local] stream*Core error on ${pathname}:`, err);
+    const userId = userIdFromAuthHeader(
+      event.headers?.authorization ?? event.headers?.Authorization,
+    );
+    Sentry.captureException(err, {
+      tags: { route: `STREAM ${pathname}` },
+      user: userId ? { id: userId } : undefined,
+    });
     if (!headWritten) {
       res.writeHead(500, { "content-type": "application/json" });
       headWritten = true;
@@ -463,6 +535,7 @@ async function seedLocalData(): Promise<void> {
 const server = createServer((req, res) => {
   handle(req, res).catch((err) => {
     console.error("[local] unexpected error:", err);
+    Sentry.captureException(err, { tags: { route: "<top-level>" } });
     if (!res.headersSent) {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { type: "server_error", message: String(err) } }));
@@ -475,12 +548,14 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 /**
- * Subscription expiry / quota reset is handled entirely by newapi (V3
- * "newapi-as-truth"): when a subscription's `end_time` passes, newapi
- * marks the record as cancelled and rolls the user's `group` back to
- * "default" automatically. TokenBoss has no cron — `/v1/buckets` reads
- * subscription state live from newapi on each request.
+ * Subscription expiry / `end_time` rollover is handled by newapi (V3
+ * "newapi-as-truth"). TokenBoss adds one piece of cron-flavored work
+ * on top: snapshot every active subscription's `(amount_total,
+ * amount_used)` every 5 minutes so /console/history can render the
+ * "expire / reset" event pair newapi itself doesn't log. See
+ * `./lib/subscriptionPoller.ts`.
  */
+startSubscriptionPoller();
 
 server.listen(PORT, () => {
   console.log(`[local] TokenBoss backend listening on http://localhost:${PORT}`);

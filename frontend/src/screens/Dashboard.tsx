@@ -134,7 +134,10 @@ export default function Dashboard() {
         dashboardCache.buckets = b;
       }),
       // Recent-call list + balance hero totals — keep small.
-      api.getUsage({ limit: 4 }).then((r) => {
+      // limit 5 — five rows ≈ the height of the right-side 接入 panel,
+      // so the two columns end at roughly the same baseline without
+      // tricks like flex-1 stretching or scrolling overflow.
+      api.getUsage({ limit: 5 }).then((r) => {
         setUsage(r);
         dashboardCache.usage = r;
       }),
@@ -335,13 +338,22 @@ export default function Dashboard() {
             }
           />
         ) : (
-        <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5">
-          {/* Mobile: stack column (label/value → chip/days → CTA right-aligned).
-              sm+: revert to flex-row with wrap so wide screens get the
-              compact horizontal hero we always had. */}
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
-            {subBucket ? (
-              <>
+        <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5 overflow-hidden">
+          {/* Single-column hero with sectioned content:
+                · Subscription section — headline + tier + days + 续费,
+                  followed by the progress bar (when there's activity).
+                · (Optional) wallet section — separated by a dashed rule,
+                  shows 钱包余额 + 充值, with lime-stamp accent on labels
+                  to mark "this is a different bucket of money."
+              No grid, no equal-height stretch — content density is
+              continuous top-to-bottom, no awkward dead zones. Mobile
+              wraps each row naturally. */}
+
+          {/* ===== SUBSCRIPTION SECTION ===== */}
+          {subBucket ? (
+            <>
+              {/* Headline row: 今日剩 + tier chip + days + 续费 button */}
+              <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
                 <div className="flex items-baseline gap-3 flex-wrap">
                   <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
                     今日剩
@@ -369,6 +381,10 @@ export default function Dashboard() {
                   </span>
                 </div>
 
+                {/* Subscription-side action — pushed to the right edge
+                    on desktop with sm:ml-auto so the headline row spans
+                    the hero width naturally. 充值额度 link only when
+                    there's no wallet section below (first-topup entry). */}
                 {isTrial ? (
                   <Link
                     to="/pricing"
@@ -380,16 +396,15 @@ export default function Dashboard() {
                     选个套餐 →
                   </Link>
                 ) : (
-                  // Paid: two CTAs (充值 + 续费). Mobile: stack 续费 full-width
-                  // primary, 充值额度 as a small link to its right (single row,
-                  // no wasted horizontal space). Desktop: revert to inline.
-                  <div className="w-full flex items-center justify-end gap-4 sm:w-auto sm:ml-auto">
-                    <Link
-                      to="/billing/topup"
-                      className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
-                    >
-                      充值额度
-                    </Link>
+                  <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto sm:ml-auto">
+                    {!topupBucket && (
+                      <Link
+                        to="/billing/topup"
+                        className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
+                      >
+                        充值额度
+                      </Link>
+                    )}
                     <button
                       type="button"
                       onClick={() => setContactReason('renew')}
@@ -399,61 +414,96 @@ export default function Dashboard() {
                     </button>
                   </div>
                 )}
-              </>
-            ) : (
-              <>
-                <div className="flex items-baseline gap-3 flex-wrap">
-                  <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                    Agent 余额
+              </div>
+
+              {/* Progress bar — sits naturally below the headline,
+                  no longer pushed to a far bottom by mt-auto. */}
+              {periodTotal > 0 && !noActivity && (
+                <div className="flex items-center gap-3 mt-3 sm:mt-3.5">
+                  <div className="flex-1 h-2.5 bg-black/30 border border-white/30 rounded overflow-hidden">
+                    <div
+                      className={`h-full ${periodFillColor} transition-all duration-300`}
+                      style={{ width: `${periodRemainingPct}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
+                    剩 {Math.round(periodRemainingPct)}%
                   </span>
+                </div>
+              )}
+            </>
+          ) : (
+            // No active subscription branch. When wallet credits exist
+            // we still show "未开通套餐" + 开通 CTA at the top, then a
+            // wallet section follows below the divider. When neither
+            // exists, this is just the legacy "Agent 余额 $0" hero.
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
+                  {topupBucket ? '未开通套餐' : 'Agent 余额'}
+                </span>
+                {!topupBucket && (
                   <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
                     <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
                     {balanceUsd.toFixed(4)}
                   </span>
-                </div>
-
-                <div className="w-full flex flex-col-reverse items-stretch sm:flex-row sm:items-center sm:w-auto sm:ml-auto gap-2 sm:gap-4">
+                )}
+              </div>
+              <div className="flex flex-col-reverse items-stretch sm:flex-row sm:items-center gap-2 sm:gap-4 w-full sm:w-auto sm:ml-auto">
+                {!topupBucket && (
                   <Link
                     to="/billing/topup"
                     className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0 text-center sm:text-left"
                   >
                     充值额度
                   </Link>
-                  <Link
-                    to="/pricing"
-                    className={
-                      slockBtn('secondary') +
-                      ' w-full text-center sm:w-auto'
-                    }
-                  >
-                    开通套餐 →
-                  </Link>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Mini progress bar — only when there's a sub AND the user has
-              actually called something. Before the first call there's
-              nothing meaningful to visualize (an empty 0% bar overlaps
-              with the "等 Agent 第一笔调用…" placeholder below in saying
-              the same thing). */}
-          {subBucket && periodTotal > 0 && !noActivity && (
-            // Two-tone bar with threshold-colored fill + a mono readout
-            // on the right. Container is bg-black/30 (dark on accent-orange)
-            // so the white/yellow/red fill always reads as a distinct mass,
-            // not a near-invisible gradient. The "剩 X%" number gives users
-            // an exact sense of where they are without parsing bar length.
-            <div className="mt-4 flex items-center gap-3">
-              <div className="flex-1 h-2.5 bg-black/30 border border-white/30 rounded overflow-hidden">
-                <div
-                  className={`h-full ${periodFillColor} transition-all duration-300`}
-                  style={{ width: `${periodRemainingPct}%` }}
-                />
+                )}
+                <Link
+                  to="/pricing"
+                  className={slockBtn('secondary') + ' w-full text-center sm:w-auto'}
+                >
+                  开通套餐 →
+                </Link>
               </div>
-              <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
-                剩 {Math.round(periodRemainingPct)}%
-              </span>
+            </div>
+          )}
+
+          {/* ===== WALLET BAR — full-bleed dark band at the hero bottom.
+              Negative margins on left/right/bottom make the panel span
+              the full hero width (eating the hero's own padding) and
+              flush against the rounded bottom corners. Hero has
+              overflow-hidden so the bar gets clipped to the rounded
+              shape automatically — no need to mirror border-radius
+              here. The black band gives the wallet its own visual
+              territory: subscription on top (orange), wallet on
+              bottom (ink), separated by their inherent color contrast
+              instead of an explicit divider line. */}
+          {topupBucket && (
+            <div className="mt-4 sm:mt-5 -mx-5 sm:-mx-7 -mb-4 sm:-mb-5 bg-ink border-t-2 border-ink px-5 py-3 sm:px-7 sm:py-3.5 flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold text-lime-stamp">
+                  钱包余额
+                </span>
+                <span className="font-mono text-[26px] sm:text-[30px] font-bold leading-none text-white">
+                  <span className="text-[13px] sm:text-[15px] opacity-70 align-top mr-0.5">$</span>
+                  {(topupBucket.totalRemainingUsd ?? 0).toFixed(2)}
+                </span>
+              </div>
+              <Link
+                to="/billing/topup"
+                className={
+                  'inline-flex items-center justify-center gap-1.5 ' +
+                  'border-2 border-lime-stamp bg-lime-stamp text-lime-stamp-ink ' +
+                  'rounded-md font-bold tracking-tight whitespace-nowrap ' +
+                  'px-5 py-2.5 text-[14px] ' +
+                  'shadow-[2px_2px_0_0_#365314] ' +
+                  'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#365314] ' +
+                  'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#365314] ' +
+                  'transition-all w-full sm:w-auto sm:ml-auto text-center'
+                }
+              >
+                充值 →
+              </Link>
             </div>
           )}
         </section>
@@ -461,26 +511,9 @@ export default function Dashboard() {
 
         {/* MAIN COL */}
         <div className="space-y-5">
-          {/* Total balance — only shown when the user has BOTH a sub AND
-              wallet topup. In that case the hero shows today's allowance
-              (sub-bound) but the user also has accrued topup that won't
-              expire — this card surfaces the "your total walking-around
-              money" so they don't think today's number is everything.
-              For sub-only users, balance ≈ today's allowance, so this
-              card would just be a confusing duplicate. */}
-          {subBucket && topupBucket && (
-            <section className={`${card} p-4 flex items-center gap-3 flex-wrap`}>
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold flex-shrink-0">
-                Agent 余额
-              </span>
-              <span className="font-mono text-[16px] font-bold text-ink">
-                ${balanceUsd.toFixed(4)}
-              </span>
-              <span className="font-mono text-[11px] text-[#A89A8D] flex-1 min-w-0">
-                总可用 ≈ 订阅剩余 + 充值余量
-              </span>
-            </section>
-          )}
+          {/* (Total-balance summary card moved into the hero's wallet zone
+              — see RIGHT ZONE in the section above. Single source of truth
+              for "user has wallet credits beyond the subscription".) */}
 
           {/* Today stats — full numbers only after the first call has
               landed. Before that, an empty 0 / $0 grid feels like a
@@ -507,19 +540,20 @@ export default function Dashboard() {
                   <div className={`${card} p-4`}>
                     <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
                     <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
-                    <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
+                    <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次 · 近 30 天</div>
                   </div>
                   <div className={`${card} p-4`}>
                     <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
                     <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
+                    <div className="font-mono text-[11px] text-[#A89A8D] mt-1">近 30 天</div>
                   </div>
                 </div>
               </section>
 
-              {/* Recent usage — moved out of the side col so the right
-                  side stays purely "接入 / AGENTS / API KEY". The single
-                  "查看全部 →" on this section's header replaces the
-                  prior separate "查看完整用量" link under the stat grid. */}
+              {/* Recent usage — 5 rows is calibrated to roughly match
+                  the right-side 接入 panel's height on desktop, so the
+                  two columns end at the same baseline without ad-hoc
+                  flex/scroll mechanics. */}
               <section>
                 <SectionLabel
                   action={
@@ -531,7 +565,7 @@ export default function Dashboard() {
                   最近使用
                 </SectionLabel>
                 <div className={`${card} overflow-hidden`}>
-                  {usage.records?.slice(0, 4).map((r) => (
+                  {usage.records?.slice(0, 5).map((r) => (
                     <UsageRow
                       key={r.id}
                       variant="mobile"
@@ -589,9 +623,15 @@ export default function Dashboard() {
             {/* divider */}
             <div className="my-4 border-t-2 border-ink/10" />
 
-            {/* API KEY sub-section */}
-            <div className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D] mb-1">
-              API KEY
+            {/* API KEY sub-section. The right-side BaseUrlChip surfaces the
+                OpenAI-compatible endpoint so a user copying their key on the
+                same screen also sees the URL they need to paste it into —
+                avoids a trip to /install/manual just to find the base URL. */}
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="font-mono text-[9.5px] font-bold tracking-[0.16em] uppercase text-[#A89A8D]">
+                API KEY
+              </span>
+              <BaseUrlChip />
             </div>
             <APIKeyList
               keys={keys}
@@ -628,6 +668,50 @@ export default function Dashboard() {
         onDeleted={handleDeleted}
       />
     </div>
+  );
+}
+
+/**
+ * Compact one-click copy of the OpenAI-compatible base URL. Lives next to
+ * the API KEY label so a user who has just copied their key also has the
+ * other half of the config (base URL) visible and grabbable in one move.
+ *
+ * accent-color flash on copy mirrors APIKeyList's copy button so the
+ * "did it work?" feedback is consistent across the whole screen.
+ */
+function BaseUrlChip() {
+  const url = 'https://api.tokenboss.co/v1';
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — silently no-op; the URL is visible inline */
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label="复制 base URL"
+      className={
+        'flex-shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded border-2 ' +
+        'font-mono text-[10px] tracking-tight transition-colors ' +
+        (copied
+          ? 'bg-accent border-accent text-white'
+          : 'bg-white border-ink text-ink hover:bg-bg')
+      }
+    >
+      <span className="font-mono">{copied ? '✓ 已复制' : 'api.tokenboss.co/v1'}</span>
+      {!copied && (
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <rect x="3.5" y="3.5" width="6" height="7" rx="1" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M2 7.5V2.5C2 2.22 2.22 2 2.5 2H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )}
+    </button>
   );
 }
 

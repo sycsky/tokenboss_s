@@ -117,21 +117,21 @@ export default function Settings() {
           <div className="grid grid-cols-2 gap-0">
             <div className="border-r-2 border-ink/10 pr-5">
               <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
-                总消耗
+                消耗
               </div>
               <div className="font-mono text-[28px] font-bold leading-none text-ink">
                 ${(stats.consumed ?? 0).toFixed(4)}
               </div>
-              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">自注册以来</div>
+              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">近 30 天</div>
             </div>
             <div className="pl-5">
               <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
-                总调用
+                调用
               </div>
               <div className="font-mono text-[28px] font-bold leading-none text-ink">
                 {stats.calls ?? 0}
               </div>
-              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">次</div>
+              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">次 · 近 30 天</div>
             </div>
           </div>
         </div>
@@ -145,12 +145,8 @@ export default function Settings() {
             onClick={() => setRedeemOpen(true)}
           />
           <ActionCard
-            title="联系客服"
-            hint="微信 / 工单 · 工作日 9-21"
-          />
-          <ActionCard
             title="退出登录"
-            hint="下次需重新输入邮箱与密码"
+            hint="下次需用邮箱验证码重新登录"
             danger
             onClick={logout}
           />
