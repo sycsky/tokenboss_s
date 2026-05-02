@@ -105,6 +105,18 @@ describe('POST /v1/keys', () => {
     ) as APIGatewayProxyStructuredResultV2;
     expect(res.statusCode).toBe(400);
   });
+
+  it.each([1.5, '30', true, 36501] as const)(
+    'rejects expiresInDays = %p with 400',
+    async (val) => {
+      const userId = `u_bad_${Math.random().toString(36).slice(2, 8)}`;
+      await seedUser(userId);
+      const res = await createKeyHandler(
+        makeAuthedEvent(userId, { label: 'bad', expiresInDays: val }),
+      ) as APIGatewayProxyStructuredResultV2;
+      expect(res.statusCode).toBe(400);
+    },
+  );
 });
 
 describe('GET /v1/keys', () => {

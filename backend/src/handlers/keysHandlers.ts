@@ -180,12 +180,13 @@ export const createKeyHandler = async (
     if (
       typeof body.expiresInDays !== "number" ||
       !Number.isInteger(body.expiresInDays) ||
-      body.expiresInDays < 1
+      body.expiresInDays < 1 ||
+      body.expiresInDays > 36500
     ) {
       return jsonError(
         400,
         "invalid_request_error",
-        "expiresInDays must be a positive integer or null.",
+        "expiresInDays must be a positive integer (≤ 36500) or null.",
       );
     }
     const seconds = Math.floor(Date.now() / 1000) + body.expiresInDays * 86400;
