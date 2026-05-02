@@ -359,11 +359,13 @@ export function RevealKeyModal({
 }) {
   const [copiedTarget, setCopiedTarget] = useState<'key' | 'cmd' | null>(null);
   const [everCopied, setEverCopied] = useState(false);
+  const [clipboardFailed, setClipboardFailed] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setCopiedTarget(null);
     setEverCopied(false);
+    setClipboardFailed(false);
   }, [open]);
 
   if (!created) return null;
@@ -378,12 +380,18 @@ export function RevealKeyModal({
       await navigator.clipboard.writeText(text);
       setCopiedTarget(target);
       setEverCopied(true);
+      setClipboardFailed(false);
       setTimeout(
         () => setCopiedTarget((t) => (t === target ? null : t)),
         1500,
       );
     } catch {
-      /* clipboard blocked — user can long-press to select on mobile */
+      // Clipboard API unavailable / permission denied / non-secure
+      // context. Don't trap the user — surface the failure inline and
+      // give them a manual escape. The plaintext is right above in a
+      // selectable text box; they can long-press / select-all + copy
+      // and then click "我已手动保存" to unblock the ack button.
+      setClipboardFailed(true);
     }
   }
 
@@ -445,6 +453,33 @@ export function RevealKeyModal({
           {copiedTarget === 'cmd' ? '已复制 ✓' : '复制完整安装命令'}
         </button>
       </div>
+
+      {/* Clipboard fallback. Triggered if navigator.clipboard.writeText
+          rejects (permission denied, non-secure context, some mobile
+          WebViews). Without this branch, ack stays disabled forever and
+          the user is trapped — there's no ×, ESC, or backdrop close. */}
+      {clipboardFailed && (
+        <div className="border-2 border-ink rounded-md bg-red-soft px-3 py-2.5 mb-4">
+          <div className="text-[12.5px] font-bold text-red-ink mb-1">
+            自动复制不可用
+          </div>
+          <div className="text-[12px] text-[#6B5E52] leading-relaxed mb-2">
+            浏览器拒绝了剪贴板写入。请手动选中上方 Key 文本并复制，然后点下面的按钮解锁关闭。
+          </div>
+          <button
+            type="button"
+            onClick={() => setEverCopied(true)}
+            className={
+              'px-3 py-1.5 bg-white text-ink font-bold text-[12px] border-2 border-ink rounded ' +
+              'shadow-[2px_2px_0_0_#1C1917] ' +
+              'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+              'transition-all'
+            }
+          >
+            我已手动复制保存
+          </button>
+        </div>
+      )}
 
       {/* Acknowledge button — disabled until at least one copy fires.
           Hint below tells the user why it's disabled. */}

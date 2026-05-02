@@ -26,6 +26,27 @@ import {
   type UserProfile,
 } from "./api.js";
 
+/**
+ * Drop every `tb_key_v1:*` entry from localStorage. The previous release
+ * cached plaintext API keys per (email, keyId) — the new flow has no
+ * such cache, so any leftover entries are stale plaintext that we'd
+ * rather not leave sitting there. Idempotent: a no-op once cleared.
+ */
+function purgeLegacyKeyCache(): void {
+  try {
+    const toDelete: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("tb_key_v1:") || k === "tb_last_email")) {
+        toDelete.push(k);
+      }
+    }
+    toDelete.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* private mode / disabled storage — nothing to clean */
+  }
+}
+
 interface AuthState {
   /** undefined while we're still hydrating from localStorage + /v1/me. */
   user: UserProfile | null | undefined;
@@ -82,6 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // On mount: if we have a stored token, fetch /me to validate it and
   // load the profile. If no token, short-circuit to "not signed in".
   useEffect(() => {
+    // One-shot migration: the previous release wrote per-(email, keyId)
+    // plaintext API keys to localStorage under `tb_key_v1:*`. The new
+    // flow doesn't write or read those, so any leftover entries are
+    // stale plaintext that should be wiped — running on every mount is
+    // fine, after the first cleanup it's a no-op.
+    purgeLegacyKeyCache();
+
     let cancelled = false;
     const token = getStoredSession();
     if (!token) {

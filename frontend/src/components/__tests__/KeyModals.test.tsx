@@ -84,6 +84,34 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
     expect(screen.getByText(/请先复制 Key/)).toBeInTheDocument();
   });
 
+  it('clipboard failure surfaces a fallback path so the user is never trapped', async () => {
+    // Simulate a denied / unavailable clipboard.
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockRejectedValue(new Error('NotAllowedError')),
+      },
+    });
+    const onClose = vi.fn();
+    render(
+      <RevealKeyModal open={true} onClose={onClose} created={sample} />,
+    );
+    expect(screen.getByText('我已保存好，关闭')).toBeDisabled();
+
+    fireEvent.click(screen.getByText('复制 API Key'));
+
+    // After the rejection, the inline fallback block + manual button appear.
+    await vi.waitFor(() => {
+      expect(screen.getByText('自动复制不可用')).toBeInTheDocument();
+    });
+    expect(screen.getByText('我已手动复制保存')).toBeInTheDocument();
+
+    // Clicking the manual button unblocks ack; ack then closes.
+    fireEvent.click(screen.getByText('我已手动复制保存'));
+    expect(screen.getByText('我已保存好，关闭')).not.toBeDisabled();
+    fireEvent.click(screen.getByText('我已保存好，关闭'));
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('after a successful copy, ack button enables and closes on click', async () => {
     const onClose = vi.fn();
     render(
