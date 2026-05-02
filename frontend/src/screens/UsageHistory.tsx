@@ -145,7 +145,8 @@ export default function UsageHistory() {
                 time={formatRecordTime(r.createdAt)}
                 eventType={r.eventType}
                 model={formatModelName(r.model)}
-                source={r.source ? formatSource(r.source) : (r.keyHint ?? undefined)}
+                source={r.source ? formatSource(r.source) : undefined}
+                keyHint={r.keyHint ?? undefined}
                 amountUsd={r.amountUsd}
               />
             ))
@@ -181,7 +182,8 @@ export default function UsageHistory() {
                     // → formatSource displays the brand name. Other endpoints
                     // (embeddings/audio etc.) still return source=null →
                     // right-hand keyHint fallback (legacy path, commit 1be9be2).
-                    source={r.source ? formatSource(r.source) : (r.keyHint ?? undefined)}
+                    source={r.source ? formatSource(r.source) : undefined}
+                keyHint={r.keyHint ?? undefined}
                     amountUsd={r.amountUsd}
                   />
                 ))

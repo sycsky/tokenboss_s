@@ -70,9 +70,21 @@ export function resolveSource(headers: Record<string, string | undefined>): Reso
     return undefined;
   };
 
-  return (
-    parseSourceHeader(get('x-source')) ??
-    parseUaSource(get('user-agent')) ??
-    { slug: 'other', method: 'fallback' }
-  );
+  const fromHeader = parseSourceHeader(get('x-source'));
+  if (fromHeader) return fromHeader;
+
+  const fromUa = parseUaSource(get('user-agent'));
+  if (fromUa) return fromUa;
+
+  // Diagnostic log — when attribution falls through to 'other', record
+  // the User-Agent so missing patterns are visible in the Zeabur logs.
+  // Sample the first 200 chars to avoid log spam from giant UAs.
+  // Drop when we've solidified UA coverage across all major Agent clients.
+  const ua = get('user-agent');
+  if (ua) {
+    console.info('[source-attribution] fallback=other', {
+      ua: ua.slice(0, 200),
+    });
+  }
+  return { slug: 'other', method: 'fallback' };
 }
