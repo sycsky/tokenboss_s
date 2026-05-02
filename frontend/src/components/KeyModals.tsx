@@ -336,8 +336,16 @@ export function CreateKeyModal({
  * Once closed, the user can never see this value again from our UI.
  *
  * No × button, no backdrop close, no ESC — the ack button is the only
- * exit. Clipboard copy is a separate action; ack writes cache + closes.
+ * exit. The acknowledge button is itself disabled until the user has
+ * copied something at least once (prevents misclick-and-lose-key).
+ *
+ * Two copy options:
+ *   - 复制 API Key — just the bare `sk-…` value
+ *   - 复制完整安装命令 — both lines of the Dashboard install spell, ready
+ *     to paste into an Agent's chat to bootstrap the client
  */
+const SPELL_CMD = 'set up tokenboss.co/skill.md';
+
 export function RevealKeyModal({
   open,
   onClose,
@@ -349,23 +357,33 @@ export function RevealKeyModal({
   created: CreatedProxyKey | null;
   email: string | undefined;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<'key' | 'cmd' | null>(null);
+  const [everCopied, setEverCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setCopied(false);
+    setCopiedTarget(null);
+    setEverCopied(false);
   }, [open]);
 
   if (!created) return null;
 
-  async function handleCopy() {
+  async function handleCopy(target: 'key' | 'cmd') {
     if (!created) return;
+    const text =
+      target === 'key'
+        ? created.key
+        : `${SPELL_CMD}\nTOKENBOSS_API_KEY=${created.key}`;
     try {
-      await navigator.clipboard.writeText(created.key);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopiedTarget(target);
+      setEverCopied(true);
+      setTimeout(
+        () => setCopiedTarget((t) => (t === target ? null : t)),
+        1500,
+      );
     } catch {
-      /* clipboard blocked — user can long-press to select */
+      /* clipboard blocked — user can long-press to select on mobile */
     }
   }
 
@@ -389,57 +407,76 @@ export function RevealKeyModal({
 
   return (
     <StickyModalShell open={open} tag="CREATED" title="API Key 已创建">
-      <div className="bg-bg border-2 border-ink rounded-md p-3 mb-4">
+      {/* The most-prominent message. Comes BEFORE the value box so users
+          read it before instinctively clicking Copy. */}
+      <div className="border-2 border-ink rounded-md bg-amber-50 p-3.5 mb-4">
+        <div className="text-[15px] font-bold text-ink leading-snug mb-1">
+          ⚠️ 这个 Key 只显示这一次
+        </div>
+        <div className="text-[12.5px] text-[#6B5E52] leading-relaxed">
+          关闭弹窗后将永远无法再次查看。如果丢失，<strong>唯一的办法是删掉它，再创建一个新的</strong>。
+        </div>
+      </div>
+
+      {/* Plaintext value box */}
+      <div className="bg-bg border-2 border-ink rounded-md p-3 mb-3">
         <div className="font-mono text-[12px] text-ink [word-break:break-all] leading-snug">
           {created.key}
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={handleCopy}
-        className={
-          'w-full px-4 py-2.5 bg-ink text-white font-bold text-[13.5px] border-2 border-ink rounded ' +
-          'shadow-[3px_3px_0_0_#E8692A] flex items-center justify-center gap-2 ' +
-          'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
-          'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#E8692A] ' +
-          'transition-all'
-        }
-      >
-        {copied ? '已复制 ✓' : '复制 API Key'}
-      </button>
-
-      <div className="mt-4 border-2 border-ink rounded-md bg-amber-50 p-3 space-y-2">
-        <div className="text-[12.5px] font-bold text-ink leading-snug">
-          ⚠️ 立即保存这个 Key
-        </div>
-        <div className="text-[12px] text-[#6B5E52] leading-relaxed">
-          此 Key 仅显示这一次。关闭后将永远无法再次查看。
-        </div>
-        <div className="text-[12.5px] font-bold text-ink leading-snug pt-1">
-          💾 缓存在这台设备
-        </div>
-        <div className="text-[12px] text-[#6B5E52] leading-relaxed">
-          我们会把这个 Key 缓存在浏览器 localStorage 里，让 Dashboard 的安装咒语继续可用。
-          退出登录、清除浏览器数据或换设备时，缓存就消失 —— 届时唯一的办法是创建一个新 Key。
-        </div>
-      </div>
-
-      <div className="mt-5">
+      {/* Two copy options side by side */}
+      <div className="grid grid-cols-2 gap-2 mb-5">
         <button
           type="button"
-          onClick={handleAcknowledge}
+          onClick={() => handleCopy('key')}
           className={
-            'w-full px-4 py-2.5 bg-white text-ink font-bold text-[13.5px] border-2 border-ink rounded ' +
+            'px-3 py-2.5 bg-white text-ink font-bold text-[12.5px] border-2 border-ink rounded ' +
             'shadow-[2px_2px_0_0_#1C1917] ' +
             'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
             'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
             'transition-all'
           }
         >
-          我已保存好，关闭
+          {copiedTarget === 'key' ? '已复制 ✓' : '复制 API Key'}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleCopy('cmd')}
+          className={
+            'px-3 py-2.5 bg-ink text-white font-bold text-[12.5px] border-2 border-ink rounded ' +
+            'shadow-[2px_2px_0_0_#E8692A] ' +
+            'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
+            'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#E8692A] ' +
+            'transition-all'
+          }
+        >
+          {copiedTarget === 'cmd' ? '已复制 ✓' : '复制完整安装命令'}
         </button>
       </div>
+
+      {/* Acknowledge button — disabled until at least one copy fires.
+          Hint below tells the user why it's disabled. */}
+      <button
+        type="button"
+        onClick={handleAcknowledge}
+        disabled={!everCopied}
+        className={
+          'w-full px-4 py-2.5 bg-white text-ink font-bold text-[13.5px] border-2 border-ink rounded ' +
+          'shadow-[2px_2px_0_0_#1C1917] ' +
+          'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+          'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+          'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[2px_2px_0_0_#1C1917] ' +
+          'transition-all'
+        }
+      >
+        我已保存好，关闭
+      </button>
+      {!everCopied && (
+        <p className="font-mono text-[10.5px] text-[#A89A8D] text-center mt-2">
+          请先复制 Key，再关闭
+        </p>
+      )}
     </StickyModalShell>
   );
 }

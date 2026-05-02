@@ -642,9 +642,7 @@ export default function Dashboard() {
               }
             />
             {defaultKey && cachedDefaultPlain && (
-              <p className="font-mono text-[10.5px] text-[#A89A8D] mt-1">
-                💾 本地缓存 · 退出登录后将消失
-              </p>
+              <CacheReasonHint />
             )}
             {/* Cache miss state intentionally has NO extra CTA here —
                 the 「+ 创建 API Key」 button below is the same action.
@@ -717,6 +715,43 @@ export default function Dashboard() {
  * accent-color flash on copy mirrors APIKeyList's copy button so the
  * "did it work?" feedback is consistent across the whole screen.
  */
+/**
+ * The install spell shows the FULL plaintext of the user's default Key.
+ * That's only possible because we have a localStorage cache of it on this
+ * device — the platform never re-fetches plaintext from the server.
+ *
+ * Users who notice this and wonder "wait, didn't you say show-once?"
+ * deserve a quick explanation. A single ⓘ icon is unobtrusive; click
+ * toggles a small note. Hover (desktop) shows the same via title.
+ */
+function CacheReasonHint() {
+  const [open, setOpen] = useState(false);
+  const summary = '本地缓存 · 退出登录后将消失';
+  const detail =
+    '这台设备的浏览器 localStorage 里缓存了一份明文，所以这里能直接显示完整 Key。' +
+    '退出登录、清除浏览器数据或换设备时，缓存就消失 —— 届时唯一的办法是创建一个新 Key。';
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title={detail}
+        aria-label={summary + '（点击查看详情）'}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 font-mono text-[10.5px] text-[#A89A8D] hover:text-ink transition-colors"
+      >
+        <span aria-hidden="true" className="text-[11px]">ⓘ</span>
+        <span>{summary}</span>
+      </button>
+      {open && (
+        <p className="font-mono text-[10.5px] text-[#6B5E52] leading-relaxed mt-1.5 max-w-[420px]">
+          {detail}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function BaseUrlChip() {
   const url = 'https://api.tokenboss.co/v1';
   const [copied, setCopied] = useState(false);

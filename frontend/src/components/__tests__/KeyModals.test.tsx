@@ -18,14 +18,23 @@ const sample = {
 };
 
 describe('RevealKeyModal — show-once + cache-on-confirm', () => {
-  it('renders the plaintext and the transparency message', () => {
+  beforeEach(() => {
+    // jsdom needs a clipboard mock — navigator.clipboard.writeText is
+    // undefined by default and our copy buttons rely on it.
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it('renders the plaintext + the prominent show-once warning', () => {
     render(
       <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
     );
     expect(screen.getByText('sk-PLAINTEXT-FOREVER')).toBeInTheDocument();
-    expect(screen.getByText(/仅显示这一次/)).toBeInTheDocument();
-    expect(screen.getByText(/缓存在这台设备/)).toBeInTheDocument();
-    expect(screen.getByText(/退出登录/)).toBeInTheDocument();
+    expect(screen.getByText(/这个 Key 只显示这一次/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/唯一的办法是删掉它，再创建一个新的/),
+    ).toBeInTheDocument();
   });
 
   it('does NOT close on backdrop click', () => {
@@ -46,12 +55,51 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
     expect(screen.queryByLabelText('关闭')).toBeNull();
   });
 
-  it('writes the plaintext to cache and closes when "我已保存好" is clicked', () => {
+  it('renders BOTH copy buttons — bare Key + full install command', () => {
+    render(
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+    );
+    expect(screen.getByText('复制 API Key')).toBeInTheDocument();
+    expect(screen.getByText('复制完整安装命令')).toBeInTheDocument();
+  });
+
+  it('「复制完整安装命令」 puts both lines on the clipboard', async () => {
+    render(
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+    );
+    fireEvent.click(screen.getByText('复制完整安装命令'));
+    await vi.waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        'set up tokenboss.co/skill.md\nTOKENBOSS_API_KEY=sk-PLAINTEXT-FOREVER',
+      ),
+    );
+  });
+
+  it('ack button is DISABLED until at least one copy fires', () => {
+    render(
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+    );
+    expect(screen.getByText('我已保存好，关闭')).toBeDisabled();
+    expect(screen.getByText(/请先复制 Key/)).toBeInTheDocument();
+  });
+
+  it('after a successful copy, ack button enables and writes cache + closes on click', async () => {
     const onClose = vi.fn();
     const setSpy = vi.spyOn(keyCache, 'setCachedKey');
     render(
       <RevealKeyModal open={true} onClose={onClose} created={sample} email="alice@x.com" />,
     );
+    // Initially disabled.
+    expect(screen.getByText('我已保存好，关闭')).toBeDisabled();
+    // Click any copy button.
+    fireEvent.click(screen.getByText('复制 API Key'));
+    // Wait for clipboard.writeText to resolve and re-render.
+    await vi.waitFor(() =>
+      expect(screen.getByText('我已保存好，关闭')).not.toBeDisabled(),
+    );
+    // The "请先复制 Key" hint should be gone.
+    expect(screen.queryByText(/请先复制 Key/)).toBeNull();
+    // Now ack works.
     fireEvent.click(screen.getByText('我已保存好，关闭'));
     expect(setSpy).toHaveBeenCalledWith('alice@x.com', 'kid-1', 'sk-PLAINTEXT-FOREVER');
     expect(onClose).toHaveBeenCalled();
