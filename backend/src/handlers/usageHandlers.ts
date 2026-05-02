@@ -216,6 +216,15 @@ export const usageHandler = async (
   }
   const username = newapiUsername(userId);
 
+  // Probe newapi for non-consume log types (topup / manage / system /
+  // sub-reset) once per process. Goal: see if reset events live in
+  // newapi-side logs (cheap to consume) before building our own
+  // tracking. Drop once a pattern is identified.
+  if (!_newapiLogTypesProbed) {
+    _newapiLogTypesProbed = true;
+    void probeNewapiLogTypes(username);
+  }
+
   const qs = event.queryStringParameters ?? {};
   const startTs = isoToTimestamp(qs.from);
   const endTs = isoToTimestamp(qs.to);
@@ -418,4 +427,40 @@ function buildHourly24h(
 
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
+}
+
+// ---------- newapi log type probe (one-shot diagnostic) ----------
+
+/** Latched so we only emit one round of probe samples per process boot,
+ *  not on every /v1/usage request. Set once in getUsageHandler. */
+let _newapiLogTypesProbed = false;
+
+/** Probe newapi /api/log for non-consume log types we don't currently
+ *  consume — topup (1), manage (3), system (4), and any extras (5).
+ *  Goal is to see whether subscription-reset events land in any of
+ *  these natively (saves us from building local reset tracking).
+ *  Logs first 3 entries per type so we can see field shapes from the
+ *  Zeabur log explorer. Drop once we know which type holds resets. */
+async function probeNewapiLogTypes(username: string): Promise<void> {
+  for (const type of [1, 3, 4, 5]) {
+    try {
+      const res = await newapi.getLogs({ username, type, per_page: 5 });
+      console.info(
+        `[newapi-log-probe] type=${type} username=${username} total=${res.total}`,
+        {
+          sample: res.items.slice(0, 3).map((e) => ({
+            ts: e.created_at,
+            type: e.type,
+            content: typeof e.content === 'string' ? e.content.slice(0, 200) : e.content,
+            model: e.model_name,
+            quota: e.quota,
+          })),
+        },
+      );
+    } catch (err) {
+      console.warn(
+        `[newapi-log-probe] type=${type} failed: ${(err as Error).message}`,
+      );
+    }
+  }
 }
