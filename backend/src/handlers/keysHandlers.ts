@@ -148,6 +148,7 @@ export const listKeysHandler = async (
         label: t.name,
         createdAt: new Date(t.created_time * 1000).toISOString(),
         disabled: t.status !== 1,
+        expiresAt: t.expired_time === -1 ? null : new Date(t.expired_time * 1000).toISOString(),
       })),
     });
   } catch (err) {
@@ -172,6 +173,27 @@ export const createKeyHandler = async (
   const rawLabel = typeof body.label === "string" ? body.label.trim() : "";
   const label = rawLabel ? rawLabel.slice(0, 64) : "default";
 
+  // expiresInDays: integer >= 1, or omitted/null = permanent.
+  let expiredTime = -1;
+  let expiresAtISO: string | null = null;
+  if (body.expiresInDays !== undefined && body.expiresInDays !== null) {
+    if (
+      typeof body.expiresInDays !== "number" ||
+      !Number.isInteger(body.expiresInDays) ||
+      body.expiresInDays < 1 ||
+      body.expiresInDays > 36500
+    ) {
+      return jsonError(
+        400,
+        "invalid_request_error",
+        "expiresInDays must be a positive integer (≤ 36500) or null.",
+      );
+    }
+    const seconds = Math.floor(Date.now() / 1000) + body.expiresInDays * 86400;
+    expiredTime = seconds;
+    expiresAtISO = new Date(seconds * 1000).toISOString();
+  }
+
   try {
     const session = await newapi.loginUser({
       username: newapiUsername(auth.userId),
@@ -181,6 +203,7 @@ export const createKeyHandler = async (
       session,
       name: label,
       unlimited_quota: true,
+      expired_time: expiredTime,
     });
     // Index the raw key's hash so chatProxyCore can resolve sk-xxx → userId
     // without storing the plaintext or hitting newapi on every request.
@@ -207,44 +230,8 @@ export const createKeyHandler = async (
       label,
       createdAt: new Date().toISOString(),
       disabled: false,
+      expiresAt: expiresAtISO,
     });
-  } catch (err) {
-    return handleNewapiError(err);
-  }
-};
-
-// ---------- GET /v1/keys/{keyId}/reveal ----------
-
-export const revealKeyHandler = async (
-  event: APIGatewayProxyEventV2,
-): Promise<APIGatewayProxyResultV2> => {
-  const auth = await requireSession(event);
-  if (isAuthFailure(auth)) {
-    return jsonError(auth.status, "authentication_error", auth.message, auth.code);
-  }
-  const guard = requireNewapiLink(auth);
-  if (guard) return guard;
-
-  const rawId = event.pathParameters?.keyId;
-  const tokenId = rawId ? Number(rawId) : NaN;
-  if (!Number.isFinite(tokenId)) {
-    return jsonError(400, "invalid_request_error", "Missing or invalid key id in path.");
-  }
-
-  try {
-    const session = await newapi.loginUser({
-      username: newapiUsername(auth.userId),
-      password: auth.user.newapiPassword as string,
-    });
-    // No second listUserTokens ownership check: the session cookie above
-    // is scoped to this user, and newapi's reveal endpoint enforces that
-    // the token belongs to the authenticated session — it returns
-    // 403/404 for tokens owned by another user. The previous extra list
-    // call was defense-in-depth that doubled our newapi roundtrips on
-    // every reveal; on a rate-limited upstream this was the dominant
-    // source of 429s during /console mounts.
-    const key = await newapi.revealToken(session, tokenId);
-    return jsonResponse(200, { keyId: tokenId, key });
   } catch (err) {
     return handleNewapiError(err);
   }

@@ -134,13 +134,12 @@ export function isExpired(k: { expiresAt: string | null }): boolean {
        ├ 永久不过期（默认）
        ├ 30 天
        ├ 7 天
-       ├ 24 小时
-       └ 自定义...
+       └ 24 小时
 
 [ 取消 ]   [ 创建 ]
 ```
 
-「自定义」展开一个日期选择器：UI 限制最小 1 天、软上限 1825 天（约 5 年，UI 默认值；用户可手输更长，后端不卡）。
+后端 `expiresInDays` 接受 1 ~ 36500 之间的整数（约 100 年硬上限，防止超出 `Number.MAX_SAFE_INTEGER` 产生垃圾 `expired_time`）。v1 不做自定义日期选择器——四个固定档覆盖 95% 场景；如果未来真需要更长或更细的粒度，再补 UI 即可。
 
 **3c. 创建结果弹窗（即 `Dashboard.tsx:281` 的 `justCreated` 分支）**
 

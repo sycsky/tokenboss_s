@@ -27,6 +27,7 @@ export const CHAT_COMPLETIONS_URL = `${CHAT_URL.replace(/\/$/, "")}/v1/chat/comp
 // ---------- session token storage ----------
 
 const SESSION_KEY = "tb_session";
+const LAST_EMAIL_KEY = "tb_last_email";
 
 export function getStoredSession(): string | null {
   try {
@@ -42,6 +43,32 @@ export function setStoredSession(token: string | null): void {
     else localStorage.removeItem(SESSION_KEY);
   } catch {
     /* private mode or disabled — session just won't persist */
+  }
+}
+
+/**
+ * Side-channel for the last-known email of the stored session. Written at
+ * login and cleared at logout so we know whose `tb_key_v1:*` cache to wipe
+ * when the JWT rejects on mount before /v1/me has hydrated `state.user`.
+ *
+ * Only written by the frontend; it's not auth material — the JWT is the
+ * authority. This is purely a "remember whose cache to nuke" hint.
+ */
+export function getStoredEmail(): string | null {
+  try {
+    return localStorage.getItem(LAST_EMAIL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredEmail(email: string | null): void {
+  try {
+    if (email) localStorage.setItem(LAST_EMAIL_KEY, email);
+    else localStorage.removeItem(LAST_EMAIL_KEY);
+  } catch {
+    /* private mode — best effort, a stale cache will linger but is
+       still scoped to this browser only */
   }
 }
 
@@ -148,6 +175,8 @@ export interface ProxyKeySummary {
   label?: string;
   createdAt: string;
   disabled?: boolean;
+  /** ISO timestamp when the key auto-expires. null = never expires. */
+  expiresAt: string | null;
 }
 
 export interface CreatedProxyKey {
@@ -157,6 +186,8 @@ export interface CreatedProxyKey {
   label?: string;
   createdAt: string;
   disabled?: boolean;
+  /** ISO timestamp when the key auto-expires. null = never expires. */
+  expiresAt: string | null;
 }
 
 export interface UsageRecordView {
@@ -390,18 +421,13 @@ export const api = {
   listKeys(): Promise<{ keys: ProxyKeySummary[] }> {
     return request<{ keys: ProxyKeySummary[] }>("/v1/keys");
   },
-  createKey(input: { label?: string }): Promise<CreatedProxyKey> {
+  createKey(input: { label?: string; expiresInDays?: number | null }): Promise<CreatedProxyKey> {
     return request<CreatedProxyKey>("/v1/keys", { method: "POST", body: input });
   },
   deleteKey(keyId: string): Promise<{ ok: true }> {
     return request<{ ok: true }>(`/v1/keys/${encodeURIComponent(keyId)}`, {
       method: "DELETE",
     });
-  },
-  revealKey(keyId: string): Promise<{ keyId: number; key: string }> {
-    return request<{ keyId: number; key: string }>(
-      `/v1/keys/${encodeURIComponent(keyId)}/reveal`,
-    );
   },
 
   // buckets

@@ -19,7 +19,8 @@ import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
-import { getCachedKey, setCachedKey } from '../lib/keyCache';
+import { getCachedKey, sweepCachedKeys } from '../lib/keyCache';
+import { isExpired } from '../lib/keyExpiry';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -121,6 +122,9 @@ export default function Dashboard() {
       setKeys(r.keys);
       dashboardCache.keys = r.keys;
       setKeysError(null);
+      // Drop any cached plaintext for keyIds that aren't in the list —
+      // those keys were deleted (possibly from another device).
+      sweepCachedKeys(user?.email, new Set(r.keys.map((k) => String(k.keyId))));
     } catch (e) {
       setKeysError((e as Error).message);
     }
@@ -250,21 +254,34 @@ export default function Dashboard() {
   //
   // The bottom API KEY list rows still reveal-on-click (see APIKeyList)
   // since those serve management, not the always-on copy spell.
-  const defaultKey = keys.find((k) => k.label === 'default') ?? keys[0];
+  // Pick the key the install spell will use. We prefer one whose plaintext
+  // is cached locally — that's the only kind the spell can actually display
+  // (post-Task-3, plaintext is never re-fetchable from the server). When
+  // no cached key exists, fall back to label=default → any usable key, so
+  // the cache-miss branch below can render its CTA.
+  //
+  // Without the cached-first preference, a user with an old uncached
+  // `default` who creates a fresh replacement (now cached) would still
+  // see the cache-miss CTA — the selection would keep landing on the
+  // old uncached row.
+  const usable = (k: typeof keys[number]) => !k.disabled && !isExpired(k);
+  const hasCache = (k: typeof keys[number]) =>
+    !!user?.email && !!getCachedKey(user.email, k.keyId);
+  const defaultKey =
+    keys.find((k) => k.label === 'default' && usable(k) && hasCache(k)) ??
+    keys.find((k) => usable(k) && hasCache(k)) ??
+    keys.find((k) => k.label === 'default' && usable(k)) ??
+    keys.find(usable);
   const cachedDefaultPlain =
     user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
-  const spellExtra = defaultKey
-    ? cachedDefaultPlain
+  // Only render the env line when we have actual plaintext from cache.
+  // On cache miss we deliberately suppress it — the masked value (e.g.
+  // sk-•••a4c2) reads like a real env line and could be skim-pasted into
+  // a client config that would then 401. The amber CTA below is the
+  // only path forward in that state.
+  const spellExtra =
+    defaultKey && cachedDefaultPlain
       ? `TOKENBOSS_API_KEY=${cachedDefaultPlain}`
-      : `TOKENBOSS_API_KEY=${defaultKey.key}`
-    : undefined;
-  const spellResolver =
-    defaultKey && !cachedDefaultPlain
-      ? async () => {
-          const { key } = await api.revealKey(defaultKey.keyId);
-          if (user?.email) setCachedKey(user.email, defaultKey.keyId, key);
-          return `TOKENBOSS_API_KEY=${key}`;
-        }
       : undefined;
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
@@ -602,7 +619,6 @@ export default function Dashboard() {
             <TerminalBlock
               cmd="set up tokenboss.co/skill.md"
               extra={spellExtra}
-              extraResolver={spellResolver}
               loading={keys.length === 0 && !keysError}
               prompt={
                 <>
@@ -613,6 +629,32 @@ export default function Dashboard() {
                 </>
               }
             />
+            {defaultKey && cachedDefaultPlain && (
+              <p className="font-mono text-[10.5px] text-[#A89A8D] mt-1">
+                💾 本地缓存 · 退出登录后将消失
+              </p>
+            )}
+
+            {defaultKey && !cachedDefaultPlain && (
+              <div className="mt-2 border-2 border-ink rounded-md bg-amber-50 p-3 text-[12.5px] leading-relaxed">
+                <div className="font-bold text-ink mb-1">📍 这台设备没有该 Key 的本地缓存</div>
+                <div className="text-[#6B5E52] mb-2">
+                  为了你的安全，明文不能在新设备上重新查看。
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  className={
+                    'px-3 py-1.5 bg-ink text-white font-bold text-[12px] border-2 border-ink rounded ' +
+                    'shadow-[2px_2px_0_0_#E8692A] ' +
+                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
+                    'transition-all'
+                  }
+                >
+                  为这台设备创建一个新 Key
+                </button>
+              </div>
+            )}
             <Link
               to="/install/manual"
               className="block mt-2.5 font-mono text-[11px] text-[#A89A8D] hover:text-ink transition-colors"
@@ -660,6 +702,7 @@ export default function Dashboard() {
         open={justCreated !== null}
         onClose={closeReveal}
         created={justCreated}
+        email={user?.email}
       />
       <DeleteKeyModal
         open={deleteTarget !== null}
