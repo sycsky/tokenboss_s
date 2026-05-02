@@ -59,8 +59,15 @@ export default function UsageHistory() {
     ]).finally(() => setLoading(false));
   }, []);
 
+  // Use hourStartMs (epoch ms) when present so the chart's X axis is in
+  // the user's local timezone — the legacy `hour` string is UTC, so a
+  // China user at 16:00 was seeing UTC "08:00" for the same hour. The
+  // string fallback is kept for the rare case the backend hasn't
+  // redeployed yet (during a rolling deploy window).
   const buckets: HourBucket[] = (data.hourly24h || []).map((h) => {
-    const hourNum = parseInt(h.hour.split(':')[0], 10);
+    const hourNum = h.hourStartMs != null
+      ? new Date(h.hourStartMs).getHours()
+      : parseInt(h.hour.split(':')[0], 10);
     return { hour: hourNum, consumeUsd: h.consumed };
   });
 

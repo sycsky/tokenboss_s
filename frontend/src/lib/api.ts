@@ -225,7 +225,14 @@ export interface UsageRecord {
 }
 
 export interface HourlyUsage {
+  /** Legacy — UTC hour string like "08:00". Kept for backward compat;
+   *  new clients should prefer `hourStartMs` and convert to local
+   *  timezone on the client. */
   hour: string;
+  /** Epoch ms of the hour bucket's start. Lets the client render the
+   *  hour label in the user's local timezone (`new Date(hourStartMs)
+   *  .getHours()`) instead of getting the backend's UTC string. */
+  hourStartMs?: number;
   consumed: number;
 }
 

@@ -367,13 +367,22 @@ export const usageHandler = async (
 
 // ---------- Hourly chart helpers ----------
 
-function emptyHourly24h(): { hour: string; consumed: number }[] {
+// Hour-bucket shape returned to the client. `hour` (UTC string) is kept
+// for backward compatibility with older bundles, but `hourStartMs` is
+// the canonical field — the frontend converts it to the user's local
+// timezone with `new Date(hourStartMs).getHours()` so the chart's X
+// axis matches the user's wall clock, not the server's UTC.
+type HourBucket = { hour: string; hourStartMs: number; consumed: number };
+
+function emptyHourly24h(): HourBucket[] {
   const now = new Date();
-  const out: { hour: string; consumed: number }[] = [];
+  const out: HourBucket[] = [];
   for (let i = 23; i >= 0; i--) {
     const hourStart = new Date(now.getTime() - i * 3600e3);
+    hourStart.setUTCMinutes(0, 0, 0);
     out.push({
       hour: `${hourStart.getUTCHours().toString().padStart(2, "0")}:00`,
+      hourStartMs: hourStart.getTime(),
       consumed: 0,
     });
   }
@@ -382,9 +391,9 @@ function emptyHourly24h(): { hour: string; consumed: number }[] {
 
 function buildHourly24h(
   entries: NewapiLogEntry[],
-): { hour: string; consumed: number }[] {
+): HourBucket[] {
   const now = Date.now();
-  const buckets: { hour: string; consumed: number }[] = [];
+  const buckets: HourBucket[] = [];
   for (let i = 23; i >= 0; i--) {
     const start = now - i * 3600e3;
     const hourStart = new Date(start);
@@ -400,6 +409,7 @@ function buildHourly24h(
     }
     buckets.push({
       hour: `${hourStart.getUTCHours().toString().padStart(2, "0")}:00`,
+      hourStartMs,
       consumed: round6(consumed),
     });
   }
