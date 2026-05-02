@@ -73,4 +73,36 @@ describe('APIKeyList', () => {
     expect(screen.getByText(/已过期 12 天/)).toBeInTheDocument();
     vi.useRealTimers();
   });
+
+  it('renders 已吊销 badge for disabled (newapi-side) keys without expiry', () => {
+    render(
+      <APIKeyList
+        keys={[baseKey({ disabled: true })]}
+        loadError={null}
+        keyStats={new Map()}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+      />,
+    );
+    expect(screen.getByText('已吊销')).toBeInTheDocument();
+    expect(screen.queryByText('已过期')).toBeNull();
+  });
+
+  it('prefers 已过期 badge over 已吊销 when a key is both expired AND disabled', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-13T12:00:00Z'));
+    const past = new Date('2026-05-01T12:00:00Z').toISOString();
+    render(
+      <APIKeyList
+        keys={[baseKey({ disabled: true, expiresAt: past })]}
+        loadError={null}
+        keyStats={new Map()}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+      />,
+    );
+    expect(screen.getByText('已过期')).toBeInTheDocument();
+    expect(screen.queryByText('已吊销')).toBeNull();
+    vi.useRealTimers();
+  });
 });
