@@ -68,5 +68,16 @@ export async function verifySessionHeader(
       message: "Session references a user that no longer exists.",
     };
   }
+  // tokenVersion gate: any token whose `tv` snapshot is older than the
+  // current user.tokenVersion was issued before a logout — reject it.
+  // Frontend already maps 401 invalid_session → clear localStorage, so
+  // we deliberately reuse that code instead of inventing a new one.
+  if ((user.tokenVersion ?? 0) !== claims.tv) {
+    return {
+      status: 401,
+      code: "invalid_session",
+      message: "Session token invalid or expired. Please log in again.",
+    };
+  }
   return { userId: user.userId, user };
 }

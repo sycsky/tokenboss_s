@@ -69,6 +69,10 @@ export interface SessionClaims {
   iat: number;
   /** Expiry (unix seconds). */
   exp: number;
+  /** Token version snapshot at sign time. Bumped server-side on logout
+   *  so all tokens carrying the old value are rejected. Defaults to 0
+   *  on legacy tokens issued before this field existed. */
+  tv: number;
 }
 
 function base64urlEncode(buf: Buffer): string {
@@ -87,31 +91,49 @@ function base64urlDecode(s: string): Buffer {
 
 function getSecret(): Buffer {
   const raw = process.env.SESSION_SECRET;
-  if (!raw || raw.length < 16) {
-    // Local dev fallback: a stable value so tokens survive `tsx watch`
-    // restarts. Lambda must set SESSION_SECRET explicitly via the SAM
-    // parameter — we crash loudly if it's missing at Lambda runtime.
-    if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-      return Buffer.from(
-        "tokenboss-local-dev-session-secret-32bytes-min",
-        "utf8",
+  // Production must have a real, non-default secret. We crash loudly
+  // rather than fall back to a hardcoded string — a fallback secret
+  // checked into source code allows trivial JWT forgery if it ever
+  // reaches a deployed environment. The check is gated on
+  // NODE_ENV='production' (Dockerfile sets this) so local dev still
+  // gets a stable default.
+  if (process.env.NODE_ENV === "production") {
+    if (!raw || raw.length < 16) {
+      throw new Error(
+        "SESSION_SECRET env var must be set (>= 16 chars) in production. " +
+          "Refusing to start with a default secret.",
       );
     }
-    throw new Error(
-      "SESSION_SECRET env var must be set (at least 16 characters) in Lambda runtime.",
-    );
+    if (raw === "tokenboss-local-dev-session-secret-32bytes-min") {
+      throw new Error(
+        "SESSION_SECRET is set to the documented local-dev placeholder. " +
+          "Generate a fresh random value before deploying.",
+      );
+    }
+    return Buffer.from(raw, "utf8");
   }
-  return Buffer.from(raw, "utf8");
+  // Non-production: prefer the configured secret, otherwise fall back
+  // to a stable string so tokens survive `tsx watch` restarts. Never
+  // returned in production because of the guard above.
+  if (raw && raw.length >= 16) {
+    return Buffer.from(raw, "utf8");
+  }
+  return Buffer.from(
+    "tokenboss-local-dev-session-secret-32bytes-min",
+    "utf8",
+  );
 }
 
-/** Sign a session token for `userId`. TTL is 7 days. */
-export function signSession(userId: string): string {
+/** Sign a session token for `userId`. TTL is 7 days. `tv` is the user's
+ *  current tokenVersion — bumped on logout so old tokens stop verifying. */
+export function signSession(userId: string, tokenVersion: number = 0): string {
   const header = { alg: "HS256", typ: "JWT" };
   const nowSec = Math.floor(Date.now() / 1000);
   const claims: SessionClaims = {
     sub: userId,
     iat: nowSec,
     exp: nowSec + SESSION_TTL_SECONDS,
+    tv: tokenVersion,
   };
   const headerB64 = base64urlEncode(Buffer.from(JSON.stringify(header)));
   const payloadB64 = base64urlEncode(Buffer.from(JSON.stringify(claims)));
@@ -152,6 +174,13 @@ export function verifySession(token: string): SessionClaims | null {
   }
   if (claims.exp <= Math.floor(Date.now() / 1000)) {
     return null;
+  }
+  // Legacy tokens minted before tokenVersion existed have no `tv` field —
+  // treat them as tv=0 so they continue to verify against fresh accounts
+  // (whose tokenVersion also defaults to 0). Once a logout happens, the
+  // user's tokenVersion bumps to 1+ and these legacy tokens stop matching.
+  if (typeof claims.tv !== "number") {
+    claims.tv = 0;
   }
   return claims;
 }

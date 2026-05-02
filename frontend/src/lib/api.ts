@@ -341,6 +341,23 @@ export const api = {
       token: null,
     });
   },
+  /**
+   * Server-side logout — bumps the user's tokenVersion so every JWT in
+   * circulation (including this one and any other browser/device that
+   * still has it) stops verifying on the next request. The frontend
+   * still needs to clear localStorage afterwards.
+   *
+   * Pass `token` explicitly when the caller has already cleared the
+   * stored session and would otherwise send an empty Authorization
+   * header (which the backend treats as "no logout to perform").
+   */
+  logout(token?: string): Promise<{ ok: true }> {
+    return request<{ ok: true }>("/v1/auth/logout", {
+      method: "POST",
+      body: {},
+      ...(token !== undefined ? { token } : {}),
+    });
+  },
   verifyEmail(token: string): Promise<AuthResponse> {
     return request<AuthResponse>("/v1/auth/verify-email", {
       method: "POST",
