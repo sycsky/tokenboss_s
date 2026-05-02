@@ -402,11 +402,6 @@ export const api = {
       method: "DELETE",
     });
   },
-  revealKey(keyId: string): Promise<{ keyId: number; key: string }> {
-    return request<{ keyId: number; key: string }>(
-      `/v1/keys/${encodeURIComponent(keyId)}/reveal`,
-    );
-  },
 
   // buckets
   getBuckets(): Promise<BucketsResponse> {
