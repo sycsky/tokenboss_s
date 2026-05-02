@@ -15,7 +15,7 @@ vi.mock('../../lib/newapi.js', async (orig) => {
 });
 
 import { init, putUser, insertAttribution, db } from '../../lib/store.js';
-import { usageHandler } from '../usageHandlers.js';
+import { usageHandler, _clearConsumeLogCacheForTests } from '../usageHandlers.js';
 import { newapi } from '../../lib/newapi.js';
 
 const getLogsMock = newapi.getLogs as unknown as ReturnType<typeof vi.fn>;
@@ -31,6 +31,7 @@ beforeEach(() => {
     newapiUserId: 42,
   });
   getLogsMock.mockReset();
+  _clearConsumeLogCacheForTests();
 });
 
 function makeEvt(qs: Record<string, string> = {}, headers: Record<string, string> = {}) {
@@ -172,6 +173,44 @@ describe('usageHandler (newapi-backed)', () => {
     for (const call of getLogsMock.mock.calls) {
       expect(call[0].start_timestamp).toBe(expectedTs);
     }
+  });
+
+  // 60s in-memory cache: a single dashboard load fires fetchAllConsumeLogs
+  // twice (once for totals/hourly, once for keyHint aggregation) — same
+  // window, same user, so the second call must hit the cache.
+  it('caches fetchAll results so the second handler call in the same window reuses them', async () => {
+    let callCount = 0;
+    getLogsMock.mockImplementation(async () => {
+      callCount++;
+      return { items: [logEntry({ id: callCount, quota: 50_000 })], total: 1, page: 0, page_size: 100 };
+    });
+
+    // First call: cache miss. Records mode triggers TWO getLogs calls
+    // (one for the records page, one inside fetchAll for totals).
+    await usageHandler(makeEvt());
+    const callsAfterFirst = callCount;
+    expect(callsAfterFirst).toBeGreaterThanOrEqual(2);
+
+    // Second call within TTL: records-page call still goes through (not
+    // cached), but the fetchAll call should be served from cache.
+    await usageHandler(makeEvt());
+    expect(callCount).toBe(callsAfterFirst + 1); // only +1, not +2
+  });
+
+  // Different windows must NOT share a cache slot — explicit `from`
+  // creates a different cache key from the default 30d window.
+  it('does not share cache across different `from` windows', async () => {
+    let callCount = 0;
+    getLogsMock.mockImplementation(async () => {
+      callCount++;
+      return { items: [], total: 0, page: 0, page_size: 100 };
+    });
+
+    await usageHandler(makeEvt());
+    const after30d = callCount;
+    await usageHandler(makeEvt({ from: '2026-04-01T00:00:00.000Z' }));
+    // Different window ⇒ different key ⇒ fetchAll re-runs.
+    expect(callCount).toBeGreaterThan(after30d + 1);
   });
 
   // Regression: newapi caps `size` at 100 server-side regardless of what

@@ -173,8 +173,42 @@ interface FetchAllParams {
   end_timestamp?: number;
 }
 
-/** Pull every consume entry for `username` in the given window. Caps at 5000. */
+// In-memory cache for fetchAllConsumeLogs — a typical dashboard load
+// fires this twice per user (once for totals/hourly, once for keyHint
+// aggregation), and dashboards refresh on focus / poll on a timer, so
+// hits compound. 60s TTL is short enough that "totals don't update for
+// a minute" is acceptable trend-view UX (hero "今日剩" reads sub state
+// directly, not this cache, so billing accuracy is unaffected).
+//
+// Per-process cache only — no Redis, no cross-instance sharing. Each
+// zeabur replica warms its own cache; eventual consistency is fine.
+// FIFO eviction at CACHE_MAX_ENTRIES bounds memory: ~500 KB/user × 200
+// users ≈ 100 MB worst case.
+interface CacheEntry {
+  expiresAt: number;
+  data: NewapiLogEntry[];
+}
+const consumeLogCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60_000;
+const CACHE_MAX_ENTRIES = 200;
+
+function cacheKeyFor(p: FetchAllParams): string {
+  return `${p.username}|${p.start_timestamp ?? ''}|${p.end_timestamp ?? ''}`;
+}
+
+/** Test-only: drop the in-memory cache so cases stay isolated. */
+export function _clearConsumeLogCacheForTests(): void {
+  consumeLogCache.clear();
+}
+
+/** Pull every consume entry for `username` in the given window. Caps at 5000.
+ *  Results are cached per (username, window) for 60s — see CacheEntry. */
 async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]> {
+  const key = cacheKeyFor(p);
+  const now = Date.now();
+  const cached = consumeLogCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.data;
+
   // newapi's /api/log/ silently caps `size` at 100 server-side regardless
   // of what we request. The previous "items.length < requestedPerPage"
   // EOF check therefore always tripped on page 0 (100 < 1000), so totals
@@ -202,6 +236,14 @@ async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]>
     if (total !== undefined && all.length >= total) break;
     if (all.length >= HARD_CAP_RECORDS) break;
   }
+
+  if (consumeLogCache.size >= CACHE_MAX_ENTRIES) {
+    // FIFO eviction — Map preserves insertion order, so the first key is
+    // the oldest. Strict LRU isn't worth the bookkeeping for a 60s TTL.
+    const oldest = consumeLogCache.keys().next().value;
+    if (oldest !== undefined) consumeLogCache.delete(oldest);
+  }
+  consumeLogCache.set(key, { expiresAt: now + CACHE_TTL_MS, data: all });
   return all;
 }
 
