@@ -12,7 +12,7 @@
  */
 
 // Prefer build-time Vite env, fall back to runtime injection via /env.js (Docker entrypoint)
-declare global { interface Window { __ENV__?: { VITE_API_URL?: string; VITE_CHAT_URL?: string } } }
+declare global { interface Window { __ENV__?: { VITE_API_URL?: string; VITE_CHAT_URL?: string; VITE_SENTRY_DSN?: string } } }
 const API_URL =
   (import.meta.env.VITE_API_URL as string | undefined) ||
   window.__ENV__?.VITE_API_URL ||
