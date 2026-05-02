@@ -90,10 +90,27 @@ describe('CreateKeyModal — expiresInDays select', () => {
     });
 
     render(<CreateKeyModal open={true} onClose={() => {}} onCreated={() => {}} />);
-    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '30' } });
+    // Open the custom slock-pixel dropdown via its trigger button.
+    fireEvent.click(screen.getByRole('button', { name: /有效期/ }));
+    // Click the "30 天" option in the listbox.
+    fireEvent.click(screen.getByRole('option', { name: /30 天/ }));
     fireEvent.click(screen.getByText('创建'));
 
     await vi.waitFor(() => expect(createSpy).toHaveBeenCalled());
     expect(createSpy.mock.calls[0][0].expiresInDays).toBe(30);
+  });
+
+  it('clicking outside the open dropdown closes it without changing the value', () => {
+    render(<CreateKeyModal open={true} onClose={() => {}} onCreated={() => {}} />);
+    // Open it.
+    fireEvent.click(screen.getByRole('button', { name: /有效期/ }));
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    // Mousedown elsewhere — the trigger's accessible name still reads
+    // 永久不过期 (the default) since we didn't pick anything.
+    fireEvent.mouseDown(screen.getByText('新建 API Key'));
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('button', { name: /有效期/ })).toHaveTextContent(
+      /永久不过期/,
+    );
   });
 });

@@ -108,6 +108,109 @@ function StickyModalShell({
 }
 
 /**
+ * Slock-pixel dropdown for the 有效期 picker. Replaces a native `<select>`
+ * so the OPEN state matches the rest of the modal (the OS-rendered dropdown
+ * panel can't be styled). Click-outside and Escape close the panel; clicking
+ * an option commits the value and closes.
+ */
+const EXPIRY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '', label: '永久不过期（默认）' },
+  { value: '30', label: '30 天' },
+  { value: '7', label: '7 天' },
+  { value: '1', label: '24 小时' },
+];
+
+function ExpirySelect({
+  value,
+  onChange,
+  labelledBy,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  labelledBy: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const current =
+    EXPIRY_OPTIONS.find((o) => o.value === value) ?? EXPIRY_OPTIONS[0];
+
+  // Close on click-outside + Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-labelledby={labelledBy}
+        className={
+          'w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-white border-2 border-ink rounded text-[14px] text-ink ' +
+          'shadow-[2px_2px_0_0_#1C1917] ' +
+          'focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] focus:shadow-[1px_1px_0_0_#1C1917] ' +
+          'transition-all'
+        }
+      >
+        <span className="truncate">{current.label}</span>
+        <span aria-hidden="true" className={'text-[12px] text-[#A89A8D] transition-transform ' + (open ? 'rotate-180' : '')}>
+          ▾
+        </span>
+      </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          aria-labelledby={labelledBy}
+          className="absolute left-0 right-0 mt-1.5 z-10 bg-white border-2 border-ink rounded shadow-[3px_3px_0_0_#1C1917] overflow-hidden"
+        >
+          {EXPIRY_OPTIONS.map((opt) => {
+            const selected = opt.value === current.value;
+            return (
+              <li key={opt.value}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={
+                    'w-full flex items-center gap-2 text-left px-3.5 py-2.5 text-[14px] text-ink transition-colors ' +
+                    (selected ? 'bg-bg font-bold' : 'hover:bg-bg')
+                  }
+                >
+                  <span aria-hidden="true" className={'w-3 inline-block ' + (selected ? 'text-accent' : 'text-transparent')}>
+                    ✓
+                  </span>
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
  * Stage 1: name input. On submit, calls api.createKey, then transitions
  * the parent to the reveal stage by handing back the freshly-minted key.
  * v1 has no rotation / scopes UX — just a label. The backend tolerates
@@ -177,28 +280,14 @@ export function CreateKeyModal({
           }
         />
 
-        <label
-          htmlFor="key-expires"
-          className="block font-mono text-[10.5px] tracking-[0.16em] uppercase text-[#A89A8D] font-bold mt-4 mb-2"
-        >
+        <div id="key-expires-label" className="block font-mono text-[10.5px] tracking-[0.16em] uppercase text-[#A89A8D] font-bold mt-4 mb-2">
           有效期
-        </label>
-        <select
-          id="key-expires"
+        </div>
+        <ExpirySelect
           value={expiresInDays}
-          onChange={(e) => setExpiresInDays(e.target.value)}
-          className={
-            'w-full px-3.5 py-2.5 bg-white border-2 border-ink rounded text-[14px] text-ink ' +
-            'shadow-[2px_2px_0_0_#1C1917] ' +
-            'focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] focus:shadow-[1px_1px_0_0_#1C1917] ' +
-            'transition-all'
-          }
-        >
-          <option value="">永久不过期（默认）</option>
-          <option value="30">30 天</option>
-          <option value="7">7 天</option>
-          <option value="1">24 小时</option>
-        </select>
+          onChange={setExpiresInDays}
+          labelledBy="key-expires-label"
+        />
 
         {error && (
           <div className="mt-3 font-mono text-[12px] bg-red-soft text-red-ink border-2 border-ink rounded px-3 py-2">
