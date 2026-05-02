@@ -45,17 +45,18 @@ interface SyntheticBucket {
 export async function listBucketsHandler(
   evt: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const headerUserId = (evt.headers?.["x-tb-user-id"] as string | undefined) ?? null;
-  let userId: string | null = headerUserId;
-  if (!userId) {
-    const authHeader =
-      evt.headers?.authorization ?? evt.headers?.Authorization ?? undefined;
-    const session = await verifySessionHeader(authHeader);
-    if (isAuthFailure(session)) {
-      return jsonResponse(401, { error: "unauthorized" });
-    }
-    userId = session.userId;
+  // Auth: session JWT only. The previous `x-tb-user-id` header branch
+  // was an unauthenticated IDOR — TokenBoss runs the Node server
+  // directly on the public internet (no edge strips client headers),
+  // so anyone could pass another user's id and read their subscription
+  // and remaining-quota state.
+  const authHeader =
+    evt.headers?.authorization ?? evt.headers?.Authorization ?? undefined;
+  const session = await verifySessionHeader(authHeader);
+  if (isAuthFailure(session)) {
+    return jsonResponse(401, { error: "unauthorized" });
   }
+  const userId = session.userId;
 
   const user = await getUser(userId);
   if (!user || user.newapiUserId == null) {
@@ -77,7 +78,7 @@ export async function listBucketsHandler(
   const planIdMap = buildPlanIdMap();
   const buckets = subs
     .filter((s) => s.status === "active")
-    .map((s) => synthesize(s, userId as string, planIdMap, user.createdAt))
+    .map((s) => synthesize(s, userId, planIdMap, user.createdAt))
     .filter((b): b is SyntheticBucket => b !== null);
 
   return jsonResponse(200, { buckets });

@@ -7,8 +7,10 @@
  * the same `UsageRecord` / `UsageAggregate` / `hourly24h` shapes the
  * dashboard already expects, so frontend code is unchanged.
  *
- * Auth: prefers `x-tb-user-id` header (internal-gateway pattern) and falls
- * back to the session JWT for browser clients.
+ * Auth: session JWT only. (An earlier "internal-gateway" pattern accepted
+ * `x-tb-user-id` as the principal, but TokenBoss is deployed with the
+ * Node server directly on the public internet — no edge strips that
+ * header — so trusting it was an unauthenticated IDOR. Removed.)
  *
  * Query params (unchanged from the local-DB version):
  *   eventType  — filter records to a single event type (only "consume" is
@@ -177,30 +179,19 @@ async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]>
 export const usageHandler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> => {
-  // Auth: prefer x-tb-user-id header (internal-gateway pattern), else
-  // fall back to session JWT for browser clients.
   const headers = event.headers ?? {};
-  const headerUserId =
-    headers["x-tb-user-id"] ?? headers["X-Tb-User-Id"] ?? undefined;
-
-  let userId: string;
-
-  if (headerUserId) {
-    userId = headerUserId;
-  } else {
-    const authHeader =
-      headers.authorization ?? headers.Authorization ?? undefined;
-    const auth = await verifySessionHeader(authHeader);
-    if (isAuthFailure(auth)) {
-      return jsonError(
-        auth.status,
-        "authentication_error",
-        auth.message,
-        auth.code,
-      );
-    }
-    userId = auth.userId;
+  const authHeader =
+    headers.authorization ?? headers.Authorization ?? undefined;
+  const auth = await verifySessionHeader(authHeader);
+  if (isAuthFailure(auth)) {
+    return jsonError(
+      auth.status,
+      "authentication_error",
+      auth.message,
+      auth.code,
+    );
   }
+  const userId = auth.userId;
 
   const user = await getUser(userId);
   if (!user || user.newapiUserId == null) {

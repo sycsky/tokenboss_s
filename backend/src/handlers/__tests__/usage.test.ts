@@ -17,11 +17,13 @@ vi.mock('../../lib/newapi.js', async (orig) => {
 import { init, putUser, insertAttribution, db } from '../../lib/store.js';
 import { usageHandler } from '../usageHandlers.js';
 import { newapi } from '../../lib/newapi.js';
+import { signSession } from '../../lib/authTokens.js';
 
 const getLogsMock = newapi.getLogs as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   process.env.SQLITE_PATH = ':memory:';
+  process.env.SESSION_SECRET = 'usage-test-session-secret-32bytes-minimum';
   init();
   putUser({
     userId: 'u_1',
@@ -33,9 +35,13 @@ beforeEach(() => {
   getLogsMock.mockReset();
 });
 
+function bearerFor(userId: string): string {
+  return `Bearer ${signSession(userId, 0)}`;
+}
+
 function makeEvt(qs: Record<string, string> = {}, headers: Record<string, string> = {}) {
   return {
-    headers: { 'x-tb-user-id': 'u_1', ...headers },
+    headers: { authorization: bearerFor('u_1'), ...headers },
     queryStringParameters: qs,
   } as unknown as Parameters<typeof usageHandler>[0];
 }
@@ -105,7 +111,7 @@ describe('usageHandler (newapi-backed)', () => {
       plan: 'trial',
     });
     const res = (await usageHandler(
-      makeEvt({}, { 'x-tb-user-id': 'u_unlinked' }),
+      makeEvt({}, { authorization: bearerFor('u_unlinked') }),
     )) as APIGatewayProxyStructuredResultV2;
     const body = JSON.parse(res.body!);
     expect(body.records).toEqual([]);
@@ -147,10 +153,10 @@ describe('usageHandler (newapi-backed)', () => {
 });
 
 describe('GET /v1/usage — source attribution soft-join', () => {
-  // The soft-join uses the user's TokenBoss userId (from x-tb-user-id header
-  // → 'u_1') + model + ±5s window from each newapi entry's created_at.
-  // attribution_capturedAt is the 'now' we set when inserting the row in
-  // chatProxy; for tests we generate it close to entry.created_at.
+  // The soft-join uses the user's TokenBoss userId (auth.userId from the
+  // Bearer JWT → 'u_1') + model + ±5s window from each newapi entry's
+  // created_at. attribution_capturedAt is the 'now' we set when inserting
+  // the row in chatProxy; for tests we generate it close to entry.created_at.
   beforeEach(() => {
     db.exec(`DELETE FROM usage_attribution`);
   });
