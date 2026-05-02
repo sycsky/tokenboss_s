@@ -41,23 +41,66 @@ function formatRecordTime(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${time}`;
 }
 
+type DateRange = '7d' | '30d' | 'all';
+const PAGE_SIZE = 50;
+
+const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: '7d', label: '近 7 天' },
+  { value: '30d', label: '近 30 天' },
+  { value: 'all', label: '4 月以来' },
+];
+
+/** Convert a date-range token into the ISO `from` query param. `all` returns
+ *  undefined so the backend falls back to "no lower bound" (i.e. everything
+ *  since the user's account inception). */
+function dateRangeToFromIso(r: DateRange): string | undefined {
+  if (r === 'all') return undefined;
+  const days = r === '7d' ? 7 : 30;
+  return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
 export default function UsageHistory() {
   const [data, setData] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRangeState] = useState<DateRange>('7d');
+  const [currentPage, setCurrentPage] = useState(1);
 
+  /** Filter changes always reset to page 1 — page=N for the new window
+   *  is meaningless and almost certainly out of bounds. */
+  function changeDateRange(r: DateRange) {
+    setDateRangeState(r);
+    setCurrentPage(1);
+  }
+
+  // Buckets — load once at mount, doesn't depend on the table filters.
   useEffect(() => {
-    Promise.all([
-      api.getUsage({ limit: 50 }).then((r) => setData(r)),
-      api.getBuckets().then((r) => {
-        const total = (r.buckets || []).reduce((s: number, b) => {
-          if (b.skuType === 'topup' || b.skuType === 'trial') return s + (b.totalRemainingUsd ?? 0);
-          return s + (b.dailyRemainingUsd ?? 0);
-        }, 0);
-        setBalance(total);
-      }),
-    ]).finally(() => setLoading(false));
+    api.getBuckets().then((r) => {
+      const total = (r.buckets || []).reduce((s: number, b) => {
+        if (b.skuType === 'topup' || b.skuType === 'trial') return s + (b.totalRemainingUsd ?? 0);
+        return s + (b.dailyRemainingUsd ?? 0);
+      }, 0);
+      setBalance(total);
+    }).catch(() => { /* non-blocking — table can render without balance */ });
   }, []);
+
+  // Usage — refetch whenever filter or page changes. Initial load also
+  // flips off the loading skeleton; subsequent loads silently swap data.
+  useEffect(() => {
+    const from = dateRangeToFromIso(dateRange);
+    const offset = (currentPage - 1) * PAGE_SIZE;
+    api.getUsage({ from, limit: PAGE_SIZE, offset })
+      .then((r) => setData(r))
+      .finally(() => setLoading(false));
+  }, [dateRange, currentPage]);
+
+  const totalCalls = data.totals?.calls ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCalls / PAGE_SIZE));
+  const isFirstPage = currentPage <= 1;
+  const isLastPage = currentPage >= totalPages;
+  const recordsOnPage = data.records?.length ?? 0;
+  const startIdx = recordsOnPage === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const endIdx = (currentPage - 1) * PAGE_SIZE + recordsOnPage;
 
   // Use hourStartMs (epoch ms) when present so the chart's X axis is in
   // the user's local timezone — the legacy `hour` string is UTC, so a
@@ -119,21 +162,22 @@ export default function UsageHistory() {
           <ConsumeChart24h buckets={buckets} variant="desktop" />
         </section>
 
-        {/* Filter bar */}
+        {/* Filter bar — only the time range select is wired to the API right
+            now. The legacy "全部模型 / 全部来源" selects were pure decoration
+            (no onChange handler, no backend support), so they're removed
+            until model/source filtering is actually implemented end-to-end. */}
         <div className={`${card} flex flex-wrap items-center gap-2.5 p-3 mb-5`}>
           <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mr-1">
             筛选
           </span>
-          <select className={selectCls}>
-            <option>近 7 天</option>
-            <option>近 30 天</option>
-            <option>4 月以来</option>
-          </select>
-          <select className={selectCls}>
-            <option>全部模型</option>
-          </select>
-          <select className={selectCls}>
-            <option>全部来源</option>
+          <select
+            className={selectCls}
+            value={dateRange}
+            onChange={(e) => changeDateRange(e.target.value as DateRange)}
+          >
+            {DATE_RANGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
         </div>
 
@@ -170,8 +214,9 @@ export default function UsageHistory() {
             <thead>
               <tr className="bg-ink text-bg border-b-2 border-ink">
                 <Th className="w-32">时间 ↓</Th>
-                <Th className="w-24">类型</Th>
+                <Th className="w-20">类型</Th>
                 <Th className="w-32">来源</Th>
+                <Th className="w-40">API Key</Th>
                 <Th>模型</Th>
                 <Th className="w-28 text-right">$ 变化</Th>
               </tr>
@@ -196,7 +241,7 @@ export default function UsageHistory() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="text-center text-[#A89A8D] text-[13px] p-8 font-mono">
+                  <td colSpan={6} className="text-center text-[#A89A8D] text-[13px] p-8 font-mono">
                     暂无使用记录 · 试着用一次 Agent，再回来这里看
                   </td>
                 </tr>
@@ -205,18 +250,22 @@ export default function UsageHistory() {
           </table>
         </div>
 
-        {/* Pagination */}
+        {/* Pagination — wired to the same `currentPage` state that drives
+            the API offset. Buttons disable at boundaries and the current-
+            page chip just shows "X / N". Window total comes from
+            data.totals.calls which the backend computes across the FULL
+            window (not just the page), so the page count is correct. */}
         <div className="flex justify-between items-center flex-wrap gap-3">
           <div className="font-mono text-[12px] text-[#6B5E52]">
-            显示第 <span className="text-ink font-bold">1 至 {Math.min(50, data.records?.length ?? 0)}</span> 条，共{' '}
-            <span className="text-ink font-bold">{data.totals?.calls ?? 0}</span> 条记录
+            显示第 <span className="text-ink font-bold">{startIdx} 至 {endIdx}</span> 条，共{' '}
+            <span className="text-ink font-bold">{totalCalls}</span> 条记录
           </div>
           <div className="flex gap-1.5">
-            <PageBtn disabled>首页</PageBtn>
-            <PageBtn disabled>上一页</PageBtn>
-            <PageBtn active>1</PageBtn>
-            <PageBtn>下一页</PageBtn>
-            <PageBtn>末页</PageBtn>
+            <PageBtn disabled={isFirstPage} onClick={() => setCurrentPage(1)}>首页</PageBtn>
+            <PageBtn disabled={isFirstPage} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>上一页</PageBtn>
+            <PageBtn active>{currentPage} / {totalPages}</PageBtn>
+            <PageBtn disabled={isLastPage} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>下一页</PageBtn>
+            <PageBtn disabled={isLastPage} onClick={() => setCurrentPage(totalPages)}>末页</PageBtn>
           </div>
         </div>
       </main>
@@ -236,10 +285,12 @@ function PageBtn({
   children,
   active = false,
   disabled = false,
+  onClick,
 }: {
   children: React.ReactNode;
   active?: boolean;
   disabled?: boolean;
+  onClick?: () => void;
 }) {
   if (active) {
     return (
@@ -250,6 +301,8 @@ function PageBtn({
   }
   return (
     <button
+      type="button"
+      onClick={onClick}
       disabled={disabled}
       className={
         'px-3 py-1.5 font-mono text-[12px] font-bold border-2 border-ink rounded bg-white text-ink ' +

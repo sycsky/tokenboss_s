@@ -43,12 +43,10 @@ export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, v
   const amount = `${styles.sign}$${Math.abs(amountUsd).toFixed(6)}`;
   if (variant === 'mobile') {
     // Compact list rows. Time auto-sizes (whitespace-nowrap) so longer
-    // formats like "今天 14:30" or "5月1日 14:30" fit; older code passed
-    // short "9:41" strings and the 48px hard-cap was just enough — once
-    // UsageHistory started shipping day-aware timestamps that no longer
-    // held. Dashboard's "最近使用" still passes `HH:mm`, so it stays
-    // visually narrow there. `source` is opt-in for the same reason —
-    // Dashboard wants visual density, UsageHistory wants attribution.
+    // formats like "今天 14:30" or "5月1日 14:30" fit. Source vs keyHint
+    // are visually distinguished (source = plain mono text, keyHint =
+    // chip with `key:` prefix) so a user whose API key happens to share
+    // a name with their agent terminal can still tell them apart.
     return (
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b-2 border-ink/10 last:border-b-0">
         <div className="font-mono text-[10.5px] text-[#A89A8D] flex-shrink-0 whitespace-nowrap">{time}</div>
@@ -58,11 +56,13 @@ export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, v
             <span className={`font-mono text-[9.5px] font-bold tracking-wider uppercase px-1.5 py-px rounded ${styles.pill}`}>
               {styles.label}
             </span>
-            {showSourceOnMobile && (source || keyHint) && (
-              <span className="font-mono text-[10px] text-[#A89A8D] truncate">
-                {source}
-                {source && keyHint && <span className="text-ink-4 mx-1">·</span>}
-                {keyHint && <span className="text-ink-3">{keyHint}</span>}
+            {showSourceOnMobile && source && (
+              <span className="font-mono text-[10px] text-[#A89A8D] truncate">{source}</span>
+            )}
+            {showSourceOnMobile && keyHint && (
+              <span className="inline-flex items-center gap-0.5 font-mono text-[10px] text-ink-3 bg-bg border border-ink/15 rounded px-1.5 py-px truncate">
+                <span className="text-ink-4 text-[8.5px] uppercase tracking-wider">key</span>
+                <span>{keyHint}</span>
               </span>
             )}
           </div>
@@ -71,7 +71,11 @@ export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, v
       </div>
     );
   }
-  // desktop: table-row layout (assume parent <table>)
+  // desktop: table-row layout (assume parent <table>). Source and API key
+  // get their own columns now — previously they shared a single "来源" cell
+  // with keyHint as a small secondary line, which made user-named keys
+  // ("Hermes" → looks like "Hermes Agent") visually indistinguishable
+  // from the actual source attribution.
   return (
     <tr className="border-b-2 border-ink/10 last:border-b-0 hover:bg-bg/50">
       <td className="font-mono text-[12.5px] text-ink-2 px-4 py-2.5">{time}</td>
@@ -81,17 +85,16 @@ export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, v
         </span>
       </td>
       <td className="font-mono text-[11px] text-[#A89A8D] px-4 py-2.5">
-        {source || keyHint ? (
-          <div>
-            <div>{source || '—'}</div>
-            {keyHint && (
-              <div className="text-[10px] text-ink-3 mt-0.5 truncate max-w-[140px]">
-                {keyHint}
-              </div>
-            )}
-          </div>
+        {source || '—'}
+      </td>
+      <td className="px-4 py-2.5">
+        {keyHint ? (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-3 bg-bg border border-ink/15 rounded px-1.5 py-0.5 max-w-[160px] truncate">
+            <span className="text-ink-4 text-[9px] uppercase tracking-wider flex-shrink-0">key</span>
+            <span className="truncate">{keyHint}</span>
+          </span>
         ) : (
-          '—'
+          <span className="font-mono text-[11px] text-[#A89A8D]">—</span>
         )}
       </td>
       <td className="text-[13.5px] font-semibold text-ink px-4 py-2.5">{model || '—'}</td>
