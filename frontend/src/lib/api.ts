@@ -242,8 +242,12 @@ export interface HourlyUsage {
 export interface UsageDetailResponse {
   records: UsageRecord[];
   /** Totals over the active window. Backend defaults to rolling 30d
-   *  when `from` isn't passed; clients label this as "近 30 天". */
-  totals: { consumed: number; calls: number };
+   *  when `from` isn't passed; clients label this as "近 30 天".
+   *  `calls` counts consume events only (UI: "X 次调用"). `records`
+   *  is the merged total including reset/expire rows and is what the
+   *  pagination UI should divide by — optional for backwards compat
+   *  with pre-fix backends; fall back to `calls` if absent. */
+  totals: { consumed: number; calls: number; records?: number };
   hourly24h: HourlyUsage[];
 }
 
