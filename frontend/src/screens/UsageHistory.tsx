@@ -42,7 +42,7 @@ function formatRecordTime(iso: string): string {
 }
 
 type DateRange = '7d' | '30d' | 'all';
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 
 const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
   { value: '7d', label: '近 7 天' },
