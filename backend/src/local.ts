@@ -119,8 +119,18 @@ const healthzHandler: LambdaHandler = async () => ({
   body: JSON.stringify({ status: "ok", t: new Date().toISOString() }),
 });
 
+/** Temporary: trigger a synthetic exception so Sentry's dashboard gets
+ *  its "first event" and exits the onboarding hint state. Visit once,
+ *  see the issue land in Sentry, then we delete this endpoint. The
+ *  thrown error has a unique tag so it's easy to grep / filter out
+ *  if it ever fires accidentally. */
+const sentryTestHandler: LambdaHandler = async () => {
+  throw new Error("[sentry-test] synthetic exception — safe to ignore");
+};
+
 const routes: Route[] = [
   { method: "GET", path: "/healthz", handler: healthzHandler },
+  { method: "GET", path: "/v1/_sentry-test", handler: sentryTestHandler },
   { method: "GET", path: "/hello", handler: helloHandler as LambdaHandler },
   { method: "POST", path: "/v1/auth/register", handler: registerHandler },
   { method: "POST", path: "/v1/auth/login", handler: loginHandler },
