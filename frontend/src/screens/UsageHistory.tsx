@@ -16,48 +16,36 @@ const selectCls =
   'shadow-[2px_2px_0_0_#1C1917] focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] ' +
   'focus:shadow-[1px_1px_0_0_#1C1917] transition-all cursor-pointer';
 
-const WEEKDAY_CN = ['日', '一', '二', '三', '四', '五', '六'];
-
 /**
- * Render a record's timestamp with day-of-week awareness so a scrolling user
- * can tell "today vs yesterday vs last Tuesday" at a glance.
+ * Render a record's timestamp as "M月D日 HH:mm".
  *
- *   today       → "今天 14:30"
- *   yesterday   → "昨天 14:30"   (calendar-yesterday, not 24h ago)
- *   <7 days     → "周三 14:30"
- *   older       → "5月1日 14:30"
- *
- * Uses local calendar boundaries (toDateString) rather than fixed-hour
- * windows to match the user's mental model — a record from 02:00 today is
- * "今天" even if it was logged 22 hours ago.
+ * Why not the "今天/昨天/周X" smart format we used before — a heavy user
+ * with 100+ calls today fills the first 5+ pages with rows that all
+ * say "今天 ...", which makes pagination LOOK broken even when it's
+ * working (different entries on each page, but identical labels).
+ * Always showing the explicit date makes date variation visible the
+ * moment the user pages back, so they can SEE pagination working.
+ * The Dashboard "近 5 笔" panel keeps its terser HH:mm format —
+ * different surface, different need.
  */
 function formatRecordTime(iso: string): string {
   const d = new Date(iso);
   const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) return `今天 ${time}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${time}`;
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
-  if (diffDays >= 0 && diffDays < 7) return `周${WEEKDAY_CN[d.getDay()]} ${time}`;
   return `${d.getMonth() + 1}月${d.getDate()}日 ${time}`;
 }
 
-type DateRange = '7d' | '30d' | 'all';
+type DateRange = '7d' | '30d';
 const PAGE_SIZE = 20;
 
 const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
   { value: '7d', label: '近 7 天' },
   { value: '30d', label: '近 30 天' },
-  { value: 'all', label: '4 月以来' },
 ];
 
-/** Convert a date-range token into the ISO `from` query param. `all` returns
- *  undefined so the backend falls back to "no lower bound" (i.e. everything
- *  since the user's account inception). */
-function dateRangeToFromIso(r: DateRange): string | undefined {
-  if (r === 'all') return undefined;
+/** Convert a date-range token into the ISO `from` query param.
+ *  Backend caps lookback at 30d server-side (see usageHandlers
+ *  `defaultStartTs`), so any wider range here would silently clamp. */
+function dateRangeToFromIso(r: DateRange): string {
   const days = r === '7d' ? 7 : 30;
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
@@ -104,6 +92,8 @@ export default function UsageHistory() {
   const recordsOnPage = data.records?.length ?? 0;
   const startIdx = recordsOnPage === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endIdx = (currentPage - 1) * PAGE_SIZE + recordsOnPage;
+  const currentRangeLabel =
+    DATE_RANGE_OPTIONS.find((o) => o.value === dateRange)?.label ?? '';
 
   // Use hourStartMs (epoch ms) when present so the chart's X axis is in
   // the user's local timezone — the legacy `hour` string is UTC, so a
@@ -144,7 +134,7 @@ export default function UsageHistory() {
             <div className="font-mono text-[13px] text-[#6B5E52]">
               共 <span className="text-ink font-bold">{data.totals?.calls ?? 0}</span> 次调用 ·
               <span className="text-ink font-bold ml-1">${(data.totals?.consumed ?? 0).toFixed(4)}</span> 已用 ·
-              <span className="text-ink font-bold ml-1">4 月以来</span>
+              <span className="text-ink font-bold ml-1">{currentRangeLabel}</span>
             </div>
           </div>
           <BalancePill amount={`$${balance.toFixed(4)}`} label="当前余额" />
