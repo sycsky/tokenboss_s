@@ -285,6 +285,15 @@ export function RevealKeyModal({
       // The single moment we commit plaintext to localStorage. Subsequent
       // reads (Dashboard install spell) come from this cache only.
       setCachedKey(email, String(created.keyId), created.key);
+    } else if (created && !email) {
+      // Shouldn't happen — the modal only opens after createKey succeeded
+      // under an authed session. If we get here it means an upstream
+      // caller forgot to thread `user.email` down. Stay loud rather than
+      // silently produce a key the user thinks is cached but isn't.
+      console.warn(
+        '[RevealKeyModal] handleAcknowledge: missing email — skipping cache write. ' +
+          'The plaintext will be lost when this modal closes.',
+      );
     }
     onClose();
   }

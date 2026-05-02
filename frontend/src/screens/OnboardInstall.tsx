@@ -149,19 +149,34 @@ export default function OnboardInstall() {
           <p className="text-[13px] text-[#6B5E52] leading-relaxed mb-3">
             继续的话，<strong>旧 Key 将被吊销</strong>，任何已经绑定它的客户端都会停止工作。
           </p>
-          <button
-            type="button"
-            onClick={handleConfirmRebuild}
-            disabled={rebuilding}
-            className={
-              'px-3 py-1.5 bg-ink text-white font-bold text-[13px] border-2 border-ink rounded ' +
-              'shadow-[2px_2px_0_0_#E8692A] ' +
-              'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
-              'disabled:opacity-50 disabled:cursor-not-allowed transition-all'
-            }
-          >
-            {rebuilding ? '处理中…' : '吊销旧 Key 并生成新的'}
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => nav('/onboard/welcome')}
+              disabled={rebuilding}
+              className={
+                'px-3 py-1.5 bg-white text-ink font-bold text-[13px] border-2 border-ink rounded ' +
+                'shadow-[2px_2px_0_0_#1C1917] ' +
+                'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+                'disabled:opacity-50 disabled:cursor-not-allowed transition-all'
+              }
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmRebuild}
+              disabled={rebuilding}
+              className={
+                'px-3 py-1.5 bg-ink text-white font-bold text-[13px] border-2 border-ink rounded ' +
+                'shadow-[2px_2px_0_0_#E8692A] ' +
+                'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
+                'disabled:opacity-50 disabled:cursor-not-allowed transition-all'
+              }
+            >
+              {rebuilding ? '处理中…' : '吊销旧 Key 并生成新的'}
+            </button>
+          </div>
         </div>
       )}
 

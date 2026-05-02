@@ -19,7 +19,7 @@ import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
-import { getCachedKey, clearCachedKey } from '../lib/keyCache';
+import { getCachedKey, sweepCachedKeys } from '../lib/keyCache';
 import { isExpired } from '../lib/keyExpiry';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
@@ -122,25 +122,9 @@ export default function Dashboard() {
       setKeys(r.keys);
       dashboardCache.keys = r.keys;
       setKeysError(null);
-      // Sweep: any cached plaintext for keyIds no longer in the list is
-      // stale (the key was deleted, possibly from another device). Collect
-      // first, delete after — mutating localStorage mid-iteration shifts
-      // indices and can skip entries.
-      if (user?.email) {
-        const present = new Set(r.keys.map((k) => String(k.keyId)));
-        const prefix = `tb_key_v1:${user.email}:`;
-        const orphanIds: string[] = [];
-        try {
-          for (let i = 0; i < localStorage.length; i++) {
-            const lk = localStorage.key(i);
-            if (lk && lk.startsWith(prefix)) {
-              const cachedId = lk.slice(prefix.length);
-              if (!present.has(cachedId)) orphanIds.push(cachedId);
-            }
-          }
-          orphanIds.forEach((id) => clearCachedKey(user.email!, id));
-        } catch { /* private mode */ }
-      }
+      // Drop any cached plaintext for keyIds that aren't in the list —
+      // those keys were deleted (possibly from another device).
+      sweepCachedKeys(user?.email, new Set(r.keys.map((k) => String(k.keyId))));
     } catch (e) {
       setKeysError((e as Error).message);
     }
@@ -275,13 +259,15 @@ export default function Dashboard() {
     keys.find((k) => !k.disabled && !isExpired(k));
   const cachedDefaultPlain =
     user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
+  // Only render the env line when we have actual plaintext from cache.
+  // On cache miss we deliberately suppress it — the masked value (e.g.
+  // sk-•••a4c2) reads like a real env line and could be skim-pasted into
+  // a client config that would then 401. The amber CTA below is the
+  // only path forward in that state.
   const spellExtra =
     defaultKey && cachedDefaultPlain
       ? `TOKENBOSS_API_KEY=${cachedDefaultPlain}`
-      : defaultKey
-      ? `TOKENBOSS_API_KEY=${defaultKey.key}` // masked fallback
       : undefined;
-  // No spellResolver — cache is the only source of plaintext now.
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
   // routes through here in v1 since there's no self-checkout yet.
