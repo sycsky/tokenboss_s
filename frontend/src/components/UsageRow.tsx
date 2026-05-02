@@ -19,6 +19,13 @@ export interface UsageRowProps {
    *  type pill. Off by default so Dashboard's compact "最近使用" rows stay
    *  visually dense; UsageHistory's full mobile list opts in. */
   showSourceOnMobile?: boolean;
+  /** Hide the source cell entirely (both desktop column and mobile span).
+   *  Used while UA-based attribution is unreliable — Hermes / Codex / Claude
+   *  Code all use the openai-python SDK, so their UA is `OpenAI/Python ...`
+   *  and our regex bucket falls through to 'other'. Re-enable this prop
+   *  (or just drop the explicit `false`) once X-Source header propagation
+   *  is wired into each agent's install snippet. */
+  showSourceColumn?: boolean;
 }
 
 // Each event type carries a "stamp" pill (matching Slock-pixel — solid fill +
@@ -38,7 +45,7 @@ const TYPE_STYLES: Record<UsageEventType, {
   refund:  { pill: 'bg-bg text-ink border-2 border-ink', amount: 'text-[#A89A8D]', label: '退款', sign: '+' },
 };
 
-export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, variant = 'desktop', showSourceOnMobile = false }: UsageRowProps) {
+export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, variant = 'desktop', showSourceOnMobile = false, showSourceColumn = true }: UsageRowProps) {
   const styles = TYPE_STYLES[eventType];
   const amount = `${styles.sign}$${Math.abs(amountUsd).toFixed(6)}`;
   if (variant === 'mobile') {
@@ -56,7 +63,7 @@ export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, v
             <span className={`font-mono text-[9.5px] font-bold tracking-wider uppercase px-1.5 py-px rounded ${styles.pill}`}>
               {styles.label}
             </span>
-            {showSourceOnMobile && source && (
+            {showSourceOnMobile && showSourceColumn && source && (
               <span className="font-mono text-[10px] text-[#A89A8D] truncate">{source}</span>
             )}
             {showSourceOnMobile && keyHint && (
@@ -84,9 +91,11 @@ export function UsageRow({ time, eventType, source, keyHint, model, amountUsd, v
           {styles.label}
         </span>
       </td>
-      <td className="font-mono text-[11px] text-[#A89A8D] px-4 py-2.5">
-        {source || '—'}
-      </td>
+      {showSourceColumn && (
+        <td className="font-mono text-[11px] text-[#A89A8D] px-4 py-2.5">
+          {source || '—'}
+        </td>
+      )}
       <td className="px-4 py-2.5">
         {keyHint ? (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-3 bg-bg border border-ink/15 rounded px-1.5 py-0.5 max-w-[160px] truncate">
