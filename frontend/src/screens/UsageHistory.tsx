@@ -257,6 +257,10 @@ export default function UsageHistory() {
             <PageBtn disabled={isLastPage} onClick={() => setCurrentPage(totalPages)}>末页</PageBtn>
           </div>
         </div>
+
+        <p className="font-mono text-[11px] text-[#A89A8D] mt-5 leading-relaxed">
+          ※ 系统仅保留最近 30 天的使用记录，更早的查询请联系我们。
+        </p>
       </main>
     </div>
   );
