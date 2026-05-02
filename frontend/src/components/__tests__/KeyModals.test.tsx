@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { RevealKeyModal, CreateKeyModal } from '../KeyModals';
-import * as keyCache from '../../lib/keyCache';
 import * as apiModule from '../../lib/api';
 
 beforeEach(() => {
@@ -28,7 +27,7 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
 
   it('renders the plaintext + the prominent action-verb warning', () => {
     render(
-      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} />,
     );
     expect(screen.getByText('sk-PLAINTEXT-FOREVER')).toBeInTheDocument();
     // Title is a call-to-action ("立刻复制并保存") not a description.
@@ -42,7 +41,7 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
   it('does NOT close on backdrop click', () => {
     const onClose = vi.fn();
     const { container } = render(
-      <RevealKeyModal open={true} onClose={onClose} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={onClose} created={sample} />,
     );
     const backdrop = container.querySelector('[aria-hidden="true"]');
     expect(backdrop).toBeTruthy();
@@ -52,14 +51,14 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
 
   it('does NOT render the × close button', () => {
     render(
-      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} />,
     );
     expect(screen.queryByLabelText('关闭')).toBeNull();
   });
 
   it('renders BOTH copy buttons — bare Key + full install command', () => {
     render(
-      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} />,
     );
     expect(screen.getByText('复制 API Key')).toBeInTheDocument();
     expect(screen.getByText('复制完整安装命令')).toBeInTheDocument();
@@ -67,7 +66,7 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
 
   it('「复制完整安装命令」 puts both lines on the clipboard', async () => {
     render(
-      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} />,
     );
     fireEvent.click(screen.getByText('复制完整安装命令'));
     await vi.waitFor(() =>
@@ -79,17 +78,16 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
 
   it('ack button is DISABLED until at least one copy fires', () => {
     render(
-      <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={() => {}} created={sample} />,
     );
     expect(screen.getByText('我已保存好，关闭')).toBeDisabled();
     expect(screen.getByText(/请先复制 Key/)).toBeInTheDocument();
   });
 
-  it('after a successful copy, ack button enables and writes cache + closes on click', async () => {
+  it('after a successful copy, ack button enables and closes on click', async () => {
     const onClose = vi.fn();
-    const setSpy = vi.spyOn(keyCache, 'setCachedKey');
     render(
-      <RevealKeyModal open={true} onClose={onClose} created={sample} email="alice@x.com" />,
+      <RevealKeyModal open={true} onClose={onClose} created={sample} />,
     );
     // Initially disabled.
     expect(screen.getByText('我已保存好，关闭')).toBeDisabled();
@@ -101,9 +99,9 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
     );
     // The "请先复制 Key" hint should be gone.
     expect(screen.queryByText(/请先复制 Key/)).toBeNull();
-    // Now ack works.
+    // Now ack works — closes the modal. No platform-side persistence
+    // happens (cache machinery was removed in favor of show-once).
     fireEvent.click(screen.getByText('我已保存好，关闭'));
-    expect(setSpy).toHaveBeenCalledWith('alice@x.com', 'kid-1', 'sk-PLAINTEXT-FOREVER');
     expect(onClose).toHaveBeenCalled();
   });
 });

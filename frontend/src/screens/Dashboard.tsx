@@ -19,8 +19,6 @@ import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
-import { getCachedKey, sweepCachedKeys } from '../lib/keyCache';
-import { isExpired } from '../lib/keyExpiry';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -122,23 +120,6 @@ export default function Dashboard() {
       setKeys(r.keys);
       dashboardCache.keys = r.keys;
       setKeysError(null);
-      // Drop cached plaintext for any keyId that's NOT a usable key
-      // anymore — covers three states:
-      //   1. Key deleted (possibly from another device) → not in r.keys
-      //   2. Key expired (newapi auto-disables on expiry) → in r.keys
-      //      but isExpired(k) === true
-      //   3. Key disabled by newapi (admin / quota) → in r.keys but
-      //      k.disabled === true
-      // In all three cases the cached plaintext is dead weight at best,
-      // and we'd rather not keep it lingering in localStorage.
-      sweepCachedKeys(
-        user?.email,
-        new Set(
-          r.keys
-            .filter((k) => !k.disabled && !isExpired(k))
-            .map((k) => String(k.keyId)),
-        ),
-      );
     } catch (e) {
       setKeysError((e as Error).message);
     }
@@ -265,50 +246,12 @@ export default function Dashboard() {
   //
   // Subsequent visits: cache hit → spell shows plaintext immediately,
   // no resolver needed, COPY is a pure-clipboard op with zero network.
-  //
-  // The bottom API KEY list rows still reveal-on-click (see APIKeyList)
-  // since those serve management, not the always-on copy spell.
-  // Pick the key the install spell will use. We prefer one whose plaintext
-  // is cached locally — that's the only kind the spell can actually display
-  // (post-Task-3, plaintext is never re-fetchable from the server). When
-  // no cached key exists, fall back to label=default → any usable key, so
-  // the cache-miss branch below can render its CTA.
-  //
-  // Without the cached-first preference, a user with an old uncached
-  // `default` who creates a fresh replacement (now cached) would still
-  // see the cache-miss CTA — the selection would keep landing on the
-  // old uncached row.
-  const usable = (k: typeof keys[number]) => !k.disabled && !isExpired(k);
-  // Build the per-key plaintext map ONCE — both defaultKey selection and
-  // APIKeyList rendering need to know which keyIds are cached.
-  const cachedPlaintexts = (() => {
-    const map = new Map<string, string>();
-    if (!user?.email) return map;
-    for (const k of keys) {
-      const plain = getCachedKey(user.email, String(k.keyId));
-      if (plain) map.set(String(k.keyId), plain);
-    }
-    return map;
-  })();
-  const hasCache = (k: typeof keys[number]) =>
-    cachedPlaintexts.has(String(k.keyId));
-  const defaultKey =
-    keys.find((k) => k.label === 'default' && usable(k) && hasCache(k)) ??
-    keys.find((k) => usable(k) && hasCache(k)) ??
-    keys.find((k) => k.label === 'default' && usable(k)) ??
-    keys.find(usable);
-  const cachedDefaultPlain =
-    defaultKey ? cachedPlaintexts.get(String(defaultKey.keyId)) ?? null : null;
   // The install spell is conceptually two lines: the setup command and
-  // the API key. On cache hit, line 2 is the real plaintext (no quotes
-  // because it's the literal env value). On cache miss we keep the line
-  // but show a quoted placeholder — the visual two-line shape stays
-  // intact, and the angle brackets make it obvious this isn't a real
-  // value (preventing skim-paste-into-config that would 401).
-  const spellExtra =
-    defaultKey && cachedDefaultPlain
-      ? `TOKENBOSS_API_KEY=${cachedDefaultPlain}`
-      : `TOKENBOSS_API_KEY="<your-api-key>"`;
+  // the API key env var. The platform never persists plaintext, so line 2
+  // is ALWAYS a quoted placeholder — users paste their saved key in
+  // place of <your-api-key> before sending the snippet to their Agent.
+  // Angle brackets make it obvious it's a placeholder, not a real value.
+  const spellExtra = `TOKENBOSS_API_KEY="<your-api-key>"`;
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
   // routes through here in v1 since there's no self-checkout yet.
@@ -656,12 +599,11 @@ export default function Dashboard() {
                 </>
               }
             />
-            {defaultKey && cachedDefaultPlain && (
-              <CacheReasonHint />
-            )}
-            {/* Cache miss state intentionally has NO extra CTA here —
-                the 「+ 创建 API Key」 button below is the same action.
-                Avoiding the duplicate keeps the panel tight. */}
+            {/* The install spell is always a placeholder snippet — the
+                platform doesn't persist plaintext anywhere, so the user
+                fills <your-api-key> in themselves from the value they
+                saved at create time. The 「+ 创建 API Key」 button below
+                covers "I haven't saved one / I lost mine" cases. */}
             <Link
               to="/install/manual"
               className="block mt-2.5 font-mono text-[11px] text-[#A89A8D] hover:text-ink transition-colors"
@@ -686,7 +628,6 @@ export default function Dashboard() {
               keys={keys}
               loadError={keysError}
               keyStats={keyStats}
-              cachedPlaintexts={cachedPlaintexts}
               onCreateClick={() => setCreateOpen(true)}
               onDeleteClick={setDeleteTarget}
               onShowAllClick={() => setAllKeysOpen(true)}
@@ -711,7 +652,6 @@ export default function Dashboard() {
         open={justCreated !== null}
         onClose={closeReveal}
         created={justCreated}
-        email={user?.email}
       />
       <DeleteKeyModal
         open={deleteTarget !== null}
@@ -724,7 +664,6 @@ export default function Dashboard() {
         onClose={() => setAllKeysOpen(false)}
         keys={keys}
         keyStats={keyStats}
-        cachedPlaintexts={cachedPlaintexts}
         onDeleteClick={setDeleteTarget}
       />
     </div>
@@ -739,43 +678,6 @@ export default function Dashboard() {
  * accent-color flash on copy mirrors APIKeyList's copy button so the
  * "did it work?" feedback is consistent across the whole screen.
  */
-/**
- * The install spell shows the FULL plaintext of the user's default Key.
- * That's only possible because we have a localStorage cache of it on this
- * device — the platform never re-fetches plaintext from the server.
- *
- * Users who notice this and wonder "wait, didn't you say show-once?"
- * deserve a quick explanation. A single ⓘ icon is unobtrusive; click
- * toggles a small note. Hover (desktop) shows the same via title.
- */
-function CacheReasonHint() {
-  const [open, setOpen] = useState(false);
-  const summary = '本地缓存 · 退出登录后将消失';
-  const detail =
-    '这台设备的浏览器 localStorage 里缓存了一份明文，所以这里能直接显示完整 Key。' +
-    '退出登录、清除浏览器数据或换设备时，缓存就消失 —— 届时唯一的办法是创建一个新 Key。';
-  return (
-    <div className="mt-1">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        title={detail}
-        aria-label={summary + '（点击查看详情）'}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 font-mono text-[10.5px] text-[#A89A8D] hover:text-ink transition-colors"
-      >
-        <span aria-hidden="true" className="text-[11px]">ⓘ</span>
-        <span>{summary}</span>
-      </button>
-      {open && (
-        <p className="font-mono text-[10.5px] text-[#6B5E52] leading-relaxed mt-1.5 max-w-[420px]">
-          {detail}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function BaseUrlChip() {
   const url = 'https://api.tokenboss.co/v1';
   const [copied, setCopied] = useState(false);

@@ -4,18 +4,22 @@ import { TerminalBlock } from '../components/TerminalBlock';
 import { OnboardShell } from '../components/OnboardShell';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { getCachedKey, setCachedKey } from '../lib/keyCache';
-import { isExpired } from '../lib/keyExpiry';
 import { slockBtn } from '../lib/slockBtn';
 
 /**
- * Step 02 — paste-and-go. Resolves the user's default API key plaintext:
- * 1) cache hit → render (most common after first visit)
- * 2) no key yet → createKey + cache + render
- * 3) edge: existing default but cache miss → confirm rebuild, then 1+2
+ * Step 02 — paste-and-go. The platform never persists plaintext anywhere,
+ * so the bootstrap policy here is:
+ *   - 0 keys: createKey, hold the plaintext in component state for the
+ *     duration of this page, render it inline. User pastes it into their
+ *     Agent before navigating away.
+ *   - any existing default (usable or stale): we have NO way to surface
+ *     its plaintext — show a confirm prompt; on confirm, delete the old
+ *     and create a fresh one (same as 0-keys path from there).
  *
- * The page itself IS the "shown once" moment: user is about to paste the
- * key into their AI client. We write to localStorage immediately on receipt.
+ * Plaintext lives only in this component's `apiKey` state. Once the user
+ * leaves the page, it's gone. Returning to /onboard/install goes through
+ * the rebuild prompt because, by then, no default-yet-uncreatable state
+ * is possible.
  */
 export default function OnboardInstall() {
   const nav = useNavigate();
@@ -30,49 +34,33 @@ export default function OnboardInstall() {
     if (!user?.email) return;
     let cancelled = false;
 
-    async function bootstrap(email: string) {
+    async function bootstrap() {
       try {
         const { keys } = await api.listKeys();
         if (cancelled) return;
 
-        // Look for a USABLE existing default — not disabled, not expired.
-        const existing = keys.find(
-          (k) => k.label === 'default' && !k.disabled && !isExpired(k),
-        );
+        // ANY existing default key = rebuild prompt (we can't surface
+        // the plaintext anywhere, so we have to make a new one).
+        const existing = keys.find((k) => k.label === 'default');
         if (existing) {
-          const cached = getCachedKey(email, String(existing.keyId));
-          if (cached) {
-            setApiKey(cached);
-            return;
-          }
-          // Edge: stale default, plaintext lost on this browser. Ask user.
           setNeedsRebuild({ existingKeyId: String(existing.keyId) });
           return;
         }
-        // If only disabled/expired defaults exist, prompt rebuild for the
-        // first such key so the user can replace it instead of getting
-        // silently stuck.
-        const stale = keys.find((k) => k.label === 'default');
-        if (stale) {
-          setNeedsRebuild({ existingKeyId: String(stale.keyId) });
-          return;
-        }
 
-        // Normal new-user path: 0 keys → create default
-        await createDefaultKey(email);
+        // 0 keys → create default + hold plaintext in state.
+        await createDefaultKey();
       } catch (e) {
         if (!cancelled) setKeyError((e as Error).message);
       }
     }
 
-    async function createDefaultKey(email: string) {
+    async function createDefaultKey() {
       const created = await api.createKey({ label: 'default' });
       if (cancelled) return;
-      setCachedKey(email, String(created.keyId), created.key);
       setApiKey(created.key);
     }
 
-    bootstrap(user.email);
+    bootstrap();
 
     return () => {
       cancelled = true;
@@ -87,13 +75,12 @@ export default function OnboardInstall() {
   }, [apiKey]);
 
   async function handleConfirmRebuild() {
-    if (!user?.email || !needsRebuild) return;
+    if (!needsRebuild) return;
     setRebuilding(true);
     setKeyError(null);
     try {
       await api.deleteKey(needsRebuild.existingKeyId);
       const created = await api.createKey({ label: 'default' });
-      setCachedKey(user.email, String(created.keyId), created.key);
       setApiKey(created.key);
       setNeedsRebuild(null);
     } catch (e) {

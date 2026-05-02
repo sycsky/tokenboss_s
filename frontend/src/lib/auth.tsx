@@ -22,12 +22,9 @@ import {
   api,
   getStoredSession,
   setStoredSession,
-  getStoredEmail,
-  setStoredEmail,
   type AuthResponse,
   type UserProfile,
 } from "./api.js";
-import { clearAllCachedKeys } from "./keyCache.js";
 
 interface AuthState {
   /** undefined while we're still hydrating from localStorage + /v1/me. */
@@ -98,11 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
-          // Stored token is dead. We can't read state.user (still
-          // undefined here — /me never returned), but `tb_last_email`
-          // remembers whose cache to wipe.
-          clearAllCachedKeys(getStoredEmail() ?? undefined);
-          setStoredEmail(null);
           setStoredSession(null);
           setState({ user: null, token: null });
         } else {
@@ -121,7 +113,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (input: { email: string; password: string; displayName?: string }): Promise<AuthResponse> => {
       const res = await api.register(input);
       setStoredSession(res.token);
-      setStoredEmail(res.user.email);
       setState({ user: res.user, token: res.token });
       return res;
     },
@@ -131,7 +122,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string): Promise<AuthResponse> => {
     const res = await api.login(email, password);
     setStoredSession(res.token);
-    setStoredEmail(res.user.email);
     setState({ user: res.user, token: res.token });
     return res;
   }, []);
@@ -139,7 +129,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const verifyEmail = useCallback(async (token: string): Promise<AuthResponse> => {
     const res = await api.verifyEmail(token);
     setStoredSession(res.token);
-    setStoredEmail(res.user.email);
     setState({ user: res.user, token: res.token });
     return res;
   }, []);
@@ -155,17 +144,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithCode = useCallback(async (email: string, code: string): Promise<AuthResponse> => {
     const res = await api.verifyCode(email, code);
     setStoredSession(res.token);
-    setStoredEmail(res.user.email);
     setState({ user: res.user, token: res.token });
     return res;
   }, []);
 
   const logout = useCallback(() => {
-    clearAllCachedKeys(state.user?.email ?? getStoredEmail() ?? undefined);
-    setStoredEmail(null);
     setStoredSession(null);
     setState({ user: null, token: null });
-  }, [state.user]);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -173,14 +159,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState((prev) => ({ user, token: prev.token }));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        clearAllCachedKeys(state.user?.email ?? getStoredEmail() ?? undefined);
-        setStoredEmail(null);
         setStoredSession(null);
         setState({ user: null, token: null });
       }
       throw err;
     }
-  }, [state.user]);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

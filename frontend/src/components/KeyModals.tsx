@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, type CreatedProxyKey, type ProxyKeySummary } from '../lib/api';
-import { setCachedKey } from '../lib/keyCache';
 import { KeyRow, type KeyStats } from './APIKeyList';
 import { isExpired } from '../lib/keyExpiry';
 
@@ -332,13 +331,14 @@ export function CreateKeyModal({
 }
 
 /**
- * Stage 2: one-shot reveal with a hard "I've saved it" gate. Dismissing
- * the modal commits the plaintext to localStorage cache (per-email,
- * per-keyId) — that's the ONLY moment we write the plaintext locally.
- * Once closed, the user can never see this value again from our UI.
+ * Stage 2: one-shot reveal. The plaintext is shown HERE and ONLY HERE —
+ * the platform never persists it anywhere (no localStorage cache, no
+ * server-side reveal endpoint). Once this modal closes, the user can
+ * never see this value again from our UI; if they didn't save it,
+ * their only path is to delete this Key and create a new one.
  *
  * No × button, no backdrop close, no ESC — the ack button is the only
- * exit. The acknowledge button is itself disabled until the user has
+ * exit. The acknowledge button itself is disabled until the user has
  * copied something at least once (prevents misclick-and-lose-key).
  *
  * Two copy options:
@@ -352,12 +352,10 @@ export function RevealKeyModal({
   open,
   onClose,
   created,
-  email,
 }: {
   open: boolean;
   onClose: () => void;
   created: CreatedProxyKey | null;
-  email: string | undefined;
 }) {
   const [copiedTarget, setCopiedTarget] = useState<'key' | 'cmd' | null>(null);
   const [everCopied, setEverCopied] = useState(false);
@@ -390,20 +388,9 @@ export function RevealKeyModal({
   }
 
   function handleAcknowledge() {
-    if (created && email) {
-      // The single moment we commit plaintext to localStorage. Subsequent
-      // reads (Dashboard install spell) come from this cache only.
-      setCachedKey(email, String(created.keyId), created.key);
-    } else if (created && !email) {
-      // Shouldn't happen — the modal only opens after createKey succeeded
-      // under an authed session. If we get here it means an upstream
-      // caller forgot to thread `user.email` down. Stay loud rather than
-      // silently produce a key the user thinks is cached but isn't.
-      console.warn(
-        '[RevealKeyModal] handleAcknowledge: missing email — skipping cache write. ' +
-          'The plaintext will be lost when this modal closes.',
-      );
-    }
+    // No side effects beyond closing — plaintext is never persisted by
+    // the platform. The user has now (verifiably) copied at least once,
+    // so they have it in their clipboard / their own storage.
     onClose();
   }
 
@@ -596,14 +583,12 @@ export function AllKeysModal({
   onClose,
   keys,
   keyStats,
-  cachedPlaintexts,
   onDeleteClick,
 }: {
   open: boolean;
   onClose: () => void;
   keys: ProxyKeySummary[];
   keyStats: Map<string, KeyStats>;
-  cachedPlaintexts: Map<string, string>;
   onDeleteClick: (target: ProxyKeySummary) => void;
 }) {
   const liveCount = keys.filter((k) => !k.disabled && !isExpired(k)).length;
@@ -624,7 +609,6 @@ export function AllKeysModal({
             key={k.keyId}
             k={k}
             stats={keyStats.get(k.label || 'default')}
-            plaintext={cachedPlaintexts.get(String(k.keyId))}
             onDeleteClick={onDeleteClick}
             isLast={i === keys.length - 1}
           />

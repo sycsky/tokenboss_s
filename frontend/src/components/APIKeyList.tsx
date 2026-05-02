@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { ProxyKeySummary } from '../lib/api';
 import { isExpired, expiryLabel } from '../lib/keyExpiry';
 
@@ -15,42 +14,31 @@ export interface APIKeyListProps {
   loadError: string | null;
   /** Map of key label → derived stats, computed from /v1/usage. */
   keyStats: Map<string, KeyStats>;
-  /**
-   * Per-keyId plaintext from the local cache (set by parent via
-   * `getCachedKey`). Rows whose keyId is in this map render the full
-   * plaintext value + a copy button. Rows NOT in the map render the
-   * masked value with no copy affordance — there is no way for the
-   * platform to surface plaintext on those rows.
-   */
-  cachedPlaintexts: Map<string, string>;
-  /** Cap on rows rendered inline. Default 3. Anything beyond surfaces
-   *  via the "see all" button which opens AllKeysModal. */
+  /** Cap on rows rendered inline. Default 1 — only the most recent key
+   *  shows up on the Dashboard panel. Anything else surfaces via the
+   *  "查看全部" button which opens AllKeysModal. */
   maxInline?: number;
   /** Click on `+ 创建` — parent opens CreateKeyModal. */
   onCreateClick: () => void;
   /** Click on the trash icon — parent opens DeleteKeyModal pre-loaded with `target`. */
   onDeleteClick: (target: ProxyKeySummary) => void;
-  /** Click on "查看全部 N 把 Key" — parent opens AllKeysModal. */
+  /** Click on "查看全部" — parent opens AllKeysModal. */
   onShowAllClick: () => void;
 }
 
 /**
  * Inline list of the user's TokenBoss proxy keys. Capped at `maxInline`
- * rows; anything more shows up via "查看全部 N 把 Key →" which opens
- * AllKeysModal.
+ * rows; anything more shows up via "查看全部 →" which opens AllKeysModal.
  *
- * Plaintext + copy button only appear for rows whose keyId is in
- * `cachedPlaintexts` AND that are still usable (not expired, not disabled).
- * For everything else the platform shows a masked value and offers no
- * way to retrieve the plaintext — the only way to use a key on a new
- * device is to create a new one.
+ * Rows ALWAYS show the masked value (e.g. `sk-•••a4c2`) — never the
+ * plaintext. The platform doesn't persist plaintext anywhere; if the
+ * user wants to use a key on a new device, they create a new one.
  */
 export function APIKeyList({
   keys,
   loadError,
   keyStats,
-  cachedPlaintexts,
-  maxInline = 3,
+  maxInline = 1,
   onCreateClick,
   onDeleteClick,
   onShowAllClick,
@@ -90,7 +78,6 @@ export function APIKeyList({
           key={k.keyId}
           k={k}
           stats={keyStats.get(k.label || 'default')}
-          plaintext={cachedPlaintexts.get(String(k.keyId))}
           onDeleteClick={onDeleteClick}
           isLast={i === visible.length - 1}
         />
@@ -109,7 +96,7 @@ export function APIKeyList({
             'transition-all'
           }
         >
-          查看全部 {keys.length} 把 Key →
+          查看全部 →
         </button>
       )}
     </div>
@@ -123,41 +110,26 @@ export function APIKeyList({
  * Visual treatment for "dead" rows (expired or disabled): the whole row
  * is dimmed via opacity-60, and the label + value get a strikethrough.
  * Combined with the gray status dot and the badge, you can spot them at
- * a glance.
+ * a glance. The row's value is always masked — there is no Copy button,
+ * because there is no platform-side plaintext to copy.
  */
 export interface KeyRowProps {
   k: ProxyKeySummary;
   stats: KeyStats | undefined;
-  plaintext: string | undefined;
   isLast: boolean;
   onDeleteClick: (target: ProxyKeySummary) => void;
 }
 
-export function KeyRow({ k, stats, plaintext, isLast, onDeleteClick }: KeyRowProps) {
-  const [copied, setCopied] = useState(false);
+export function KeyRow({ k, stats, isLast, onDeleteClick }: KeyRowProps) {
   const expired = isExpired(k);
   const dead = expired || !!k.disabled;
-  const canCopy = !!plaintext && !dead;
   const dotClass = dead ? 'bg-[#A89A8D]' : 'bg-lime-stamp';
-  // Visual: dim everything in a dead row, strikethrough on the label
-  // + value box so it's unmistakable at a glance that the key is gone.
   const labelClass = dead
     ? 'truncate line-through text-[#A89A8D]'
     : 'truncate text-ink';
   const valueClass = dead
     ? 'flex-1 min-w-0 font-mono text-[11px] line-through text-[#A89A8D] bg-bg border-2 border-[#D9CEC2] px-2 py-1.5 rounded truncate'
     : 'flex-1 min-w-0 font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate';
-
-  async function handleCopy() {
-    if (!plaintext) return;
-    try {
-      await navigator.clipboard.writeText(plaintext);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — user can long-press to select on mobile */
-    }
-  }
 
   return (
     <div
@@ -199,31 +171,7 @@ export function KeyRow({ k, stats, plaintext, isLast, onDeleteClick }: KeyRowPro
       </div>
 
       <div className="flex items-center gap-1.5">
-        <span className={valueClass}>
-          {/* Show plaintext only when cached AND usable. Dead rows fall
-              back to the mask even if cache still has them — there's no
-              point leaking a dead value into the DOM. */}
-          {canCopy ? plaintext : k.key}
-        </span>
-        {canCopy && (
-          <button
-            type="button"
-            onClick={handleCopy}
-            aria-label={`复制 ${k.label || 'default'}`}
-            className={
-              'flex-shrink-0 px-2 py-1.5 border-2 rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase ' +
-              'shadow-[2px_2px_0_0_#1C1917] ' +
-              'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-              'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-              'transition-all ' +
-              (copied
-                ? 'bg-accent border-accent text-white'
-                : 'bg-white border-ink text-ink')
-            }
-          >
-            {copied ? '✓' : <CopyIcon />}
-          </button>
-        )}
+        <span className={valueClass}>{k.key}</span>
       </div>
 
       <div className="font-mono text-[10px] text-[#A89A8D] mt-1 flex items-center justify-between gap-2">
@@ -239,15 +187,6 @@ export function KeyRow({ k, stats, plaintext, isLast, onDeleteClick }: KeyRowPro
         )}
       </div>
     </div>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <rect x="3.5" y="3.5" width="6" height="7" rx="1" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M2 7.5V2.5C2 2.22 2.22 2 2.5 2H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
   );
 }
 
