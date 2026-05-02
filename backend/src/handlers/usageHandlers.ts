@@ -151,28 +151,20 @@ function isoToTimestamp(iso: string | undefined): number | undefined {
   return Number.isFinite(d) ? Math.floor(d / 1000) : undefined;
 }
 
-/** Default lookback when no `from` is provided. We bound usage queries
- *  to "current billing cycle" so totals stay aligned with what users
- *  mentally track ("this month") and so server load doesn't grow with
- *  account lifetime. Resolution order:
- *    1. Most recent reset snapshot (= start of current sub cycle)
- *    2. max(now - 30d, user.createdAt) for users without resets yet
- *  The returned ISO string is also surfaced to the client in
- *  `response.cycleStart` so labels can say "自 X 起" honestly. */
-function resolveCycleStart(userId: string, userCreatedAt: string): {
-  startTs: number;
-  startIso: string;
-} {
-  const snaps = listResetSnapshots(userId);
-  if (snaps.length > 0) {
-    // listResetSnapshots is ORDER BY observedAt DESC — first row wins.
-    const startIso = snaps[0].observedAt;
-    return { startTs: Math.floor(new Date(startIso).getTime() / 1000), startIso };
-  }
-  const thirtyDaysAgoMs = Date.now() - 30 * 86400 * 1000;
-  const userCreatedMs = new Date(userCreatedAt).getTime();
-  const startMs = Math.max(thirtyDaysAgoMs, userCreatedMs);
-  return { startTs: Math.floor(startMs / 1000), startIso: new Date(startMs).toISOString() };
+/** Default lookback when no `from` is provided. Always "last 30 days"
+ *  for every user (sub or not, new or old) — picked over per-cycle
+ *  windows because:
+ *    - One rule, zero branches.
+ *    - Stable across sub resets (no "where did my history go?" jump
+ *      when the cycle rolls over).
+ *    - Matches industry convention (Stripe / Vercel / GitHub all
+ *      default to 近 30 天).
+ *  Hero "今日剩" still reads from newapi sub state so cycle-accurate
+ *  numbers exist where they matter; this window is for the trend
+ *  cards, not for billing accounting. */
+const DEFAULT_LOOKBACK_DAYS = 30;
+function defaultStartTs(): number {
+  return Math.floor((Date.now() - DEFAULT_LOOKBACK_DAYS * 86400 * 1000) / 1000);
 }
 
 interface FetchAllParams {
@@ -258,15 +250,9 @@ export const usageHandler = async (
   const username = newapiUsername(userId);
 
   const qs = event.queryStringParameters ?? {};
-  // Default window = current billing cycle (since last subscription
-  // reset, or rolling 30d for users who haven't reset yet). Only kicks
-  // in when the client doesn't pass an explicit `from` — UsageHistory's
-  // 24h fetch and any future custom-range queries override it.
-  const explicitFromTs = isoToTimestamp(qs.from);
-  const cycle = explicitFromTs === undefined
-    ? resolveCycleStart(userId, user.createdAt)
-    : null;
-  const startTs = explicitFromTs ?? cycle!.startTs;
+  // Default window = rolling 30d. Client may override via `from` (e.g.
+  // UsageHistory's 24h fetch).
+  const startTs = isoToTimestamp(qs.from) ?? defaultStartTs();
   const endTs = isoToTimestamp(qs.to);
 
   // ----- Aggregation mode -----
@@ -432,11 +418,6 @@ export const usageHandler = async (
       calls: all.length,
     },
     hourly24h,
-    // Surface the start of the window so the dashboard can label totals
-    // honestly ("自 4月 28 日 起 / 本周期"). Only set when we computed
-    // it ourselves — when the client passed an explicit `from`, it
-    // already knows the window.
-    ...(cycle ? { cycleStart: cycle.startIso } : {}),
   });
 };
 

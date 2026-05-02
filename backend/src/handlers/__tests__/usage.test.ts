@@ -14,7 +14,7 @@ vi.mock('../../lib/newapi.js', async (orig) => {
   };
 });
 
-import { init, putUser, insertAttribution, writeSubscriptionSnapshot, db } from '../../lib/store.js';
+import { init, putUser, insertAttribution, db } from '../../lib/store.js';
 import { usageHandler } from '../usageHandlers.js';
 import { newapi } from '../../lib/newapi.js';
 
@@ -145,51 +145,29 @@ describe('usageHandler (newapi-backed)', () => {
     expect(body.groups[0].callCount).toBe(2);
   });
 
-  // Default window = current billing cycle: when no `from` is provided,
-  // the handler should pass the most recent reset snapshot's timestamp
-  // as start_timestamp, and surface it in response.cycleStart.
-  it('defaults to current billing cycle when no `from` is provided', async () => {
-    const resetIso = '2026-04-15T00:00:00.000Z';
-    writeSubscriptionSnapshot({
-      userId: 'u_1',
-      subId: 7,
-      observedAt: resetIso,
-      amountTotalUsd: 80,
-      amountUsedUsd: 0,
-      resetExpiredUsd: 12.5, // non-null = this row IS a reset event
-      planTier: 'super',
-    });
+  // Default window = rolling 30d for every user (sub or not). Same
+  // logic for everyone — keeps server load bounded and gives a stable
+  // "近 30 天" trend that doesn't jump on sub reset.
+  it('defaults to rolling 30d when no `from` is provided', async () => {
     getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
-
     await usageHandler(makeEvt());
-    // Every getLogs call should now carry start_timestamp = resetIso/1000
-    const expectedTs = Math.floor(new Date(resetIso).getTime() / 1000);
-    for (const call of getLogsMock.mock.calls) {
-      expect(call[0].start_timestamp).toBe(expectedTs);
-    }
 
-    // And the response should surface it so the UI can label honestly.
-    const res = (await usageHandler(makeEvt())) as APIGatewayProxyStructuredResultV2;
-    const body = JSON.parse(res.body!);
-    expect(body.cycleStart).toBe(resetIso);
+    const expectedMin = Math.floor((Date.now() - 30 * 86400 * 1000) / 1000);
+    for (const call of getLogsMock.mock.calls) {
+      const ts = call[0].start_timestamp as number;
+      // Allow ±2s for clock skew between handler call and assertion.
+      expect(ts).toBeGreaterThanOrEqual(expectedMin - 2);
+      expect(ts).toBeLessThanOrEqual(expectedMin + 2);
+    }
   });
 
   // Explicit `from` from the client (e.g. UsageHistory's 24h window)
-  // must override the cycle-default and the response should NOT include
-  // cycleStart (the client already knows the window).
-  it('respects explicit `from` and omits cycleStart in that case', async () => {
-    writeSubscriptionSnapshot({
-      userId: 'u_1', subId: 7,
-      observedAt: '2026-04-15T00:00:00.000Z',
-      amountTotalUsd: 80, amountUsedUsd: 0,
-      resetExpiredUsd: 12.5, planTier: 'super',
-    });
+  // must override the 30d default.
+  it('respects explicit `from` and skips the 30d default', async () => {
     getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
 
     const explicitFrom = '2026-05-01T00:00:00.000Z';
-    const res = (await usageHandler(makeEvt({ from: explicitFrom }))) as APIGatewayProxyStructuredResultV2;
-    const body = JSON.parse(res.body!);
-    expect(body.cycleStart).toBeUndefined();
+    await usageHandler(makeEvt({ from: explicitFrom }));
     const expectedTs = Math.floor(new Date(explicitFrom).getTime() / 1000);
     for (const call of getLogsMock.mock.calls) {
       expect(call[0].start_timestamp).toBe(expectedTs);

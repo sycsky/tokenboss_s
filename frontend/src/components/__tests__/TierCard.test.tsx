@@ -27,11 +27,11 @@ describe('<TierCard>', () => {
     expect(screen.getByText('★')).toBeInTheDocument();
   });
 
-  it('renders strong sold-out banner when soldOutBanner is set', () => {
+  it('renders strong sold-out banner when banner is set', () => {
     render(<TierCard
       name="Ultra" pricePeriod="¥1688/4周" dailyCap="$720/天" models={['极致使用 Codex 满血版']}
       ctaText="下次开放 04:23:11" ctaVariant="muted"
-      soldOutBanner="今日 8 席已抢完 · 明日 10:00 再开" />);
+      banner="今日 8 席已抢完 · 明日 10:00 再开" />);
     expect(screen.getByText('今日 8 席已抢完 · 明日 10:00 再开')).toBeInTheDocument();
   });
 });

@@ -7,26 +7,16 @@ import { RedeemCodeModal } from '../components/RedeemCodeModal';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
-function formatCycleStart(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '本周期';
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
-}
-
 export default function Settings() {
   const { user, logout } = useAuth();
   const [stats, setStats] = useState({ consumed: 0, calls: 0 });
-  const [cycleStart, setCycleStart] = useState<string | null>(null);
   const [bucket, setBucket] = useState<BucketRecord | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
 
   useEffect(() => {
-    api.getUsage({}).then((r) => {
-      setStats(r.totals);
-      setCycleStart(r.cycleStart ?? null);
-    });
+    api.getUsage({}).then((r) => setStats(r.totals));
     api.getBuckets().then((r) => setBucket((r.buckets || []).find((b) => b.skuType.startsWith('plan_')) ?? null));
     api.me().then((r) => {
       setCreatedAt(r.user?.createdAt ?? null);
@@ -127,23 +117,21 @@ export default function Settings() {
           <div className="grid grid-cols-2 gap-0">
             <div className="border-r-2 border-ink/10 pr-5">
               <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
-                本周期消耗
+                消耗
               </div>
               <div className="font-mono text-[28px] font-bold leading-none text-ink">
                 ${(stats.consumed ?? 0).toFixed(4)}
               </div>
-              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">
-                {cycleStart ? `自 ${formatCycleStart(cycleStart)} 起` : '本周期'}
-              </div>
+              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">近 30 天</div>
             </div>
             <div className="pl-5">
               <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
-                本周期调用
+                调用
               </div>
               <div className="font-mono text-[28px] font-bold leading-none text-ink">
                 {stats.calls ?? 0}
               </div>
-              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">次</div>
+              <div className="font-mono text-[10.5px] text-[#A89A8D] mt-1.5">次 · 近 30 天</div>
             </div>
           </div>
         </div>
