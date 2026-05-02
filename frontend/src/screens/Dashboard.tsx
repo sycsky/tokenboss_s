@@ -19,7 +19,8 @@ import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
-import { getCachedKey, setCachedKey } from '../lib/keyCache';
+import { getCachedKey, clearCachedKey } from '../lib/keyCache';
+import { isExpired } from '../lib/keyExpiry';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -121,6 +122,25 @@ export default function Dashboard() {
       setKeys(r.keys);
       dashboardCache.keys = r.keys;
       setKeysError(null);
+      // Sweep: any cached plaintext for keyIds no longer in the list is
+      // stale (the key was deleted, possibly from another device). Collect
+      // first, delete after — mutating localStorage mid-iteration shifts
+      // indices and can skip entries.
+      if (user?.email) {
+        const present = new Set(r.keys.map((k) => String(k.keyId)));
+        const prefix = `tb_key_v1:${user.email}:`;
+        const orphanIds: string[] = [];
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const lk = localStorage.key(i);
+            if (lk && lk.startsWith(prefix)) {
+              const cachedId = lk.slice(prefix.length);
+              if (!present.has(cachedId)) orphanIds.push(cachedId);
+            }
+          }
+          orphanIds.forEach((id) => clearCachedKey(user.email!, id));
+        } catch { /* private mode */ }
+      }
     } catch (e) {
       setKeysError((e as Error).message);
     }
@@ -250,22 +270,18 @@ export default function Dashboard() {
   //
   // The bottom API KEY list rows still reveal-on-click (see APIKeyList)
   // since those serve management, not the always-on copy spell.
-  const defaultKey = keys.find((k) => k.label === 'default') ?? keys[0];
+  const defaultKey =
+    keys.find((k) => k.label === 'default' && !k.disabled && !isExpired(k)) ??
+    keys.find((k) => !k.disabled && !isExpired(k));
   const cachedDefaultPlain =
     user?.email && defaultKey ? getCachedKey(user.email, defaultKey.keyId) : null;
-  const spellExtra = defaultKey
-    ? cachedDefaultPlain
+  const spellExtra =
+    defaultKey && cachedDefaultPlain
       ? `TOKENBOSS_API_KEY=${cachedDefaultPlain}`
-      : `TOKENBOSS_API_KEY=${defaultKey.key}`
-    : undefined;
-  const spellResolver =
-    defaultKey && !cachedDefaultPlain
-      ? async () => {
-          const { key } = await api.revealKey(defaultKey.keyId);
-          if (user?.email) setCachedKey(user.email, defaultKey.keyId, key);
-          return `TOKENBOSS_API_KEY=${key}`;
-        }
+      : defaultKey
+      ? `TOKENBOSS_API_KEY=${defaultKey.key}` // masked fallback
       : undefined;
+  // No spellResolver — cache is the only source of plaintext now.
 
   // Contact-sales modal — every paid action (upgrade / renew / topup)
   // routes through here in v1 since there's no self-checkout yet.
@@ -602,7 +618,6 @@ export default function Dashboard() {
             <TerminalBlock
               cmd="set up tokenboss.co/skill.md"
               extra={spellExtra}
-              extraResolver={spellResolver}
               loading={keys.length === 0 && !keysError}
               prompt={
                 <>
@@ -613,6 +628,32 @@ export default function Dashboard() {
                 </>
               }
             />
+            {defaultKey && cachedDefaultPlain && (
+              <p className="font-mono text-[10.5px] text-[#A89A8D] mt-1">
+                💾 本地缓存 · 退出登录后将消失
+              </p>
+            )}
+
+            {defaultKey && !cachedDefaultPlain && (
+              <div className="mt-2 border-2 border-ink rounded-md bg-amber-50 p-3 text-[12.5px] leading-relaxed">
+                <div className="font-bold text-ink mb-1">📍 这台设备没有该 Key 的本地缓存</div>
+                <div className="text-[#6B5E52] mb-2">
+                  为了你的安全，明文不能在新设备上重新查看。
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  className={
+                    'px-3 py-1.5 bg-ink text-white font-bold text-[12px] border-2 border-ink rounded ' +
+                    'shadow-[2px_2px_0_0_#E8692A] ' +
+                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#E8692A] ' +
+                    'transition-all'
+                  }
+                >
+                  为这台设备创建一个新 Key
+                </button>
+              </div>
+            )}
             <Link
               to="/install/manual"
               className="block mt-2.5 font-mono text-[11px] text-[#A89A8D] hover:text-ink transition-colors"
