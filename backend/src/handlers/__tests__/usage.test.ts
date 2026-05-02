@@ -181,9 +181,10 @@ describe('usageHandler (newapi-backed)', () => {
     }
   });
 
-  // 60s in-memory cache: a single dashboard load fires fetchAllConsumeLogs
-  // twice (once for totals/hourly, once for keyHint aggregation) — same
-  // window, same user, so the second call must hit the cache.
+  // 60s in-memory cache: records mode now sources records from the
+  // same fetchAllConsumeLogs result it uses for totals/hourly, so a
+  // second handler call within the TTL must trigger zero upstream
+  // getLogs calls.
   it('caches fetchAll results so the second handler call in the same window reuses them', async () => {
     let callCount = 0;
     getLogsMock.mockImplementation(async () => {
@@ -191,16 +192,15 @@ describe('usageHandler (newapi-backed)', () => {
       return { items: [logEntry({ id: callCount, quota: 50_000 })], total: 1, page: 0, page_size: 100 };
     });
 
-    // First call: cache miss. Records mode triggers TWO getLogs calls
-    // (one for the records page, one inside fetchAll for totals).
+    // First call: cache miss. fetchAll paginates until total reached
+    // (1 entry with total=1 → exactly 1 upstream call).
     await usageHandler(makeEvt());
     const callsAfterFirst = callCount;
-    expect(callsAfterFirst).toBeGreaterThanOrEqual(2);
+    expect(callsAfterFirst).toBeGreaterThanOrEqual(1);
 
-    // Second call within TTL: records-page call still goes through (not
-    // cached), but the fetchAll call should be served from cache.
+    // Second call within TTL: every read served from cache.
     await usageHandler(makeEvt());
-    expect(callCount).toBe(callsAfterFirst + 1); // only +1, not +2
+    expect(callCount).toBe(callsAfterFirst);
   });
 
   // Different windows must NOT share a cache slot — explicit `from`
@@ -216,7 +216,7 @@ describe('usageHandler (newapi-backed)', () => {
     const after30d = callCount;
     await usageHandler(makeEvt({ from: '2026-04-01T00:00:00.000Z' }));
     // Different window ⇒ different key ⇒ fetchAll re-runs.
-    expect(callCount).toBeGreaterThan(after30d + 1);
+    expect(callCount).toBeGreaterThan(after30d);
   });
 
   // Regression: newapi caps `size` at 100 server-side regardless of what

@@ -100,8 +100,16 @@ function attachSourcesToLogEntries(
   const out = new Map<number, string>();
   if (entries.length === 0) return out;
 
-  const minTs = Math.min(...entries.map((e) => e.created_at));
-  const maxTs = Math.max(...entries.map((e) => e.created_at));
+  // Iterate instead of spreading into Math.min/max — spread blows the
+  // call stack at ~10k args on V8, and this is now called with the
+  // full 30d window (capped at 5k but close to that limit on heavy
+  // users).
+  let minTs = Number.POSITIVE_INFINITY;
+  let maxTs = Number.NEGATIVE_INFINITY;
+  for (const e of entries) {
+    if (e.created_at < minTs) minTs = e.created_at;
+    if (e.created_at > maxTs) maxTs = e.created_at;
+  }
   const minIso = new Date((minTs - 5) * 1000).toISOString();
   const maxIso = new Date((maxTs + 5) * 1000).toISOString();
   const distinctModels = Array.from(new Set(
@@ -396,29 +404,26 @@ export const usageHandler = async (
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 50;
   const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
-  // newapi pages by 0-indexed `p` and `size`; convert offset → page when
-  // possible. For typical limit=50 this maps cleanly.
-  const page = Math.floor(offset / limit);
-  const pageRes = await newapi.getLogs({
-    page,
-    per_page: limit,
-    type: 2,
+  // Pull the full window once (60s cached). We slice the merged
+  // consume + reset list ourselves below — using newapi's own
+  // pagination here would only paginate consume rows, leaving every
+  // page padded with the same full set of reset rows.
+  const all = await fetchAllConsumeLogs({
     username,
     start_timestamp: startTs,
     end_timestamp: endTs,
   });
-  const pageItems = pageRes.items ?? [];
-  const sourceByEntryId = attachSourcesToLogEntries(userId, pageItems);
-  const consumeRecords = pageItems.map((entry) =>
+
+  const sourceByEntryId = attachSourcesToLogEntries(userId, all);
+  const consumeRecords = all.map((entry) =>
     mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
   );
 
   // Synthesize subscription reset/expire records from the snapshot table
   // so /console/history shows the periodic "作废 + 重置" pair newapi
-  // doesn't log natively. Window matches the consume window so the merge
-  // stays time-coherent. listResetSnapshots returns ONLY rows with
-  // resetExpiredUsd set (= rows that detected a reset), so we don't
-  // double-count ordinary observation snapshots.
+  // doesn't log natively. listResetSnapshots returns ONLY rows with
+  // resetExpiredUsd set, so ordinary observation snapshots aren't
+  // double-counted.
   const resetSnapshots = listResetSnapshots(
     userId,
     startTs ? new Date(startTs * 1000).toISOString() : undefined,
@@ -426,29 +431,26 @@ export const usageHandler = async (
   );
   const resetRecords = resetSnapshots.flatMap(snapshotToRecords);
 
-  // Merge + sort newest-first. consumeRecords are already paginated by
-  // newapi so they're at most `limit` long; reset rows in a normal
-  // window are ≤ 30 (one per day for monthly, one per cycle for others).
-  // No re-pagination needed at this size.
-  const records = [...consumeRecords, ...resetRecords].sort((a, b) =>
+  // Merge + sort newest-first, then slice the requested page. Both
+  // sources participate in pagination so frequent resets don't crowd
+  // every page.
+  const merged = [...consumeRecords, ...resetRecords].sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
   );
+  const records = merged.slice(offset, offset + limit);
 
-  // Pull the full window for totals + hourly chart. Reasonable cap.
-  const all = await fetchAllConsumeLogs({
-    username,
-    start_timestamp: startTs,
-    end_timestamp: endTs,
-  });
   const totalConsumed = all.reduce((s, e) => s + newapiQuotaToUsd(e.quota), 0);
-
   const hourly24h = buildHourly24h(all);
 
   return jsonResponse(200, {
     records,
     totals: {
       consumed: round6(totalConsumed),
+      // `calls` stays consume-only — the UI labels it "X 次调用".
+      // `records` is the merged total (consume + reset) the UI uses
+      // for page-count math.
       calls: all.length,
+      records: merged.length,
     },
     hourly24h,
   });
