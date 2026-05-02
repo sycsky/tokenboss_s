@@ -243,6 +243,12 @@ export interface UsageDetailResponse {
   records: UsageRecord[];
   totals: { consumed: number; calls: number };
   hourly24h: HourlyUsage[];
+  /** ISO timestamp marking the start of the window used for `totals` /
+   *  `hourly24h`. Backend defaults to "current billing cycle" (last
+   *  subscription reset, or 30d for users without a sub) so totals
+   *  don't grow unbounded with account lifetime. Only present when the
+   *  client did NOT pass an explicit `from`. */
+  cycleStart?: string;
 }
 
 export interface UsageAggregateGroup {

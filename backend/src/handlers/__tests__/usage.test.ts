@@ -14,7 +14,7 @@ vi.mock('../../lib/newapi.js', async (orig) => {
   };
 });
 
-import { init, putUser, insertAttribution, db } from '../../lib/store.js';
+import { init, putUser, insertAttribution, writeSubscriptionSnapshot, db } from '../../lib/store.js';
 import { usageHandler } from '../usageHandlers.js';
 import { newapi } from '../../lib/newapi.js';
 
@@ -143,6 +143,57 @@ describe('usageHandler (newapi-backed)', () => {
     expect(body.groups).toHaveLength(1);
     expect(body.groups[0].groupKey).toBeNull();
     expect(body.groups[0].callCount).toBe(2);
+  });
+
+  // Default window = current billing cycle: when no `from` is provided,
+  // the handler should pass the most recent reset snapshot's timestamp
+  // as start_timestamp, and surface it in response.cycleStart.
+  it('defaults to current billing cycle when no `from` is provided', async () => {
+    const resetIso = '2026-04-15T00:00:00.000Z';
+    writeSubscriptionSnapshot({
+      userId: 'u_1',
+      subId: 7,
+      observedAt: resetIso,
+      amountTotalUsd: 80,
+      amountUsedUsd: 0,
+      resetExpiredUsd: 12.5, // non-null = this row IS a reset event
+      planTier: 'super',
+    });
+    getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
+
+    await usageHandler(makeEvt());
+    // Every getLogs call should now carry start_timestamp = resetIso/1000
+    const expectedTs = Math.floor(new Date(resetIso).getTime() / 1000);
+    for (const call of getLogsMock.mock.calls) {
+      expect(call[0].start_timestamp).toBe(expectedTs);
+    }
+
+    // And the response should surface it so the UI can label honestly.
+    const res = (await usageHandler(makeEvt())) as APIGatewayProxyStructuredResultV2;
+    const body = JSON.parse(res.body!);
+    expect(body.cycleStart).toBe(resetIso);
+  });
+
+  // Explicit `from` from the client (e.g. UsageHistory's 24h window)
+  // must override the cycle-default and the response should NOT include
+  // cycleStart (the client already knows the window).
+  it('respects explicit `from` and omits cycleStart in that case', async () => {
+    writeSubscriptionSnapshot({
+      userId: 'u_1', subId: 7,
+      observedAt: '2026-04-15T00:00:00.000Z',
+      amountTotalUsd: 80, amountUsedUsd: 0,
+      resetExpiredUsd: 12.5, planTier: 'super',
+    });
+    getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
+
+    const explicitFrom = '2026-05-01T00:00:00.000Z';
+    const res = (await usageHandler(makeEvt({ from: explicitFrom }))) as APIGatewayProxyStructuredResultV2;
+    const body = JSON.parse(res.body!);
+    expect(body.cycleStart).toBeUndefined();
+    const expectedTs = Math.floor(new Date(explicitFrom).getTime() / 1000);
+    for (const call of getLogsMock.mock.calls) {
+      expect(call[0].start_timestamp).toBe(expectedTs);
+    }
   });
 
   // Regression: newapi caps `size` at 100 server-side regardless of what

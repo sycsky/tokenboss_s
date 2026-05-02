@@ -538,12 +538,12 @@ export default function Dashboard() {
               <section>
                 <div className="grid grid-cols-2 gap-2.5">
                   <div className={`${card} p-4`}>
-                    <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">调用</div>
+                    <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">本周期调用</div>
                     <div className="font-mono text-[28px] font-bold leading-none text-ink">{usage.totals?.calls ?? 0}</div>
                     <div className="font-mono text-[11px] text-[#A89A8D] mt-1">次</div>
                   </div>
                   <div className={`${card} p-4`}>
-                    <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">已用</div>
+                    <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-1.5">本周期已用</div>
                     <div className="font-mono text-[28px] font-bold leading-none text-accent">${(usage.totals?.consumed ?? 0).toFixed(4)}</div>
                   </div>
                 </div>
