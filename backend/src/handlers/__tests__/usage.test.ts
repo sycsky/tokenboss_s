@@ -144,6 +144,34 @@ describe('usageHandler (newapi-backed)', () => {
     expect(body.groups[0].groupKey).toBeNull();
     expect(body.groups[0].callCount).toBe(2);
   });
+
+  // Regression: newapi caps `size` at 100 server-side regardless of what
+  // we ask for. The old loop's "items.length < requestedPerPage" EOF
+  // check tripped on page 0 (100 < 1000), freezing totals at 100.
+  // Make sure we now paginate until res.total is satisfied.
+  it('totals.calls follows newapi total even when server caps page size at 100', async () => {
+    // Simulate a user with 250 entries while newapi caps each page at 100.
+    const TOTAL = 250;
+    const SERVER_CAP = 100;
+    const allEntries = Array.from({ length: TOTAL }, (_, i) =>
+      logEntry({ id: i + 1, quota: 10_000 }),
+    );
+    getLogsMock.mockImplementation(async (q: { page?: number; per_page?: number }) => {
+      const page = q.page ?? 0;
+      // newapi ignores per_page > 100 — clamp like the real server.
+      const size = Math.min(q.per_page ?? 50, SERVER_CAP);
+      const start = page * size;
+      const items = allEntries.slice(start, start + size);
+      return { items, total: TOTAL, page, page_size: size };
+    });
+
+    const res = (await usageHandler(makeEvt())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body!);
+    expect(body.totals.calls).toBe(TOTAL);
+    // 250 entries × 10_000 quota × $1 / 500_000 = $5.00
+    expect(body.totals.consumed).toBeCloseTo(250 * (10_000 / 500_000), 3);
+  });
 });
 
 describe('GET /v1/usage — source attribution soft-join', () => {

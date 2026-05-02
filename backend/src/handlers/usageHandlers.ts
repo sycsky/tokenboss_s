@@ -155,25 +155,36 @@ interface FetchAllParams {
   username: string;
   start_timestamp?: number;
   end_timestamp?: number;
-  per_page?: number;
 }
 
 /** Pull every consume entry for `username` in the given window. Caps at 5000. */
 async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]> {
-  const perPage = Math.min(p.per_page ?? 1000, 1000);
+  // newapi's /api/log/ silently caps `size` at 100 server-side regardless
+  // of what we request. The previous "items.length < requestedPerPage"
+  // EOF check therefore always tripped on page 0 (100 < 1000), so totals
+  // and the hourly chart silently froze at the first 100 entries — the
+  // exact symptom users hit ("调用次数停在 100"). Drive the loop off the
+  // response's own `total` instead, with a hard cap to bound memory /
+  // request count for power users.
+  const PER_PAGE = 100;
+  const HARD_CAP_RECORDS = 5000;
+  const HARD_CAP_PAGES = Math.ceil(HARD_CAP_RECORDS / PER_PAGE);
   const all: NewapiLogEntry[] = [];
-  for (let page = 0; page < 5; page++) {
+  for (let page = 0; page < HARD_CAP_PAGES; page++) {
     const res = await newapi.getLogs({
       page,
-      per_page: perPage,
+      per_page: PER_PAGE,
       type: 2, // consume only
       username: p.username,
       start_timestamp: p.start_timestamp,
       end_timestamp: p.end_timestamp,
     });
     const items = res?.items ?? [];
+    if (items.length === 0) break;
     all.push(...items);
-    if (items.length < perPage) break;
+    const total = typeof res?.total === 'number' ? res.total : undefined;
+    if (total !== undefined && all.length >= total) break;
+    if (all.length >= HARD_CAP_RECORDS) break;
   }
   return all;
 }
