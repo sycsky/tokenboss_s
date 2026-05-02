@@ -47,3 +47,24 @@ export function clearCachedKey(email: string, keyId: string): void {
     /* noop */
   }
 }
+
+/**
+ * Clear ALL cached plaintext keys for one user. Used at logout to keep
+ * the "缓存只在你这台设备" promise honest — sign out wipes the local copy.
+ *
+ * No-op when email is missing (e.g., logout fired before user hydrated).
+ */
+export function clearAllCachedKeys(email: string | undefined): void {
+  if (!email) return;
+  const prefix = `${NS}:${email}:`;
+  try {
+    const toDelete: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) toDelete.push(k);
+    }
+    toDelete.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* private mode / disabled storage — nothing to clear */
+  }
+}

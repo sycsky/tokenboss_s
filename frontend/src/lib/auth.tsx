@@ -25,6 +25,7 @@ import {
   type AuthResponse,
   type UserProfile,
 } from "./api.js";
+import { clearAllCachedKeys } from "./keyCache.js";
 
 interface AuthState {
   /** undefined while we're still hydrating from localStorage + /v1/me. */
@@ -149,9 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    clearAllCachedKeys(state.user?.email);
     setStoredSession(null);
     setState({ user: null, token: null });
-  }, []);
+  }, [state.user]);
 
   const refresh = useCallback(async () => {
     try {
@@ -159,12 +161,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState((prev) => ({ user, token: prev.token }));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
+        clearAllCachedKeys(state.user?.email);
         setStoredSession(null);
         setState({ user: null, token: null });
       }
       throw err;
     }
-  }, []);
+  }, [state.user]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
