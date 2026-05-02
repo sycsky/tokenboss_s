@@ -660,6 +660,7 @@ export default function Dashboard() {
         open={justCreated !== null}
         onClose={closeReveal}
         created={justCreated}
+        email={user?.email}
       />
       <DeleteKeyModal
         open={deleteTarget !== null}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, type CreatedProxyKey, type ProxyKeySummary } from '../lib/api';
+import { setCachedKey } from '../lib/keyCache';
 
 /**
  * Slock-pixel modal shell — backdrop dim + ink-bordered card. Shared by
@@ -54,6 +55,51 @@ function ModalShell({
           >
             ×
           </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Variant of ModalShell for moments where dismissing without an explicit
+ * action is unsafe (e.g., the "show once" plaintext reveal). No backdrop
+ * click, no ×, no ESC — only the explicit acknowledge button can close it.
+ */
+function StickyModalShell({
+  open,
+  tag,
+  title,
+  children,
+}: {
+  open: boolean;
+  tag: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-5" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-ink/55" aria-hidden="true" />
+      <div className="relative bg-white border-2 border-ink rounded-lg shadow-[6px_6px_0_0_#1C1917] max-w-[440px] w-full p-6">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-1">
+              {tag}
+            </div>
+            <h2 className="text-[20px] font-bold tracking-tight text-ink leading-tight">{title}</h2>
+          </div>
         </div>
         {children}
       </div>
@@ -165,19 +211,24 @@ export function CreateKeyModal({
 }
 
 /**
- * Stage 2: one-shot reveal. Backend returns the full key only at create
- * time — once this modal closes the user can never see it again, so the
- * primary action is COPY. The 完成 button is intentionally secondary so
- * the user reaches for COPY first.
+ * Stage 2: one-shot reveal with a hard "I've saved it" gate. Dismissing
+ * the modal commits the plaintext to localStorage cache (per-email,
+ * per-keyId) — that's the ONLY moment we write the plaintext locally.
+ * Once closed, the user can never see this value again from our UI.
+ *
+ * No × button, no backdrop close, no ESC — the ack button is the only
+ * exit. Clipboard copy is a separate action; ack writes cache + closes.
  */
 export function RevealKeyModal({
   open,
   onClose,
   created,
+  email,
 }: {
   open: boolean;
   onClose: () => void;
   created: CreatedProxyKey | null;
+  email: string | undefined;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -199,12 +250,17 @@ export function RevealKeyModal({
     }
   }
 
-  return (
-    <ModalShell open={open} onClose={onClose} tag="CREATED" title="API Key 已创建">
-      <div className="font-mono text-[12px] text-[#6B5E52] mb-3 leading-relaxed">
-        现在复制贴给 Agent · 之后在列表里点 复制 也能再拿。
-      </div>
+  function handleAcknowledge() {
+    if (created && email) {
+      // The single moment we commit plaintext to localStorage. Subsequent
+      // reads (Dashboard install spell) come from this cache only.
+      setCachedKey(email, String(created.keyId), created.key);
+    }
+    onClose();
+  }
 
+  return (
+    <StickyModalShell open={open} tag="CREATED" title="API Key 已创建">
       <div className="bg-bg border-2 border-ink rounded-md p-3 mb-4">
         <div className="font-mono text-[12px] text-ink [word-break:break-all] leading-snug">
           {created.key}
@@ -225,16 +281,38 @@ export function RevealKeyModal({
         {copied ? '已复制 ✓' : '复制 API Key'}
       </button>
 
-      <div className="mt-3 flex items-center justify-end">
+      <div className="mt-4 border-2 border-ink rounded-md bg-amber-50 p-3 space-y-2">
+        <div className="text-[12.5px] font-bold text-ink leading-snug">
+          ⚠️ 立即保存这个 Key
+        </div>
+        <div className="text-[12px] text-[#6B5E52] leading-relaxed">
+          此 Key 仅显示这一次。关闭后将永远无法再次查看。
+        </div>
+        <div className="text-[12.5px] font-bold text-ink leading-snug pt-1">
+          💾 缓存在这台设备
+        </div>
+        <div className="text-[12px] text-[#6B5E52] leading-relaxed">
+          我们会把这个 Key 缓存在浏览器 localStorage 里，让 Dashboard 的安装咒语继续可用。
+          退出登录、清除浏览器数据或换设备时，缓存就消失 —— 届时唯一的办法是创建一个新 Key。
+        </div>
+      </div>
+
+      <div className="mt-5">
         <button
           type="button"
-          onClick={onClose}
-          className="font-mono text-[12px] tracking-wider uppercase text-[#A89A8D] hover:text-ink font-bold transition-colors"
+          onClick={handleAcknowledge}
+          className={
+            'w-full px-4 py-2.5 bg-white text-ink font-bold text-[13.5px] border-2 border-ink rounded ' +
+            'shadow-[2px_2px_0_0_#1C1917] ' +
+            'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+            'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+            'transition-all'
+          }
         >
-          完成
+          我已保存好，关闭
         </button>
       </div>
-    </ModalShell>
+    </StickyModalShell>
   );
 }
 
