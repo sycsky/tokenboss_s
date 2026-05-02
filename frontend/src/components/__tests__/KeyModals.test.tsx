@@ -26,14 +26,16 @@ describe('RevealKeyModal — show-once + cache-on-confirm', () => {
     });
   });
 
-  it('renders the plaintext + the prominent show-once warning', () => {
+  it('renders the plaintext + the prominent action-verb warning', () => {
     render(
       <RevealKeyModal open={true} onClose={() => {}} created={sample} email="alice@x.com" />,
     );
     expect(screen.getByText('sk-PLAINTEXT-FOREVER')).toBeInTheDocument();
-    expect(screen.getByText(/这个 Key 只显示这一次/)).toBeInTheDocument();
+    // Title is a call-to-action ("立刻复制并保存") not a description.
+    expect(screen.getByText('立刻复制并保存')).toBeInTheDocument();
+    // Body explains the one-shot consequence + the recovery path.
     expect(
-      screen.getByText(/唯一的办法是删掉它，再创建一个新的/),
+      screen.getByText(/关闭后无法再次查看.*丢了只能新建/),
     ).toBeInTheDocument();
   });
 

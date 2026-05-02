@@ -407,14 +407,16 @@ export function RevealKeyModal({
 
   return (
     <StickyModalShell open={open} tag="CREATED" title="API Key 已创建">
-      {/* The most-prominent message. Comes BEFORE the value box so users
-          read it before instinctively clicking Copy. */}
+      {/* The most-prominent message. Action-verb title so users see WHAT
+          to do (copy + save) before glancing at the value box. The amber
+          background + bold title carry the warning visual — no emoji
+          needed (the colorful ⚠️ glyph clashed with the slock aesthetic). */}
       <div className="border-2 border-ink rounded-md bg-amber-50 p-3.5 mb-4">
-        <div className="text-[15px] font-bold text-ink leading-snug mb-1">
-          ⚠️ 这个 Key 只显示这一次
+        <div className="text-[15.5px] font-bold text-ink leading-snug mb-1">
+          立刻复制并保存
         </div>
         <div className="text-[12.5px] text-[#6B5E52] leading-relaxed">
-          关闭弹窗后将永远无法再次查看。如果丢失，<strong>唯一的办法是删掉它，再创建一个新的</strong>。
+          关闭后无法再次查看 · Key 丢了只能新建一把。
         </div>
       </div>
 
