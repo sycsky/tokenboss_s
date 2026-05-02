@@ -10,7 +10,7 @@ import {
   type UsageDetailResponse,
 } from '../lib/api';
 import { APIKeyList, type KeyStats } from '../components/APIKeyList';
-import { CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
+import { AllKeysModal, CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
 import { UsageRow } from '../components/UsageRow';
 import { formatModelName } from '../lib/modelName';
 import { formatSource } from '../lib/sourceDisplay';
@@ -323,6 +323,7 @@ export default function Dashboard() {
   const [createOpen, setCreateOpen] = useState(false);
   const [justCreated, setJustCreated] = useState<CreatedProxyKey | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProxyKeySummary | null>(null);
+  const [allKeysOpen, setAllKeysOpen] = useState(false);
 
   function handleCreated(created: CreatedProxyKey) {
     setCreateOpen(false);
@@ -688,6 +689,7 @@ export default function Dashboard() {
               cachedPlaintexts={cachedPlaintexts}
               onCreateClick={() => setCreateOpen(true)}
               onDeleteClick={setDeleteTarget}
+              onShowAllClick={() => setAllKeysOpen(true)}
             />
           </section>
 
@@ -716,6 +718,14 @@ export default function Dashboard() {
         onClose={() => setDeleteTarget(null)}
         target={deleteTarget}
         onDeleted={handleDeleted}
+      />
+      <AllKeysModal
+        open={allKeysOpen}
+        onClose={() => setAllKeysOpen(false)}
+        keys={keys}
+        keyStats={keyStats}
+        cachedPlaintexts={cachedPlaintexts}
+        onDeleteClick={setDeleteTarget}
       />
     </div>
   );

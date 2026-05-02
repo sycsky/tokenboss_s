@@ -23,44 +23,40 @@ export interface APIKeyListProps {
    * platform to surface plaintext on those rows.
    */
   cachedPlaintexts: Map<string, string>;
+  /** Cap on rows rendered inline. Default 3. Anything beyond surfaces
+   *  via the "see all" button which opens AllKeysModal. */
+  maxInline?: number;
   /** Click on `+ 创建` — parent opens CreateKeyModal. */
   onCreateClick: () => void;
   /** Click on the trash icon — parent opens DeleteKeyModal pre-loaded with `target`. */
   onDeleteClick: (target: ProxyKeySummary) => void;
+  /** Click on "查看全部 N 把 Key" — parent opens AllKeysModal. */
+  onShowAllClick: () => void;
 }
 
 /**
- * Inline list of the user's TokenBoss proxy keys. Each row shows label,
- * masked key, expiry label, usage stats, and a delete button.
+ * Inline list of the user's TokenBoss proxy keys. Capped at `maxInline`
+ * rows; anything more shows up via "查看全部 N 把 Key →" which opens
+ * AllKeysModal.
  *
  * Plaintext + copy button only appear for rows whose keyId is in
- * `cachedPlaintexts` (i.e., the user saw / saved this key on this
- * device). For uncached rows the platform shows a masked value and
- * intentionally offers no way to retrieve the plaintext — the only
- * way to use a key on a new device is to create a new one.
+ * `cachedPlaintexts` AND that are still usable (not expired, not disabled).
+ * For everything else the platform shows a masked value and offers no
+ * way to retrieve the plaintext — the only way to use a key on a new
+ * device is to create a new one.
  */
 export function APIKeyList({
   keys,
   loadError,
   keyStats,
   cachedPlaintexts,
+  maxInline = 3,
   onCreateClick,
   onDeleteClick,
+  onShowAllClick,
 }: APIKeyListProps) {
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  async function handleCopy(keyId: string, plaintext: string) {
-    try {
-      await navigator.clipboard.writeText(plaintext);
-      setCopiedId(keyId);
-      setTimeout(
-        () => setCopiedId((id) => (id === keyId ? null : id)),
-        1500,
-      );
-    } catch {
-      /* clipboard blocked — user can long-press to select on mobile */
-    }
-  }
+  const visible = keys.slice(0, maxInline);
+  const hidden = keys.length - visible.length;
 
   return (
     <div>
@@ -89,94 +85,159 @@ export function APIKeyList({
         </div>
       )}
 
-      {keys.map((k, i) => {
-        const stats = keyStats.get(k.label || 'default');
-        const expired = isExpired(k);
-        const dotClass = k.disabled || expired ? 'bg-[#A89A8D]' : 'bg-lime-stamp';
-        const plaintext = cachedPlaintexts.get(String(k.keyId));
-        const canCopy = !!plaintext && !expired && !k.disabled;
-        const isCopied = copiedId === String(k.keyId);
-        return (
-          <div
-            key={k.keyId}
-            className={`py-2.5 ${i < keys.length - 1 ? 'border-b border-ink/10' : ''}`}
+      {visible.map((k, i) => (
+        <KeyRow
+          key={k.keyId}
+          k={k}
+          stats={keyStats.get(k.label || 'default')}
+          plaintext={cachedPlaintexts.get(String(k.keyId))}
+          onDeleteClick={onDeleteClick}
+          isLast={i === visible.length - 1}
+        />
+      ))}
+
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={onShowAllClick}
+          className={
+            'block w-full mt-2.5 px-3 py-2 font-mono text-[11px] tracking-tight text-ink ' +
+            'bg-white border-2 border-ink rounded ' +
+            'shadow-[2px_2px_0_0_#1C1917] ' +
+            'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+            'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+            'transition-all'
+          }
+        >
+          查看全部 {keys.length} 把 Key →
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One row in the key list. Shared between the inline `APIKeyList` (above)
+ * and the modal that lists everything (`AllKeysModal` in KeyModals.tsx).
+ *
+ * Visual treatment for "dead" rows (expired or disabled): the whole row
+ * is dimmed via opacity-60, and the label + value get a strikethrough.
+ * Combined with the gray status dot and the badge, you can spot them at
+ * a glance.
+ */
+export interface KeyRowProps {
+  k: ProxyKeySummary;
+  stats: KeyStats | undefined;
+  plaintext: string | undefined;
+  isLast: boolean;
+  onDeleteClick: (target: ProxyKeySummary) => void;
+}
+
+export function KeyRow({ k, stats, plaintext, isLast, onDeleteClick }: KeyRowProps) {
+  const [copied, setCopied] = useState(false);
+  const expired = isExpired(k);
+  const dead = expired || !!k.disabled;
+  const canCopy = !!plaintext && !dead;
+  const dotClass = dead ? 'bg-[#A89A8D]' : 'bg-lime-stamp';
+  // Visual: dim everything in a dead row, strikethrough on the label
+  // + value box so it's unmistakable at a glance that the key is gone.
+  const labelClass = dead
+    ? 'truncate line-through text-[#A89A8D]'
+    : 'truncate text-ink';
+  const valueClass = dead
+    ? 'flex-1 min-w-0 font-mono text-[11px] line-through text-[#A89A8D] bg-bg border-2 border-[#D9CEC2] px-2 py-1.5 rounded truncate'
+    : 'flex-1 min-w-0 font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate';
+
+  async function handleCopy() {
+    if (!plaintext) return;
+    try {
+      await navigator.clipboard.writeText(plaintext);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — user can long-press to select on mobile */
+    }
+  }
+
+  return (
+    <div
+      className={
+        `py-2.5 ${isLast ? '' : 'border-b border-ink/10'} ` +
+        (dead ? 'opacity-60' : '')
+      }
+    >
+      <div className="flex items-center justify-between mb-1.5 gap-2">
+        <span className="text-[12.5px] font-bold flex items-center gap-1.5 min-w-0">
+          <span
+            className={`w-2 h-2 border-2 border-ink rounded-full flex-shrink-0 ${dotClass}`}
+          />
+          <span className={labelClass}>{k.label || 'default'}</span>
+        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {expired && (
+            <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
+              已过期
+            </span>
+          )}
+          {!expired && k.disabled && (
+            <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
+              已吊销
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => onDeleteClick(k)}
+            aria-label={`删除 ${k.label || 'default'}`}
+            className={
+              'flex-shrink-0 w-6 h-6 inline-flex items-center justify-center border-2 border-ink rounded ' +
+              'text-ink hover:bg-red-soft hover:text-red-ink transition-colors'
+            }
           >
-            <div className="flex items-center justify-between mb-1.5 gap-2">
-              <span className="text-[12.5px] font-bold text-ink flex items-center gap-1.5 min-w-0">
-                <span
-                  className={`w-2 h-2 border-2 border-ink rounded-full flex-shrink-0 ${dotClass}`}
-                />
-                <span className="truncate">{k.label || 'default'}</span>
-              </span>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {expired && (
-                  <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
-                    已过期
-                  </span>
-                )}
-                {!expired && k.disabled && (
-                  <span className="font-mono text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 border-2 border-[#D9CEC2] rounded text-[#A89A8D]">
-                    已吊销
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => onDeleteClick(k)}
-                  aria-label={`删除 ${k.label || 'default'}`}
-                  className={
-                    'flex-shrink-0 w-6 h-6 inline-flex items-center justify-center border-2 border-ink rounded ' +
-                    'text-ink hover:bg-red-soft hover:text-red-ink transition-colors'
-                  }
-                >
-                  <TrashIcon />
-                </button>
-              </div>
-            </div>
+            <TrashIcon />
+          </button>
+        </div>
+      </div>
 
-            <div className="flex items-center gap-1.5">
-              <span className="flex-1 min-w-0 font-mono text-[11px] text-ink bg-bg border-2 border-ink px-2 py-1.5 rounded truncate">
-                {/* Show plaintext only when this key is BOTH cached AND
-                    usable. Expired/disabled rows fall back to the mask
-                    even if cache still has them — there's no point
-                    leaking a dead value into the DOM. */}
-                {canCopy ? plaintext : k.key}
-              </span>
-              {canCopy && (
-                <button
-                  type="button"
-                  onClick={() => handleCopy(String(k.keyId), plaintext!)}
-                  aria-label={`复制 ${k.label || 'default'}`}
-                  className={
-                    'flex-shrink-0 px-2 py-1.5 border-2 rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase ' +
-                    'shadow-[2px_2px_0_0_#1C1917] ' +
-                    'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
-                    'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
-                    'transition-all ' +
-                    (isCopied
-                      ? 'bg-accent border-accent text-white'
-                      : 'bg-white border-ink text-ink')
-                  }
-                >
-                  {isCopied ? '✓' : <CopyIcon />}
-                </button>
-              )}
-            </div>
+      <div className="flex items-center gap-1.5">
+        <span className={valueClass}>
+          {/* Show plaintext only when cached AND usable. Dead rows fall
+              back to the mask even if cache still has them — there's no
+              point leaking a dead value into the DOM. */}
+          {canCopy ? plaintext : k.key}
+        </span>
+        {canCopy && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            aria-label={`复制 ${k.label || 'default'}`}
+            className={
+              'flex-shrink-0 px-2 py-1.5 border-2 rounded font-mono text-[10px] font-bold tracking-[0.14em] uppercase ' +
+              'shadow-[2px_2px_0_0_#1C1917] ' +
+              'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+              'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+              'transition-all ' +
+              (copied
+                ? 'bg-accent border-accent text-white'
+                : 'bg-white border-ink text-ink')
+            }
+          >
+            {copied ? '✓' : <CopyIcon />}
+          </button>
+        )}
+      </div>
 
-            <div className="font-mono text-[10px] text-[#A89A8D] mt-1 flex items-center justify-between gap-2">
-              <span>
-                创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')} · {expiryLabel(k)}
-              </span>
-              {stats ? (
-                <span className="text-ink-2">
-                  {timeAgo(stats.lastUsedAt)} · {stats.callCount} 次 · ${stats.totalSpent.toFixed(6)}
-                </span>
-              ) : (
-                <span>未使用</span>
-              )}
-            </div>
-          </div>
-        );
-      })}
+      <div className="font-mono text-[10px] text-[#A89A8D] mt-1 flex items-center justify-between gap-2">
+        <span>
+          创建于 {new Date(k.createdAt).toLocaleDateString('zh-CN')} · {expiryLabel(k)}
+        </span>
+        {stats ? (
+          <span className="text-ink-2">
+            {timeAgo(stats.lastUsedAt)} · {stats.callCount} 次 · ${stats.totalSpent.toFixed(6)}
+          </span>
+        ) : (
+          <span>未使用</span>
+        )}
+      </div>
     </div>
   );
 }

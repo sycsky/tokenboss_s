@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { APIKeyList } from '../APIKeyList';
 
 const baseKey = (over: Partial<any> = {}) => ({
@@ -22,6 +22,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.queryByLabelText(/复制/)).toBeNull();
@@ -36,6 +37,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText(/永久/)).toBeInTheDocument();
@@ -53,6 +55,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText(/23 天后过期/)).toBeInTheDocument();
@@ -71,6 +74,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText('已过期')).toBeInTheDocument();
@@ -87,6 +91,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText('已吊销')).toBeInTheDocument();
@@ -105,6 +110,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText('已过期')).toBeInTheDocument();
@@ -122,6 +128,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={cached}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText('sk-FULL-PLAINTEXT-XYZ')).toBeInTheDocument();
@@ -138,6 +145,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={new Map()}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.getByText('sk-•••a4c2')).toBeInTheDocument();
@@ -154,6 +162,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={cached}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.queryByLabelText(/复制/)).toBeNull();
@@ -169,6 +178,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={cached}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     expect(screen.queryByLabelText(/复制/)).toBeNull();
@@ -188,6 +198,7 @@ describe('APIKeyList', () => {
         cachedPlaintexts={cached}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     // Expired row falls back to the masked `sk-•••a4c2` even though
@@ -203,11 +214,77 @@ describe('APIKeyList', () => {
         cachedPlaintexts={cached}
         onCreateClick={() => {}}
         onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
       />,
     );
     // Disabled row also falls back to mask.
     expect(screen.getByText('sk-•••a4c2')).toBeInTheDocument();
     expect(screen.queryByText('sk-CACHED-BUT-DEAD')).toBeNull();
     vi.useRealTimers();
+  });
+
+  it('expired rows get a line-through + dim treatment so they read as dead', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-13T12:00:00Z'));
+    const past = new Date('2026-05-01T12:00:00Z').toISOString();
+    const { container } = render(
+      <APIKeyList
+        keys={[baseKey({ expiresAt: past })]}
+        loadError={null}
+        keyStats={new Map()}
+        cachedPlaintexts={new Map()}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
+      />,
+    );
+    // Whole row dimmed
+    expect(container.querySelector('.opacity-60')).toBeTruthy();
+    // Label has line-through class
+    expect(container.querySelector('.line-through')).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it('caps inline rows at maxInline (default 3) and surfaces a "see all" button', () => {
+    const onShowAll = vi.fn();
+    const manyKeys = Array.from({ length: 6 }, (_, i) =>
+      baseKey({ keyId: `k-${i}`, label: `key-${i}` }),
+    );
+    render(
+      <APIKeyList
+        keys={manyKeys}
+        loadError={null}
+        keyStats={new Map()}
+        cachedPlaintexts={new Map()}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+        onShowAllClick={onShowAll}
+      />,
+    );
+    // Only 3 rows rendered inline.
+    expect(screen.getByText('key-0')).toBeInTheDocument();
+    expect(screen.getByText('key-1')).toBeInTheDocument();
+    expect(screen.getByText('key-2')).toBeInTheDocument();
+    expect(screen.queryByText('key-3')).toBeNull();
+    // The see-all button shows the total count (6).
+    const seeAll = screen.getByText(/查看全部 6 把 Key/);
+    expect(seeAll).toBeInTheDocument();
+    fireEvent.click(seeAll);
+    expect(onShowAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT render the see-all entry when keys.length <= maxInline', () => {
+    render(
+      <APIKeyList
+        keys={[baseKey()]}
+        loadError={null}
+        keyStats={new Map()}
+        cachedPlaintexts={new Map()}
+        onCreateClick={() => {}}
+        onDeleteClick={() => {}}
+        onShowAllClick={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/查看全部/)).toBeNull();
   });
 });

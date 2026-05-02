@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, type CreatedProxyKey, type ProxyKeySummary } from '../lib/api';
 import { setCachedKey } from '../lib/keyCache';
+import { KeyRow, type KeyStats } from './APIKeyList';
+import { isExpired } from '../lib/keyExpiry';
 
 /**
  * Slock-pixel modal shell — backdrop dim + ink-bordered card. Shared by
@@ -573,6 +575,60 @@ export function DeleteKeyModal({
         >
           {submitting ? '吊销中…' : '吊销'}
         </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/**
+ * "All keys" modal — surfaces every key the user has (active + expired
+ * + disabled), so they can clean up dead ones without the inline panel
+ * needing to scroll. The inline panel (Dashboard) caps at 3 rows and
+ * surfaces this modal via the "查看全部 N 把 Key" entry.
+ *
+ * Body of the modal is the same KeyRow as the inline list — same delete
+ * affordance, same cache-aware plaintext display, same dim+strikethrough
+ * for dead rows. The modal just gives the list a scrollable container
+ * with a count breakdown in the header.
+ */
+export function AllKeysModal({
+  open,
+  onClose,
+  keys,
+  keyStats,
+  cachedPlaintexts,
+  onDeleteClick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  keys: ProxyKeySummary[];
+  keyStats: Map<string, KeyStats>;
+  cachedPlaintexts: Map<string, string>;
+  onDeleteClick: (target: ProxyKeySummary) => void;
+}) {
+  const liveCount = keys.filter((k) => !k.disabled && !isExpired(k)).length;
+  const deadCount = keys.length - liveCount;
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      tag="ALL KEYS"
+      title={`所有 API Key (${keys.length})`}
+    >
+      <p className="font-mono text-[11px] text-[#A89A8D] mb-3">
+        {liveCount} 把活跃 · {deadCount} 把已过期或吊销 · 删除任意一把都不可恢复
+      </p>
+      <div className="max-h-[60vh] overflow-y-auto -mx-1 px-1">
+        {keys.map((k, i) => (
+          <KeyRow
+            key={k.keyId}
+            k={k}
+            stats={keyStats.get(k.label || 'default')}
+            plaintext={cachedPlaintexts.get(String(k.keyId))}
+            onDeleteClick={onDeleteClick}
+            isLast={i === keys.length - 1}
+          />
+        ))}
       </div>
     </ModalShell>
   );
