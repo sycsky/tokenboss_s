@@ -29,6 +29,44 @@ import {
 } from "../lib/store.js";
 import { getNewapiPlanId, skuTypeToPlanId } from "../lib/plans.js";
 import { newapi, NewapiError } from "../lib/newapi.js";
+import * as Sentry from "@sentry/node";
+
+/** Settle-failure reporter — pushes to Sentry as a high-severity event
+ *  with structured tags so it's filterable in the dashboard. We log
+ *  console.error too so on-call still sees it inline in zeabur logs.
+ *  Message is generic ("settle failed at <stage>") and orderId is a
+ *  tag (not in the message) so Sentry groups by failure mode, not
+ *  by per-order noise. */
+function reportSettleFailure(opts: {
+  stage: 'plan_bind' | 'topup_mint' | 'topup_redeem' | 'topup_user_link' | 'topup_amount_missing' | 'unknown_skuType';
+  channel: string;
+  orderId: string;
+  userId: string;
+  err?: unknown;
+  extra?: Record<string, unknown>;
+}): void {
+  const errMsg = opts.err
+    ? (opts.err instanceof NewapiError ? opts.err.message : (opts.err as Error).message)
+    : null;
+  console.error(
+    `[webhook/${opts.channel}] settle-failure stage=${opts.stage} order=${opts.orderId}`,
+    { userId: opts.userId, errMsg, ...opts.extra },
+  );
+  Sentry.captureMessage(`webhook settle failed: ${opts.stage}`, {
+    level: 'error',
+    tags: {
+      kind: 'settle_failure',
+      stage: opts.stage,
+      channel: opts.channel,
+    },
+    extra: {
+      orderId: opts.orderId,
+      userId: opts.userId,
+      errMsg,
+      ...opts.extra,
+    },
+  });
+}
 
 function textResponse(
   statusCode: number,
@@ -143,7 +181,13 @@ async function processWebhook(
         if (planId) {
           await applyPlanToUser(order.userId, planId, channel);
         } else {
-          console.error(`${tag} unknown skuType on settled order: ${order.skuType}`);
+          reportSettleFailure({
+            stage: 'unknown_skuType',
+            channel,
+            orderId: order.orderId,
+            userId: order.userId,
+            extra: { skuType: order.skuType },
+          });
         }
       }
     }
@@ -245,10 +289,14 @@ async function applyPlanToUser(
       `${tag} bound ${planId} sub (newapi plan_id=${newapiPlanId}) to user=${userId} (newapi user=${user.newapiUserId})`,
     );
   } catch (err) {
-    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-    console.error(
-      `${tag} newapi.bindSubscription failed for ${userId}: ${msg}`,
-    );
+    reportSettleFailure({
+      stage: 'plan_bind',
+      channel,
+      orderId: 'n/a',  // applyPlanToUser doesn't carry order id, only userId
+      userId,
+      err,
+      extra: { planId, newapiPlanId, newapiUserId: user.newapiUserId },
+    });
   }
 }
 
@@ -278,9 +326,12 @@ async function applyTopupToUser(
 
   const usd = order.topupAmountUsd;
   if (!usd || usd <= 0) {
-    console.error(`${tag} topup order has no topupAmountUsd`, {
+    reportSettleFailure({
+      stage: 'topup_amount_missing',
+      channel,
       orderId: order.orderId,
       userId: order.userId,
+      extra: { topupAmountUsd: usd },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
     return;
@@ -288,9 +339,12 @@ async function applyTopupToUser(
 
   const user = await getUser(order.userId);
   if (!user || user.newapiUserId == null || !user.newapiPassword) {
-    console.error(`${tag} topup user has no newapi link`, {
+    reportSettleFailure({
+      stage: 'topup_user_link',
+      channel,
       orderId: order.orderId,
       userId: order.userId,
+      extra: { hasNewapiUserId: user?.newapiUserId != null, hasNewapiPassword: !!user?.newapiPassword },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
     return;
@@ -303,13 +357,13 @@ async function applyTopupToUser(
       quotaUsd: usd,
     });
   } catch (err) {
-    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-    console.error(`${tag} createRedemption failed`, {
+    reportSettleFailure({
+      stage: 'topup_mint',
+      channel,
       orderId: order.orderId,
       userId: order.userId,
-      topupAmountUsd: usd,
-      errorMessage: msg,
-      channel,
+      err,
+      extra: { topupAmountUsd: usd },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
     return;
@@ -328,14 +382,18 @@ async function applyTopupToUser(
       topupAmountUsd: usd,
     });
   } catch (err) {
-    const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-    console.error(`${tag} topup redeemCode failed`, {
+    reportSettleFailure({
+      stage: 'topup_redeem',
+      channel,
       orderId: order.orderId,
       userId: order.userId,
-      topupAmountUsd: usd,
-      errorMessage: msg,
-      channel,
-      mintedCodeTail: code.slice(-4), // last 4 chars only — ops looks up the full code in newapi admin by name=orderId
+      err,
+      extra: {
+        topupAmountUsd: usd,
+        // Last 4 chars of the minted code so ops can look it up in
+        // newapi admin by name=orderId without leaking the full code.
+        mintedCodeTail: code.slice(-4),
+      },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
   }
