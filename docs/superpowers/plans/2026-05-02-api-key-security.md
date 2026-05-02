@@ -12,6 +12,28 @@
 
 ---
 
+## ⚠️ 架构前提：TokenBoss 不是独立 Key 后端
+
+**所有 Key 操作（创建 / 列表 / 删除 / 设过期）都是 TokenBoss 调用 newapi 完成的**，TokenBoss 自己**不**保管 Key 的 source of truth。
+
+执行此 plan 时务必记住：
+
+| Plan 操作 | 真正落地的地方 |
+|---|---|
+| `createKeyHandler` 创建 Key | `newapi.createAndRevealToken({ name, expired_time, ... })` |
+| `listKeysHandler` 列表 | `newapi.listUserTokens()` 返回 + 字段映射 |
+| `deleteKeyHandler` 删除 | `newapi.deleteUserToken(tokenId)` 走 newapi 用户会话 |
+| 设有效期 | `expired_time` 是 newapi 自己的字段（unix seconds，`-1 = 永久`），TokenBoss 只是把 `expiresInDays` 翻译成它 |
+| 删 reveal 端点 | 删的是对 `newapi.revealToken` 的封装；newapi 那边的 reveal 接口我们不再调用 |
+
+TokenBoss 这边的 SQLite **只**存 `api_key_index`（SHA256 反查表）和用户表，**不**存 Key 明文、**不**存 Key 状态副本。`newapi` 是 Key 的 single source of truth；TokenBoss 是它的认证 / 计费 / UI 包装。
+
+vitest 测试里**全部**用 `vi.spyOn(newapi, 'createAndRevealToken')` / `'listUserTokens'` / `'deleteUserToken'` mock，绝不直接 INSERT 到本地表去模拟"已创建 Key"的状态——那不是 source of truth。
+
+唯一**纯本地**的状态是浏览器 `localStorage` 的明文缓存（`tb_key_v1:${email}:${keyId}`），那是用户自己设备的状态，跟 TokenBoss 后端无关。
+
+---
+
 ## File Structure
 
 **Backend (修改)：**
