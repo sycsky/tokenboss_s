@@ -37,7 +37,7 @@ import {
   type AttributionRecord,
   type SubscriptionSnapshot,
 } from "../lib/store.js";
-import { newapi, newapiQuotaToUsd, type NewapiLogEntry } from "../lib/newapi.js";
+import { newapi, newapiQuotaToUsd, NewapiError, type NewapiLogEntry } from "../lib/newapi.js";
 import { newapiUsername } from "../lib/newapiIdentity.js";
 
 // ---------- Helpers ----------
@@ -255,7 +255,39 @@ async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]>
 
 // ---------- Handler ----------
 
+/**
+ * Translate any newapi errors that bubble out of the handler body into a
+ * frontend-friendly response. The 429 case in particular: newapi's
+ * `/api/user/login` rate-limits per source IP, and TokenBoss shares one
+ * IP across all users, so a quiet thundering herd of dashboard tabs can
+ * trip it. We surface a 503 with a retry hint instead of leaking the raw
+ * upstream string. Mirrors keysHandlers#handleNewapiError.
+ */
+function handleNewapiError(err: unknown): APIGatewayProxyResultV2 {
+  if (err instanceof NewapiError && err.status === 429) {
+    return jsonError(
+      503,
+      "service_unavailable",
+      "上游短暂限流，请等几十秒再重试。",
+      "newapi_rate_limited",
+    );
+  }
+  const msg = err instanceof NewapiError ? err.message : (err as Error).message;
+  const status = err instanceof NewapiError ? err.status || 502 : 502;
+  return jsonError(status, "upstream_error", msg);
+}
+
 export const usageHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  try {
+    return await usageHandlerImpl(event);
+  } catch (err) {
+    return handleNewapiError(err);
+  }
+};
+
+const usageHandlerImpl = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> => {
   const headers = event.headers ?? {};

@@ -37,7 +37,14 @@ export default function AdminLogin() {
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         if (err.status === 503) {
-          setError("管理后台未启用：请在 Zeabur 设置 TB_ADMIN_USERNAME / TB_ADMIN_PASSWORD。");
+          if (err.code === "admin_misconfigured") {
+            // Surface the upstream reason verbatim — usually a too-short
+            // password tripping the production guard, and the operator
+            // needs to see the actual rule to fix it.
+            setError(err.message || "管理后台配置错误");
+          } else {
+            setError("管理后台未启用：请在 Zeabur 设置 TB_ADMIN_USERNAME / TB_ADMIN_PASSWORD。");
+          }
         } else if (err.status === 429) {
           setError("尝试次数过多，请稍后再试。");
         } else if (err.status === 401) {

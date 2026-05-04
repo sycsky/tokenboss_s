@@ -318,16 +318,22 @@ interface PageResult<T> {
 
 // ---------- Session cache ----------
 //
-// newapi's /api/user/login is rate-limited (returns 429 with empty body
-// when called too often). Callers that need a user-scoped session
-// (listUserTokens, createAndRevealToken, revealToken) all go through
-// loginUser; without caching, every dashboard refresh re-authenticates
-// and trips the limiter. We hold a session cookie in-memory keyed by
-// username for SESSION_TTL_MS — after which loginUser fetches a fresh
-// one. Process restarts evict everything (intentional; sessions are
-// non-critical state).
+// newapi's /api/user/login is rate-limited PER SOURCE IP (returns 429 with
+// empty body when over budget). In production every TokenBoss dashboard
+// request shares the same Zeabur container IP, so concurrent users + a
+// short cache TTL trips the limiter aggressively. We hold session cookies
+// in-memory keyed by username and reuse them for SESSION_TTL_MS.
+//
+// We also coalesce concurrent loginUser() calls for the same username
+// onto a single in-flight Promise (`loginInFlight`). Without this, ten
+// dashboard tabs opening at once burn ten /api/user/login calls in one
+// burst even with caching, because the cache fill races. With it, only
+// the first call hits newapi; the other nine await the same Promise.
+//
+// Process restarts evict everything (intentional; sessions are non-
+// critical state — at most one extra login per restart per active user).
 
-const SESSION_TTL_MS = 5 * 60 * 1000;
+const SESSION_TTL_MS = 30 * 60 * 1000; // 30 min — newapi cookies typically last hours
 
 interface CachedSession {
   cookie: string;
@@ -336,6 +342,16 @@ interface CachedSession {
 }
 
 const sessionCache = new Map<string, CachedSession>();
+
+/**
+ * Concurrent-login coalescing. When N callers ask for a session for the
+ * same username simultaneously and the cache is empty/expired, only the
+ * first call hits newapi; the rest await its Promise. The map is cleared
+ * for that key as soon as the in-flight Promise settles (success → cache
+ * is now warm; failure → next caller can retry on its own). Keyed by
+ * username for user logins, by ADMIN_SESSION_KEY for the admin login.
+ */
+const loginInFlight = new Map<string, Promise<{ cookie: string; userId: number }>>();
 
 // Reserved cache key for the admin user's own session. Distinct from any
 // real username so it can't collide (real usernames are derived from
@@ -354,53 +370,72 @@ const ADMIN_SESSION_KEY = "__tokenboss_admin__";
  * misconfiguration loudly instead of silently making admin endpoints
  * 403 later.
  */
-async function adminLogin(force = false): Promise<{ cookie: string; userId: number }> {
+async function newapiAdminLogin(force = false): Promise<{ cookie: string; userId: number }> {
   const cached = sessionCache.get(ADMIN_SESSION_KEY);
   if (!force && cached && cached.expiresAt > Date.now()) {
     return { cookie: cached.cookie, userId: cached.userId };
+  }
+  const inFlight = loginInFlight.get(ADMIN_SESSION_KEY);
+  if (!force && inFlight) {
+    return inFlight;
   }
   const username = process.env.NEWAPI_ADMIN_USERNAME;
   const password = process.env.NEWAPI_ADMIN_PASSWORD;
   if (!username || !password) {
     throw new NewapiError(
       500,
-      "adminLogin called but NEWAPI_ADMIN_USERNAME/PASSWORD not set",
+      "newapiAdminLogin called but NEWAPI_ADMIN_USERNAME/PASSWORD not set",
     );
   }
-  const baseUrl = getBaseUrl();
-  const res = await nfetch(`${baseUrl}/api/user/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  const parsed = await readJsonResponse<{
-    success?: boolean;
-    message?: string;
-    data?: { id?: number; role?: number };
-  }>(res, "adminLogin");
-  if (!res.ok || !parsed.success || !parsed.data?.id) {
-    throw new NewapiError(
-      res.status || 500,
-      parsed.message ?? `admin login failed for ${username}`,
-    );
+  const promise = (async () => {
+    const baseUrl = getBaseUrl();
+    const res = await nfetch(`${baseUrl}/api/user/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    if (res.status === 429) {
+      throw new NewapiError(
+        429,
+        `newapiAdminLogin: newapi login rate-limited. Concurrent admin operations + ` +
+          "shared egress IP can trip newapi's per-IP login budget. Retry in ~60s.",
+      );
+    }
+    const parsed = await readJsonResponse<{
+      success?: boolean;
+      message?: string;
+      data?: { id?: number; role?: number };
+    }>(res, "newapiAdminLogin");
+    if (!res.ok || !parsed.success || !parsed.data?.id) {
+      throw new NewapiError(
+        res.status || 500,
+        parsed.message ?? `admin login failed for ${username}`,
+      );
+    }
+    if (parsed.data.role !== undefined && parsed.data.role < 10) {
+      throw new NewapiError(
+        403,
+        `NEWAPI_ADMIN_USERNAME='${username}' is not an admin (role=${parsed.data.role}). Admin endpoints will fail; aborting.`,
+      );
+    }
+    const setCookie = res.headers.get("set-cookie");
+    const cookie = setCookie?.split(";")[0];
+    if (!cookie) {
+      throw new NewapiError(500, "admin login succeeded but no Set-Cookie returned");
+    }
+    sessionCache.set(ADMIN_SESSION_KEY, {
+      cookie,
+      userId: parsed.data.id,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+    return { cookie, userId: parsed.data.id };
+  })();
+  loginInFlight.set(ADMIN_SESSION_KEY, promise);
+  try {
+    return await promise;
+  } finally {
+    loginInFlight.delete(ADMIN_SESSION_KEY);
   }
-  if (parsed.data.role !== undefined && parsed.data.role < 10) {
-    throw new NewapiError(
-      403,
-      `NEWAPI_ADMIN_USERNAME='${username}' is not an admin (role=${parsed.data.role}). Admin endpoints will fail; aborting.`,
-    );
-  }
-  const setCookie = res.headers.get("set-cookie");
-  const cookie = setCookie?.split(";")[0];
-  if (!cookie) {
-    throw new NewapiError(500, "admin login succeeded but no Set-Cookie returned");
-  }
-  sessionCache.set(ADMIN_SESSION_KEY, {
-    cookie,
-    userId: parsed.data.id,
-    expiresAt: Date.now() + SESSION_TTL_MS,
-  });
-  return { cookie, userId: parsed.data.id };
 }
 
 /**
@@ -424,7 +459,7 @@ async function buildAdminAuthHeaders(): Promise<{
       },
     };
   }
-  const sess = await adminLogin();
+  const sess = await newapiAdminLogin();
   return {
     headers: { cookie: sess.cookie, "new-api-user": String(sess.userId) },
     invalidate: () => {
@@ -626,6 +661,10 @@ export const newapi = {
    * Cached for SESSION_TTL_MS so repeated dashboard calls reuse a single
    * cookie. Pass `force=true` (e.g., after a 401 from a downstream call)
    * to skip the cache.
+   *
+   * Concurrent calls for the same username share one in-flight login
+   * (see `loginInFlight` above) so a thundering herd doesn't multiply
+   * /api/user/login traffic and trip newapi's per-IP rate limiter.
    */
   async loginUser(input: {
     username: string;
@@ -636,34 +675,58 @@ export const newapi = {
     if (!input.force && cached && cached.expiresAt > Date.now()) {
       return { cookie: cached.cookie, userId: cached.userId };
     }
-    const baseUrl = getBaseUrl();
-    const res = await nfetch(`${baseUrl}/api/user/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ username: input.username, password: input.password }),
-    });
-    const parsed = await readJsonResponse<{
-      success?: boolean;
-      message?: string;
-      data?: { id?: number };
-    }>(res, "loginUser");
-    if (!res.ok || !parsed.success || !parsed.data?.id) {
-      throw new NewapiError(
-        res.status || 500,
-        parsed.message ?? `login failed for ${input.username}`,
-      );
+    const inFlight = loginInFlight.get(input.username);
+    if (!input.force && inFlight) {
+      return inFlight;
     }
-    const setCookie = res.headers.get("set-cookie");
-    const cookie = setCookie?.split(";")[0];
-    if (!cookie) {
-      throw new NewapiError(500, "login succeeded but no session cookie returned");
+    const promise = (async () => {
+      const baseUrl = getBaseUrl();
+      const res = await nfetch(`${baseUrl}/api/user/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: input.username, password: input.password }),
+      });
+      // newapi returns 429 with an empty body when over the per-IP login
+      // budget. Surface a clearer message so callers know it's NOT a wrong-
+      // password situation and can decide whether to surface "try again
+      // soon" upstream rather than dumping the user out of the dashboard.
+      if (res.status === 429) {
+        throw new NewapiError(
+          429,
+          `loginUser: newapi login rate-limited for ${input.username}. ` +
+            "All TokenBoss requests share one source IP; concurrent dashboard " +
+            "logins can trip this. Retry in ~60s.",
+        );
+      }
+      const parsed = await readJsonResponse<{
+        success?: boolean;
+        message?: string;
+        data?: { id?: number };
+      }>(res, "loginUser");
+      if (!res.ok || !parsed.success || !parsed.data?.id) {
+        throw new NewapiError(
+          res.status || 500,
+          parsed.message ?? `login failed for ${input.username}`,
+        );
+      }
+      const setCookie = res.headers.get("set-cookie");
+      const cookie = setCookie?.split(";")[0];
+      if (!cookie) {
+        throw new NewapiError(500, "login succeeded but no session cookie returned");
+      }
+      sessionCache.set(input.username, {
+        cookie,
+        userId: parsed.data.id,
+        expiresAt: Date.now() + SESSION_TTL_MS,
+      });
+      return { cookie, userId: parsed.data.id };
+    })();
+    loginInFlight.set(input.username, promise);
+    try {
+      return await promise;
+    } finally {
+      loginInFlight.delete(input.username);
     }
-    sessionCache.set(input.username, {
-      cookie,
-      userId: parsed.data.id,
-      expiresAt: Date.now() + SESSION_TTL_MS,
-    });
-    return { cookie, userId: parsed.data.id };
   },
 
   /** Drop a cached session for a username — call this after a downstream
