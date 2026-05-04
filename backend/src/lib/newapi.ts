@@ -283,6 +283,11 @@ export interface NewapiToken {
   status: number;
   created_time: number;
   expired_time: number;
+  /** newapi group this token is pinned to. Empty string = follow the
+   *  owning user's account-level group. */
+  group?: string;
+  /** Comma-separated list of model name allow-list, or empty for all. */
+  model_limits?: string;
 }
 
 /** Single log entry from newapi. */
@@ -478,6 +483,45 @@ export const newapi = {
       { keyword: username },
     );
     return res.items.find((u) => u.username === username) ?? null;
+  },
+
+  /** Admin: page through every user on the instance. newapi paginates with
+   *  `p` (0-based) + `size`; returns the raw PageResult so callers can
+   *  iterate all pages. */
+  async listAllUsers(input: {
+    page?: number;
+    size?: number;
+  } = {}): Promise<PageResult<NewapiUser>> {
+    return req<PageResult<NewapiUser>>(
+      "GET",
+      "/api/user/",
+      undefined,
+      { p: input.page ?? 0, size: input.size ?? 100 },
+    );
+  },
+
+  /** Admin: list every token on the instance, paginated. Some newapi forks
+   *  scope `/api/token/` to the calling admin's own tokens; others return
+   *  all rows. Probe before relying on the count. */
+  async listAllTokensAdmin(input: {
+    page?: number;
+    size?: number;
+  } = {}): Promise<PageResult<NewapiToken>> {
+    return req<PageResult<NewapiToken>>(
+      "GET",
+      "/api/token/",
+      undefined,
+      { p: input.page ?? 0, size: input.size ?? 100 },
+    );
+  },
+
+  /** Admin: PUT a token row. Same hazard as updateUser — newapi re-saves
+   *  the entire row, so spread the existing token object and only override
+   *  the field you want to change. May fail on forks where token PUT is
+   *  owner-scoped; caller should fall back to the user-session
+   *  setTokenGroup in that case. */
+  async setTokenGroupAdmin(token: NewapiToken, group: string): Promise<void> {
+    await req<unknown>("PUT", "/api/token/", { ...token, group });
   },
 
   /** Get a user by ID (admin). */
@@ -890,6 +934,44 @@ export const newapi = {
       throw new NewapiError(
         res.status || 500,
         body.message ?? "deleteUserToken failed",
+      );
+    }
+  },
+
+  /**
+   * Update an existing token's group via the owner's session. newapi's PUT
+   * /api/token/ re-saves the whole row (same hazard as updateUser), so we
+   * spread the current token object into the body and only override the
+   * group field. Pass the token exactly as returned by listUserTokens —
+   * that already carries every field newapi needs to round-trip safely.
+   *
+   * Returns silently on success; throws NewapiError if newapi rejects the
+   * update (most often because `name` was empty after the update — guard
+   * upstream by always passing the token unchanged).
+   */
+  async setTokenGroup(
+    session: { cookie: string; userId: number },
+    token: NewapiToken,
+    group: string,
+  ): Promise<void> {
+    const baseUrl = getBaseUrl();
+    const res = await nfetch(`${baseUrl}/api/token/`, {
+      method: "PUT",
+      headers: {
+        cookie: session.cookie,
+        "new-api-user": String(session.userId),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ ...token, group }),
+    });
+    const body = await readJsonResponse<{ success?: boolean; message?: string }>(
+      res,
+      "setTokenGroup",
+    );
+    if (!res.ok || body.success === false) {
+      throw new NewapiError(
+        res.status || 500,
+        body.message ?? "setTokenGroup failed",
       );
     }
   },

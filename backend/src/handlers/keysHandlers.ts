@@ -204,6 +204,10 @@ export const createKeyHandler = async (
       name: label,
       unlimited_quota: true,
       expired_time: expiredTime,
+      // Pin every newly minted user token to newapi's "auto" group so the
+      // upstream router picks the auto-tier channel rather than whichever
+      // channel the user's account-level group resolves to.
+      group: "auto",
     });
     // Index the raw key's hash so chatProxyCore can resolve sk-xxx → userId
     // without storing the plaintext or hitting newapi on every request.
