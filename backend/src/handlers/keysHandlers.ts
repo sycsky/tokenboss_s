@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 
 import { isAuthFailure, verifySessionHeader, type AuthContext } from "../lib/auth.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
+import { newapiUsername } from "../lib/newapiIdentity.js";
 import { putApiKeyIndex, deleteApiKeyIndex } from "../lib/store.js";
 
 function sha256Hex(input: string): string {
@@ -96,14 +97,6 @@ function requireNewapiLink(
     );
   }
   return null;
-}
-
-/**
- * Compute the newapi username we used at provisioning time. Must mirror
- * the scheme in authHandlers#register.
- */
-function newapiUsername(userId: string): string {
-  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
 }
 
 function handleNewapiError(err: unknown): APIGatewayProxyResultV2 {

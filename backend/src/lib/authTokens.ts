@@ -60,7 +60,7 @@ export async function verifyPassword(
 
 // ---------- JWT ----------
 
-const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface SessionClaims {
   /** User ID. */
@@ -75,7 +75,7 @@ export interface SessionClaims {
   tv: number;
 }
 
-function base64urlEncode(buf: Buffer): string {
+export function base64urlEncode(buf: Buffer): string {
   return buf
     .toString("base64")
     .replace(/\+/g, "-")
@@ -83,13 +83,13 @@ function base64urlEncode(buf: Buffer): string {
     .replace(/=+$/, "");
 }
 
-function base64urlDecode(s: string): Buffer {
+export function base64urlDecode(s: string): Buffer {
   const padded = s.replace(/-/g, "+").replace(/_/g, "/");
   const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
   return Buffer.from(padded + pad, "base64");
 }
 
-function getSecret(): Buffer {
+export function getSecret(): Buffer {
   const raw = process.env.SESSION_SECRET;
   // Production must have a real, non-default secret. We crash loudly
   // rather than fall back to a hardcoded string — a fallback secret
@@ -170,6 +170,13 @@ export function verifySession(token: string): SessionClaims | null {
     return null;
   }
   if (typeof claims.sub !== "string" || typeof claims.exp !== "number") {
+    return null;
+  }
+  // Defense-in-depth: an admin JWT (signed by signAdminSession) carries a
+  // `role: "admin"` claim. Reject it here so an admin token can never act
+  // on user-scoped routes even if the user store somehow grew a row whose
+  // userId matches the admin username.
+  if ((claims as unknown as { role?: string }).role !== undefined) {
     return null;
   }
   if (claims.exp <= Math.floor(Date.now() / 1000)) {

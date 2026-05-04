@@ -68,6 +68,11 @@ import {
   verifyEmailHandler,
 } from "./handlers/authHandlers.js";
 import {
+  adminGetUserHandler,
+  adminListUsersHandler,
+  adminLoginHandler,
+} from "./handlers/adminHandlers.js";
+import {
   createKeyHandler,
   deleteKeyHandler,
   listKeysHandler,
@@ -161,6 +166,9 @@ const routes: Route[] = [
   { method: "POST", path: "/v1/billing/redeem", handler: redeemHandler },
   { method: "POST", path: "/v1/billing/webhook/epusdt", handler: epusdtWebhookHandler },
   { method: "POST", path: "/v1/billing/webhook/xunhupay", handler: xunhupayWebhookHandler },
+  { method: "POST", path: "/v1/admin/login", handler: adminLoginHandler },
+  { method: "GET", path: "/v1/admin/users", handler: adminListUsersHandler },
+  { method: "GET", path: "/v1/admin/users/{userId}", handler: adminGetUserHandler },
   { method: "GET", path: "/skill.md", handler: skillMdHandler as LambdaHandler },
   { method: "GET", path: "/api/catalog.json", handler: catalogJsonHandler },
 ];

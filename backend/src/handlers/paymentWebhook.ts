@@ -29,6 +29,7 @@ import {
 } from "../lib/store.js";
 import { getNewapiPlanId, skuTypeToPlanId } from "../lib/plans.js";
 import { newapi, NewapiError } from "../lib/newapi.js";
+import { newapiUsername } from "../lib/newapiIdentity.js";
 import * as Sentry from "@sentry/node";
 
 /** Settle-failure reporter — pushes to Sentry as a high-severity event
@@ -399,7 +400,3 @@ async function applyTopupToUser(
   }
 }
 
-/** Mirrors authHandlers#register — newapi username = userId without u_ prefix. */
-function newapiUsername(userId: string): string {
-  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
-}

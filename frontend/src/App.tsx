@@ -16,7 +16,11 @@ import Payment from './screens/Payment';
 import OrderStatus from './screens/OrderStatus';
 import ManualConfigPC from './screens/ManualConfigPC';
 import Topup from './screens/Topup';
+import AdminLogin from './screens/AdminLogin';
+import AdminUsers from './screens/AdminUsers';
+import AdminUserDetail from './screens/AdminUserDetail';
 import { RequireAuth } from './components/RequireAuth';
+import { RequireAdmin } from './components/RequireAdmin';
 import { CurrencyProvider } from './lib/currency';
 
 export default function App() {
@@ -45,6 +49,10 @@ export default function App() {
       <Route path="/billing/success" element={<RequireAuth><OrderStatus /></RequireAuth>} />
 
       <Route path="/install/manual" element={<ManualConfigPC />} />
+
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/admin/users" element={<RequireAdmin><AdminUsers /></RequireAdmin>} />
+      <Route path="/admin/users/:userId" element={<RequireAdmin><AdminUserDetail /></RequireAdmin>} />
     </Routes>
     </CurrencyProvider>
   );

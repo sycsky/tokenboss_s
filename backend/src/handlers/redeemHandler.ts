@@ -39,6 +39,7 @@ import {
   NewapiError,
   newapiQuotaToUsd,
 } from "../lib/newapi.js";
+import { newapiUsername } from "../lib/newapiIdentity.js";
 
 function jsonResponse(
   statusCode: number,
@@ -81,11 +82,6 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
   } catch {
     return null;
   }
-}
-
-/** Mirrors authHandlers#register — newapi username = userId without u_ prefix. */
-function newapiUsername(userId: string): string {
-  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
 }
 
 function requireNewapiLink(auth: AuthContext): APIGatewayProxyResultV2 | null {

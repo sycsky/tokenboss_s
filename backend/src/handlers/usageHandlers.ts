@@ -38,6 +38,7 @@ import {
   type SubscriptionSnapshot,
 } from "../lib/store.js";
 import { newapi, newapiQuotaToUsd, type NewapiLogEntry } from "../lib/newapi.js";
+import { newapiUsername } from "../lib/newapiIdentity.js";
 
 // ---------- Helpers ----------
 
@@ -68,11 +69,6 @@ type EventType = (typeof VALID_EVENT_TYPES)[number];
 
 function isValidEventType(v: string): v is EventType {
   return (VALID_EVENT_TYPES as readonly string[]).includes(v);
-}
-
-/** Mirror of keysHandlers.newapiUsername — derived deterministically from userId. */
-function newapiUsername(userId: string): string {
-  return userId.startsWith("u_") ? userId.slice(2) : userId.slice(0, 20);
 }
 
 interface UsageRecordShape {

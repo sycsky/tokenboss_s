@@ -473,6 +473,58 @@ export function getUserIdByEmail(email: string): string | null {
   return row?.userId ?? null;
 }
 
+/**
+ * Admin-side paginated user listing for the ops dashboard.
+ *
+ * `q` is a free-text search applied to email / userId / displayName via
+ * SQLite LIKE (case-insensitive). Empty `q` returns the full table page-
+ * by-page. The query uses LOWER(...) on both sides so the index doesn't
+ * help — but at TokenBoss's scale (thousands of users, not millions) a
+ * sequential scan is fine and the simpler SQL beats a separate FTS
+ * table for the maintenance cost.
+ *
+ * Order is createdAt DESC so newest signups land on page 0; ties broken
+ * by userId DESC so paging is stable across two users with identical
+ * createdAt timestamps (race-window inserts).
+ */
+export function listUsers(input: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): { items: UserRecord[]; total: number } {
+  const limit = Math.max(1, Math.min(input.limit ?? 50, 500));
+  const offset = Math.max(0, input.offset ?? 0);
+  const q = (input.q ?? "").trim();
+  const like = `%${q.toLowerCase()}%`;
+
+  const where = q
+    ? `WHERE LOWER(IFNULL(email, '')) LIKE @like
+         OR LOWER(userId) LIKE @like
+         OR LOWER(IFNULL(displayName, '')) LIKE @like`
+    : "";
+
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS n FROM users ${where}`)
+    .get(q ? { like } : {}) as { n: number };
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM users
+        ${where}
+        ORDER BY createdAt DESC, userId DESC
+        LIMIT @limit OFFSET @offset`,
+    )
+    .all(q ? { like, limit, offset } : { limit, offset }) as Record<
+    string,
+    unknown
+  >[];
+
+  return {
+    items: rows.map(rowToUser),
+    total: totalRow.n,
+  };
+}
+
 export async function putEmailIndex(
   _email: string,
   _userId: string

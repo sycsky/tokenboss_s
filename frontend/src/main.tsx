@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import * as Sentry from "@sentry/react";
 import App from "./App.tsx";
 import { AuthProvider } from "./lib/auth.js";
+import { AdminAuthProvider } from "./lib/adminAuth.js";
 import "./index.css";
 
 // Frontend Sentry — separate project from backend so error counts /
@@ -71,7 +72,9 @@ createRoot(document.getElementById("root")!).render(
     >
       <BrowserRouter>
         <AuthProvider>
-          <App />
+          <AdminAuthProvider>
+            <App />
+          </AdminAuthProvider>
         </AuthProvider>
       </BrowserRouter>
     </Sentry.ErrorBoundary>
