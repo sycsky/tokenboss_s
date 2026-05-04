@@ -1,0 +1,40 @@
+{
+  "model": "gpt-5.5",
+  "instructions": "You are Codex, a CLI coding agent. Be concise. When you need to run a shell command, call the `shell` tool.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "用一句话告诉我当前 unix 时间戳怎么获取（不要真的执行）。" }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Run a shell command and return stdout/stderr/exit_code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "argv vector"
+          },
+          "workdir": { "type": "string" },
+          "timeout_ms": { "type": "integer" }
+        },
+        "required": ["command"]
+      },
+      "strict": false
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "reasoning": { "effort": "medium", "summary": "auto" },
+  "store": false,
+  "stream": true,
+  "include": ["reasoning.encrypted_content"]
+}
