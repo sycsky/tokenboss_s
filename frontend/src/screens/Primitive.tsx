@@ -1,4 +1,5 @@
 import { TopNav } from '../components/TopNav';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 /**
  * Primitive layer · v2 preview page.
@@ -18,6 +19,12 @@ import { TopNav } from '../components/TopNav';
  * v2; keep it lightweight on copy, heavy on visual contrast.
  */
 export default function Primitive() {
+  useDocumentMeta({
+    title: 'TokenBoss Primitive · Agent + TokenBoss = Productive',
+    description:
+      'TokenBoss v2 预告：从 Agent + LLM 到 Agent + TokenBoss——钱包、路由、原语层让 Agent 真正可用。',
+    ogImage: 'https://tokenboss.co/og-cover.png',
+  });
   return (
     <div className="min-h-screen bg-bg">
       <TopNav current="primitive" />

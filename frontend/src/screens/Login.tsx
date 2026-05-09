@@ -12,6 +12,7 @@ import {
   authLabelCls,
   authOAuthBtnCls,
 } from '../components/AuthShell';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 /**
  * Unified email-code entry. Same screen for new and returning users —
@@ -27,6 +28,12 @@ import {
  * password" task off the signup funnel.
  */
 export default function Login() {
+  useDocumentMeta({
+    title: '登录 · TokenBoss',
+    description:
+      '输入邮箱获取验证码，登录或注册 TokenBoss。免密码、即开即用。',
+    ogImage: 'https://tokenboss.co/og-cover.png',
+  });
   const nav = useNavigate();
   const { sendCode, loginWithCode } = useAuth();
   const [email, setEmail] = useState('');

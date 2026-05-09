@@ -5,6 +5,7 @@ import { AppNav, Breadcrumb } from '../components/AppNav';
 import { CompatRow, type AgentMark } from '../components/CompatRow';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import hermesIcon from '../assets/agents/hermes.png';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 const AGENTS: AgentMark[] = [
   {
@@ -297,6 +298,12 @@ const TOC_ITEMS: TocItem[] = [
 const TOC_IDS = TOC_ITEMS.map((t) => t.id);
 
 export default function ManualConfigPC() {
+  useDocumentMeta({
+    title: 'TokenBoss 接入手册 · OpenClaw / Hermes / Codex / OpenAI 兼容',
+    description:
+      '一份手册讲清楚：怎么把 TokenBoss 接到你的 Agent。OpenClaw、Hermes、Codex、Claude Code 全覆盖，配置一次到位。',
+    ogImage: 'https://tokenboss.co/og-cover.png',
+  });
   // Track which section is currently in view so the TOC can highlight it.
   // Section ids on the dom: spell / manual / recipes / openclaw / hermes /
   // codex / openai-compat / verify — all anchored below.

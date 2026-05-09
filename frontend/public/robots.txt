@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /console
+Disallow: /billing
+Disallow: /onboard
+Disallow: /verify-email
+Disallow: /login/magic
+
+Sitemap: https://tokenboss.co/sitemap.xml

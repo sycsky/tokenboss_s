@@ -12,8 +12,15 @@ import { AppNav } from '../components/AppNav';
 import { CurrencySwitcher } from '../components/CurrencySwitcher';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { api, type BucketRecord } from '../lib/api';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 export default function Plans() {
+  useDocumentMeta({
+    title: 'TokenBoss 定价 · 订阅制用大模型',
+    description:
+      '看清各档订阅的额度、价格与适用场景。Plus / Super / Ultra 三档，按月按年付费均可，一次订阅多模型可用。',
+    ogImage: 'https://tokenboss.co/og-cover.png',
+  });
   const { user } = useAuth();
   const { currency } = useCurrency();
   const isLoggedIn = !!user;
