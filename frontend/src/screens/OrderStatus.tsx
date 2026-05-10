@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppNav, Breadcrumb } from '../components/AppNav';
+import { MonoLogLoader } from '../components/MonoLogLoader';
 import { api, type BillingOrder, type BillingStatus } from '../lib/api';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
@@ -124,10 +125,10 @@ export default function OrderStatus() {
   if (loading && !order) {
     return (
       <Shell>
-        <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
-          BILLING · 订单状态
-        </div>
-        <h1 className="text-[28px] font-bold mb-3">加载订单中…</h1>
+        <MonoLogLoader
+          title="tokenboss · loading order"
+          endpoints={['order status']}
+        />
       </Shell>
     );
   }
