@@ -4,6 +4,7 @@ import { api, type BucketRecord } from '../lib/api';
 import { AppNav, Breadcrumb } from '../components/AppNav';
 import { SectionHeader } from '../components/SectionHeader';
 import { RedeemCodeModal } from '../components/RedeemCodeModal';
+import { MonoLogLoader } from '../components/MonoLogLoader';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -14,14 +15,25 @@ export default function Settings() {
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getUsage({}).then((r) => setStats(r.totals));
-    api.getBuckets().then((r) => setBucket((r.buckets || []).find((b) => b.skuType.startsWith('plan_')) ?? null));
-    api.me().then((r) => {
-      setCreatedAt(r.user?.createdAt ?? null);
-      setUserId(r.user?.userId ?? null);
-    });
+    Promise.all([
+      api.getUsage({}).then((r) => setStats(r.totals)).catch(() => undefined),
+      api
+        .getBuckets()
+        .then((r) =>
+          setBucket((r.buckets || []).find((b) => b.skuType.startsWith('plan_')) ?? null),
+        )
+        .catch(() => undefined),
+      api
+        .me()
+        .then((r) => {
+          setCreatedAt(r.user?.createdAt ?? null);
+          setUserId(r.user?.userId ?? null);
+        })
+        .catch(() => undefined),
+    ]).finally(() => setLoading(false));
   }, []);
 
   // Strip the internal `u_` prefix on the way to the screen — the bare
@@ -33,6 +45,19 @@ export default function Settings() {
   const daysLeft = bucket?.expiresAt
     ? Math.ceil((new Date(bucket.expiresAt).getTime() - Date.now()) / 86400e3)
     : 0;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-bg pb-12">
+        <AppNav current="account" />
+        <main className="max-w-[820px] mx-auto px-5 sm:px-9 pt-6">
+          <MonoLogLoader
+            endpoints={['account', 'subscription', 'usage stats']}
+          />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-bg pb-12">
