@@ -7,6 +7,7 @@ import { BalancePill } from '../components/BalancePill';
 import { ConsumeChart24h, type HourBucket } from '../components/ConsumeChart24h';
 import { UsageRow } from '../components/UsageRow';
 import { formatModelName } from '../lib/modelName';
+import { MonoLogLoader } from '../components/MonoLogLoader';
 // formatSource is intentionally unused while the 来源 column is hidden —
 // UA-based attribution is unreliable today (Hermes/Codex/Claude Code all
 // surface as openai-python UA → falls to 'other'). Re-import once X-Source
@@ -125,8 +126,13 @@ export default function UsageHistory() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg flex items-center justify-center font-mono text-[#A89A8D]">
-        加载中…
+      <div className="min-h-screen bg-bg pb-12">
+        <AppNav current="history" />
+        <main className="max-w-[1340px] mx-auto px-5 sm:px-9 pt-6">
+          <MonoLogLoader
+            endpoints={['subscription state', `usage ${dateRange} window`]}
+          />
+        </main>
       </div>
     );
   }
