@@ -1,16 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from '../../lib/auth';
 import * as apiModule from '../../lib/api';
-import * as authModule from '../../lib/auth';
 import OrderStatus from '../OrderStatus';
 
 beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
-
-  // Stub auth so OrderStatus renders.
-  vi.spyOn(authModule, 'useAuth').mockReturnValue({
+  // Stub api.me for AuthProvider initialization.
+  vi.spyOn(apiModule.api, 'me').mockResolvedValue({
     user: {
       userId: 'u_1',
       email: 'alice@x.com',
@@ -18,20 +17,17 @@ beforeEach(() => {
       balance: 0,
       createdAt: '2026-04-01T00:00:00Z',
     },
-    session: { token: 't' } as any,
-    loading: false,
-    setSession: () => {},
-    logout: () => {},
-    refreshUser: async () => {},
   } as any);
 });
 
 const renderOrder = (orderId = 'ord_test_123') =>
   render(
     <MemoryRouter initialEntries={[`/billing/orders/${orderId}`]}>
-      <Routes>
-        <Route path="/billing/orders/:id" element={<OrderStatus />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/billing/orders/:id" element={<OrderStatus />} />
+        </Routes>
+      </AuthProvider>
     </MemoryRouter>,
   );
 
