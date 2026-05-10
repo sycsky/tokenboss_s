@@ -115,6 +115,77 @@ describe('Dashboard cycle countdown', () => {
     expect(screen.queryByText('今日剩')).toBeNull();
   });
 
+  // Regression (codex P2): without an auto-refetch on the cycle boundary,
+  // a user who keeps /console open across nextResetAt sees the countdown
+  // disappear but the depleted pre-reset value linger because bucketsCache
+  // (60s TTL) is never invalidated by elapsed time alone.
+  it('refetches buckets when the cycle reset boundary passes', async () => {
+    const soon = new Date(Date.now() + 80); // boundary fires in 80ms
+    const far = new Date(Date.now() + 30 * 86400 * 1000);
+    const next = new Date(Date.now() + 24 * 3600 * 1000); // post-reset boundary
+    const getBucketsMock = vi.spyOn(apiModule.api, 'getBuckets')
+      .mockResolvedValueOnce({
+        buckets: [
+          {
+            id: 'bk_plus_1',
+            userId: 'u_1',
+            skuType: 'plan_plus',
+            amountUsd: 30,
+            dailyCapUsd: 30,
+            dailyRemainingUsd: 0.5, // depleted pre-reset
+            totalRemainingUsd: 0.5,
+            startedAt: '2026-04-01T16:00:00Z',
+            expiresAt: far.toISOString(),
+            nextResetAt: soon.toISOString(),
+            modeLock: 'none',
+            modelPool: 'all',
+            createdAt: '2026-04-01T16:00:00Z',
+          },
+        ],
+      } as any)
+      .mockResolvedValueOnce({
+        buckets: [
+          {
+            id: 'bk_plus_1',
+            userId: 'u_1',
+            skuType: 'plan_plus',
+            amountUsd: 30,
+            dailyCapUsd: 30,
+            dailyRemainingUsd: 30, // full post-reset
+            totalRemainingUsd: 30,
+            startedAt: '2026-04-01T16:00:00Z',
+            expiresAt: far.toISOString(),
+            nextResetAt: next.toISOString(),
+            modeLock: 'none',
+            modelPool: 'all',
+            createdAt: '2026-04-01T16:00:00Z',
+          },
+        ],
+      } as any);
+    vi.spyOn(apiModule.api, 'listKeys').mockResolvedValue({ keys: [] });
+
+    renderDashboard();
+
+    // First render: pre-reset value visible. The hero renders the `$`
+    // sign in a sibling <span>, so match the bare number.
+    await waitFor(() => {
+      expect(screen.getByText('0.5000')).toBeInTheDocument();
+    });
+
+    // After the boundary + 2s buffer + a render tick, getBuckets must
+    // have been called a second time AND the hero should show the new
+    // full quota.
+    await waitFor(
+      () => {
+        expect(getBucketsMock).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 4000 },
+    );
+    await waitFor(() => {
+      expect(screen.getByText('30.0000')).toBeInTheDocument();
+    });
+  }, 6000);
+
   // When newapi doesn't return a reset boundary (trial / non-resetting
   // plan), the countdown is suppressed rather than falling back to a
   // misleading subscription-end day count.

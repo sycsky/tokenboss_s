@@ -9,7 +9,7 @@ import {
   type UsageAggregateGroup,
   type UsageDetailResponse,
 } from '../lib/api';
-import { getBucketsCached, peekBuckets } from '../lib/bucketsCache';
+import { clearBucketsCache, getBucketsCached, peekBuckets } from '../lib/bucketsCache';
 import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { AllKeysModal, CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
 import { UsageRow } from '../components/UsageRow';
@@ -266,6 +266,27 @@ export default function Dashboard() {
     const m = Math.floor((cycleSecRemaining % 3600) / 60);
     return `${h}h ${m}m 后刷新`;
   })();
+
+  // Auto-refresh buckets the moment the cycle reset boundary passes. Without
+  // this, a user who keeps the dashboard open across the reset (e.g. at 4pm
+  // for a 4pm-anchored cycle) sees the countdown disappear but periodRemaining
+  // stays at the pre-reset value, because bucketsCache (60s TTL) is never
+  // explicitly invalidated by the elapsed boundary alone. Schedule a one-shot
+  // refetch slightly past the boundary so newapi has time to apply the reset.
+  useEffect(() => {
+    if (!cycleResetMs) return;
+    const msUntilReset = cycleResetMs - Date.now();
+    // Skip if already past, or unrealistically far out (>25h means the
+    // cached nextResetAt is itself stale; the next mount will re-pull).
+    if (msUntilReset <= 0 || msUntilReset > 25 * 3600 * 1000) return;
+    const id = setTimeout(() => {
+      clearBucketsCache();
+      getBucketsCached(user?.userId)
+        .then((r) => setBuckets(Array.isArray(r?.buckets) ? r.buckets : []))
+        .catch(() => undefined);
+    }, msUntilReset + 2000);
+    return () => clearTimeout(id);
+  }, [cycleResetMs, user?.userId]);
 
   // Plan tier metadata — chip color follows the status palette so
   // each tier reads at a glance without needing to read the label.
