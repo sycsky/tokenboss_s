@@ -213,7 +213,7 @@ export default function Dashboard() {
     : (subBucket?.dailyRemainingUsd ?? 0);
   // Hero progress bar visualizes "how much is LEFT" — full bar at the
   // start of the period, shrinks as the user spends. Reads more naturally
-  // than a fill-from-empty bar next to a big "今日剩 $X" headline.
+  // than a fill-from-empty bar next to a big "本期剩 $X" headline.
   const periodRemainingPct = periodTotal > 0
     ? Math.max(0, Math.min(100, (periodRemaining / periodTotal) * 100))
     : 0;
@@ -227,16 +227,19 @@ export default function Dashboard() {
     : periodRemainingPct >= 20 ? 'bg-yellow-stamp'
     : 'bg-red-soft';
 
-  // Live trial countdown — ticks once a second, only when there's a
-  // trial bucket whose expiry is in the future. The hero shows it as a
-  // mono HH:MM:SS so the urgency carried over from /onboard/success
-  // doesn't get lost the moment the user lands on /console.
+  // Live countdown clock — ticks 'now' so trial expiry and paid-plan
+  // cycle resets re-render. Trial uses HH:MM:SS so the urgency carried
+  // over from /onboard/success doesn't get lost on /console; paid plans
+  // only need minute precision for the "Xh Ym 后刷新" status text.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!trialBucket?.expiresAt) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const trialActive = !!trialBucket?.expiresAt;
+    const cycleActive = !!subBucket?.nextResetAt && !isTrial;
+    if (!trialActive && !cycleActive) return;
+    const intervalMs = trialActive ? 1000 : 60_000;
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(id);
-  }, [trialBucket?.expiresAt]);
+  }, [trialBucket?.expiresAt, subBucket?.nextResetAt, isTrial]);
   const trialSecRemaining = trialBucket?.expiresAt
     ? Math.max(0, Math.floor((new Date(trialBucket.expiresAt).getTime() - now) / 1000))
     : 0;
@@ -244,6 +247,25 @@ export default function Dashboard() {
   const tM = String(Math.floor((trialSecRemaining % 3600) / 60)).padStart(2, '0');
   const tS = String(trialSecRemaining % 60).padStart(2, '0');
   const trialClock = `${tH}:${tM}:${tS}`;
+
+  // Paid-plan cycle reset countdown. Source of truth is `nextResetAt`
+  // (newapi's `next_reset_time`) — the boundary where amount_used resets
+  // to 0 and the user gets a fresh full quota. Hardcoding "midnight" or
+  // "本月还 X 天" (subscription end) lies to users whose cycle is
+  // anchored to their subscription start (e.g. paid at 4pm → resets
+  // every 4pm). Falsy when newapi doesn't supply a reset (trial / topup
+  // / non-resetting plans).
+  const cycleResetMs = subBucket?.nextResetAt && !isTrial
+    ? new Date(subBucket.nextResetAt).getTime()
+    : null;
+  const cycleSecRemaining = cycleResetMs
+    ? Math.max(0, Math.floor((cycleResetMs - now) / 1000))
+    : 0;
+  const cycleCountdown = (() => {
+    const h = Math.floor(cycleSecRemaining / 3600);
+    const m = Math.floor((cycleSecRemaining % 3600) / 60);
+    return `${h}h ${m}m 后刷新`;
+  })();
 
   // Plan tier metadata — chip color follows the status palette so
   // each tier reads at a glance without needing to read the label.
@@ -257,9 +279,6 @@ export default function Dashboard() {
     : subBucket?.skuType === 'plan_super' ? 'bg-lavender text-lavender-ink'
     : subBucket?.skuType === 'plan_ultra' ? 'bg-accent text-white'
     : '';
-  const subDaysRemaining = subBucket?.expiresAt
-    ? Math.max(0, Math.ceil((new Date(subBucket.expiresAt).getTime() - Date.now()) / 86400e3))
-    : 0;
 
   // Default-key target for the inline spell. The spell always points at
   // the same default key, so once we've revealed its plaintext on this
@@ -328,8 +347,8 @@ export default function Dashboard() {
         ) : (
         <div className="lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
         {/* Subscription hero — uniform treatment for any active tier
-              (trial / plus / super / ultra). All three say "今日剩" since
-              trial is also a 24h day-card. Mini progress bar lives on the
+              (trial / plus / super / ultra). All three say "本期剩" since
+              trial is also a single-period card. Mini progress bar lives on the
               hero itself — no separate "今日额度" card below. CTA differs:
                 · trial            → "选个套餐 →"  /pricing (upgrade to paid)
                 · plus/super/ultra → "续费 →"     ContactSalesModal(renew)
@@ -352,11 +371,11 @@ export default function Dashboard() {
           {/* ===== SUBSCRIPTION SECTION ===== */}
           {subBucket ? (
             <>
-              {/* Headline row: 今日剩 + tier chip + days + 续费 button */}
+              {/* Headline row: 本期剩 + tier chip + cycle reset countdown + 续费 button */}
               <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3">
                 <div className="flex items-baseline gap-3 flex-wrap">
                   <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase font-bold opacity-85">
-                    今日剩
+                    本期剩
                   </span>
                   <span className="font-mono text-[36px] sm:text-[44px] font-bold leading-none">
                     <span className="text-[18px] sm:text-[22px] opacity-70 align-top mr-0.5">$</span>
@@ -377,7 +396,9 @@ export default function Dashboard() {
                       ? `剩 ${trialClock}`
                       : isTrial
                         ? '已到期'
-                        : `本月还 ${subDaysRemaining} 天`}
+                        : cycleResetMs && cycleSecRemaining > 0
+                          ? cycleCountdown
+                          : ''}
                   </span>
                 </div>
 

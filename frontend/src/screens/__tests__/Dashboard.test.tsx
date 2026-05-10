@@ -58,7 +58,7 @@ describe('Dashboard loading state', () => {
     expect(screen.getByText(/usage 30d/)).toBeInTheDocument();
     expect(screen.getByText(/api keys/)).toBeInTheDocument();
     // No real hero content visible during loading.
-    expect(screen.queryByText(/今日剩|Agent 余额/)).toBeNull();
+    expect(screen.queryByText(/本期剩|Agent 余额/)).toBeNull();
   });
 
   it('hides MonoLogLoader and renders content after fetches resolve', async () => {
@@ -69,6 +69,84 @@ describe('Dashboard loading state', () => {
     await waitFor(() => {
       expect(screen.queryByText('tokenboss · syncing')).toBeNull();
     });
+  });
+});
+
+describe('Dashboard cycle countdown', () => {
+  // Regression: hero status used to read "本月还 X 天" (subscription end),
+  // which lied about the actual quota cycle. Newapi resets amount_used
+  // at next_reset_time (e.g. 4pm if user subscribed at 4pm), and the
+  // backend ships that boundary as `nextResetAt`. The hero must consume
+  // that, not `expiresAt`.
+  it('shows cycle reset countdown derived from nextResetAt, not subscription end', async () => {
+    const future = new Date(Date.now() + 5 * 3600 * 1000 + 32 * 60 * 1000); // 5h 32m from now
+    const farFuture = new Date(Date.now() + 30 * 86400 * 1000); // 30d from now (subscription end)
+    vi.spyOn(apiModule.api, 'getBuckets').mockResolvedValue({
+      buckets: [
+        {
+          id: 'bk_plus_1',
+          userId: 'u_1',
+          skuType: 'plan_plus',
+          amountUsd: 30,
+          dailyCapUsd: 30,
+          dailyRemainingUsd: 18.5,
+          totalRemainingUsd: 18.5,
+          startedAt: '2026-04-01T16:00:00Z',
+          expiresAt: farFuture.toISOString(),
+          nextResetAt: future.toISOString(),
+          modeLock: 'none',
+          modelPool: 'all',
+          createdAt: '2026-04-01T16:00:00Z',
+        },
+      ],
+    } as any);
+    vi.spyOn(apiModule.api, 'listKeys').mockResolvedValue({ keys: [] });
+
+    renderDashboard();
+
+    // Cycle countdown should show hours+minutes ("Xh Ym 后刷新"), NOT
+    // subscription-end "本月还 X 天".
+    await waitFor(() => {
+      expect(screen.getByText(/\d+h \d+m 后刷新/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/本月还 \d+ 天/)).toBeNull();
+    // Label switched from "今日剩" to "本期剩".
+    expect(screen.getByText('本期剩')).toBeInTheDocument();
+    expect(screen.queryByText('今日剩')).toBeNull();
+  });
+
+  // When newapi doesn't return a reset boundary (trial / non-resetting
+  // plan), the countdown is suppressed rather than falling back to a
+  // misleading subscription-end day count.
+  it('omits the cycle countdown when nextResetAt is null', async () => {
+    vi.spyOn(apiModule.api, 'getBuckets').mockResolvedValue({
+      buckets: [
+        {
+          id: 'bk_plus_1',
+          userId: 'u_1',
+          skuType: 'plan_plus',
+          amountUsd: 30,
+          dailyCapUsd: 30,
+          dailyRemainingUsd: 30,
+          totalRemainingUsd: 30,
+          startedAt: '2026-04-01T16:00:00Z',
+          expiresAt: '2026-06-01T16:00:00Z',
+          nextResetAt: null,
+          modeLock: 'none',
+          modelPool: 'all',
+          createdAt: '2026-04-01T16:00:00Z',
+        },
+      ],
+    } as any);
+    vi.spyOn(apiModule.api, 'listKeys').mockResolvedValue({ keys: [] });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('本期剩')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/\d+h \d+m 后刷新/)).toBeNull();
+    expect(screen.queryByText(/本月还 \d+ 天/)).toBeNull();
   });
 });
 
