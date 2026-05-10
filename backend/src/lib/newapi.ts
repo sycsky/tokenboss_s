@@ -1073,14 +1073,21 @@ export const newapi = {
   },
 
   /**
-   * Get aggregated usage stats (admin).
-   * Returns total quota used in the time range.
+   * Get aggregated usage stats (admin). Returns total quota used in the
+   * time range. Upstream `/api/log/stat` (controller/log.go) accepts the
+   * same filter set as `/api/log/`, so passing `username` + `type` lets
+   * the dashboard read per-user "spent in 30d" in one RTT instead of
+   * paginating ~50 pages of raw logs and summing in Node.
    */
   async getLogStat(query?: {
     start_timestamp?: number;
     end_timestamp?: number;
     model_name?: string;
     token_name?: string;
+    username?: string;
+    /** 2 = consume; passing it scopes the sum to actual API calls so
+     *  topup/refund rows don't pollute "已用" totals. */
+    type?: number;
   }): Promise<{ quota: number; rpm: number; tpm: number }> {
     return req<{ quota: number; rpm: number; tpm: number }>(
       "GET",
@@ -1091,6 +1098,8 @@ export const newapi = {
         end_timestamp: query?.end_timestamp,
         model_name: query?.model_name,
         token_name: query?.token_name,
+        username: query?.username,
+        type: query?.type,
       },
     );
   },

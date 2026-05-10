@@ -73,7 +73,21 @@ interface RequestOptions {
   token?: string | null;
   /** Query params, appended only if non-empty. */
   query?: Record<string, string | undefined>;
+  /** Per-request abort timeout in ms. Default 30 s. Override for endpoints
+   *  known to do upstream pagination (usage). 0 disables. */
+  timeoutMs?: number;
 }
+
+/** Default abort timeout. Without this, a stalled backend hangs the
+ *  whole tab — Dashboard's Promise.all sets `hydrating=false` only in
+ *  `.finally`, so any single slow call freezes the skeleton forever.
+ *  30 s is generous for healthy traffic and short enough that a wedged
+ *  call surfaces a real error instead of phantom-spinning. */
+const DEFAULT_TIMEOUT_MS = 30_000;
+/** /v1/usage paginates upstream newapi logs; under load this can take
+ *  longer than the default budget. Tuned to give the backend its full
+ *  worst-case window before we call it dead. */
+const USAGE_TIMEOUT_MS = 60_000;
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = new URL(path, API_URL);
@@ -90,14 +104,32 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const token = opts.token === undefined ? getStoredSession() : opts.token;
   if (token) headers["authorization"] = `Bearer ${token}`;
 
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // AbortSignal.timeout is in every browser shipped since 2022 (Chrome
+  // 103 / FF 100 / Safari 16). Falls through unguarded — ancient-browser
+  // users have bigger problems than a missing timeout.
+  const signal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+
   let res: Response;
   try {
     res = await fetch(url.toString(), {
       method: opts.method ?? "GET",
       headers,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      signal,
     });
   } catch (err) {
+    // AbortSignal.timeout fires a DOMException with name 'TimeoutError'.
+    // Surface it as a recognizable ApiError code so callers can render
+    // a "请求超时，请重试" message instead of the raw browser string.
+    const e = err as { name?: string; message?: string };
+    if (e.name === 'TimeoutError') {
+      throw new ApiError(
+        0,
+        { error: { type: 'timeout', message: '请求超时', code: 'request_timeout' } },
+        `Request timeout after ${timeoutMs}ms`,
+      );
+    }
     throw new ApiError(0, undefined, `Network error: ${(err as Error).message}`);
   }
 
@@ -439,7 +471,7 @@ export const api = {
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => [k, String(v)]),
     ).toString();
-    return request<UsageDetailResponse>(`/v1/usage${qs ? "?" + qs : ""}`, { method: "GET" });
+    return request<UsageDetailResponse>(`/v1/usage${qs ? "?" + qs : ""}`, { method: "GET", timeoutMs: USAGE_TIMEOUT_MS });
   },
   /**
    * Aggregate consume events grouped by `source` (Agent identifier) or
@@ -456,7 +488,7 @@ export const api = {
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => [k, String(v)]),
     ).toString();
-    return request<UsageAggregateResponse>(`/v1/usage?${qs}`, { method: 'GET' });
+    return request<UsageAggregateResponse>(`/v1/usage?${qs}`, { method: 'GET', timeoutMs: USAGE_TIMEOUT_MS });
   },
 
   // billing

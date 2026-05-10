@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type UsageDetailResponse } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { getBucketsCached, peekBuckets } from '../lib/bucketsCache';
 import { AppNav, Breadcrumb, SectionLabel } from '../components/AppNav';
 import { BalancePill } from '../components/BalancePill';
 import { ConsumeChart24h, type HourBucket } from '../components/ConsumeChart24h';
@@ -50,9 +52,22 @@ function dateRangeToFromIso(r: DateRange): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
+function totalRemainingFromBuckets(buckets: { skuType: string; totalRemainingUsd: number | null; dailyRemainingUsd: number | null }[] | undefined): number {
+  return (buckets || []).reduce((s: number, b) => {
+    if (b.skuType === 'topup' || b.skuType === 'trial') return s + (b.totalRemainingUsd ?? 0);
+    return s + (b.dailyRemainingUsd ?? 0);
+  }, 0);
+}
+
 export default function UsageHistory() {
+  const { user } = useAuth();
   const [data, setData] = useState<UsageDetailResponse>({ records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] });
-  const [balance, setBalance] = useState(0);
+  // Hydrate from the shared buckets cache so navigating Dashboard ↔
+  // UsageHistory within the 60 s TTL paints the BalancePill instantly
+  // instead of flashing $0.
+  const [balance, setBalance] = useState(() =>
+    totalRemainingFromBuckets(peekBuckets(user?.userId)?.buckets),
+  );
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRangeState] = useState<DateRange>('7d');
   const [currentPage, setCurrentPage] = useState(1);
@@ -64,16 +79,13 @@ export default function UsageHistory() {
     setCurrentPage(1);
   }
 
-  // Buckets — load once at mount, doesn't depend on the table filters.
+  // Buckets — shared cache, fresh fetch coalesced with whatever
+  // Dashboard might have just kicked off. Doesn't depend on filters.
   useEffect(() => {
-    api.getBuckets().then((r) => {
-      const total = (r.buckets || []).reduce((s: number, b) => {
-        if (b.skuType === 'topup' || b.skuType === 'trial') return s + (b.totalRemainingUsd ?? 0);
-        return s + (b.dailyRemainingUsd ?? 0);
-      }, 0);
-      setBalance(total);
-    }).catch(() => { /* non-blocking — table can render without balance */ });
-  }, []);
+    getBucketsCached(user?.userId)
+      .then((r) => setBalance(totalRemainingFromBuckets(r.buckets)))
+      .catch(() => { /* non-blocking — table can render without balance */ });
+  }, [user?.userId]);
 
   // Usage — refetch whenever filter or page changes. Initial load also
   // flips off the loading skeleton; subsequent loads silently swap data.

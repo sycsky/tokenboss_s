@@ -9,6 +9,7 @@ vi.mock('../../lib/newapi.js', async (orig) => {
     ...real,
     newapi: {
       getLogs: vi.fn(),
+      getLogStat: vi.fn(),
       getUser: vi.fn(),
     },
   };
@@ -20,6 +21,7 @@ import { newapi } from '../../lib/newapi.js';
 import { signSession } from '../../lib/authTokens.js';
 
 const getLogsMock = newapi.getLogs as unknown as ReturnType<typeof vi.fn>;
+const getLogStatMock = newapi.getLogStat as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   process.env.SQLITE_PATH = ':memory:';
@@ -33,6 +35,11 @@ beforeEach(() => {
     newapiUserId: 42,
   });
   getLogsMock.mockReset();
+  getLogStatMock.mockReset();
+  // Default stat result so tests that don't care about totals.consumed
+  // don't have to wire it up. Override with mockResolvedValueOnce in
+  // tests that assert on the value.
+  getLogStatMock.mockResolvedValue({ quota: 0, rpm: 0, tpm: 0 });
   _clearConsumeLogCacheForTests();
 });
 
@@ -76,6 +83,9 @@ describe('usageHandler (newapi-backed)', () => {
       logEntry({ id: 2, quota: 25_000, model_name: 'gpt-mini' }),
     ];
     getLogsMock.mockResolvedValue({ items, total: 2, page: 0, page_size: 50 });
+    // Fast path reads totals.consumed from getLogStat, not from summing
+    // records. 75_000 quota = $0.15.
+    getLogStatMock.mockResolvedValue({ quota: 75_000, rpm: 0, tpm: 0 });
 
     const res = (await usageHandler(makeEvt())) as APIGatewayProxyStructuredResultV2;
     expect(res.statusCode).toBe(200);
@@ -154,53 +164,75 @@ describe('usageHandler (newapi-backed)', () => {
 
   // Default window = rolling 30d for every user (sub or not). Same
   // logic for everyone — keeps server load bounded and gives a stable
-  // "近 30 天" trend that doesn't jump on sub reset.
+  // "近 30 天" trend that doesn't jump on sub reset. The fast path also
+  // fires a separate 24h-ago getLogs call for the hourly chart, so
+  // assert against the records-page call (page:0, per_page:50) which
+  // is the one that should respect the 30d window.
   it('defaults to rolling 30d when no `from` is provided', async () => {
     getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
     await usageHandler(makeEvt());
 
     const expectedMin = Math.floor((Date.now() - 30 * 86400 * 1000) / 1000);
-    for (const call of getLogsMock.mock.calls) {
-      const ts = call[0].start_timestamp as number;
-      // Allow ±2s for clock skew between handler call and assertion.
-      expect(ts).toBeGreaterThanOrEqual(expectedMin - 2);
-      expect(ts).toBeLessThanOrEqual(expectedMin + 2);
-    }
+    const recordsCall = getLogsMock.mock.calls.find(
+      (c) => c[0].per_page === 50 && c[0].page === 0,
+    );
+    expect(recordsCall).toBeDefined();
+    const ts = recordsCall![0].start_timestamp as number;
+    // Quantized to the minute, so allow ~60s slack vs. wall clock.
+    expect(ts).toBeGreaterThanOrEqual(expectedMin - 65);
+    expect(ts).toBeLessThanOrEqual(expectedMin + 5);
+    // The stat call must also use the 30d window.
+    expect(getLogStatMock).toHaveBeenCalled();
+    const statTs = getLogStatMock.mock.calls[0][0].start_timestamp as number;
+    expect(statTs).toBe(ts);
   });
 
   // Explicit `from` from the client (e.g. UsageHistory's 24h window)
-  // must override the 30d default.
+  // must override the 30d default. Fast path: records page + stat call
+  // both honour the override; the 24h hourly chart call is intentionally
+  // independent (always last 24h, never tied to the user-supplied range).
   it('respects explicit `from` and skips the 30d default', async () => {
     getLogsMock.mockResolvedValue({ items: [], total: 0, page: 0, page_size: 100 });
 
     const explicitFrom = '2026-05-01T00:00:00.000Z';
     await usageHandler(makeEvt({ from: explicitFrom }));
     const expectedTs = Math.floor(new Date(explicitFrom).getTime() / 1000);
-    for (const call of getLogsMock.mock.calls) {
-      expect(call[0].start_timestamp).toBe(expectedTs);
-    }
+    const recordsCall = getLogsMock.mock.calls.find(
+      (c) => c[0].per_page === 50 && c[0].page === 0,
+    );
+    expect(recordsCall![0].start_timestamp).toBe(expectedTs);
+    expect(getLogStatMock.mock.calls[0][0].start_timestamp).toBe(expectedTs);
   });
 
-  // 60s in-memory cache: records mode now sources records from the
-  // same fetchAllConsumeLogs result it uses for totals/hourly, so a
-  // second handler call within the TTL must trigger zero upstream
-  // getLogs calls.
-  it('caches fetchAll results so the second handler call in the same window reuses them', async () => {
-    let callCount = 0;
+  // 60s in-memory caches across all three upstream call shapes — a
+  // second handler call in the same window must trigger zero new
+  // upstream traffic. Records page, stat result, and 24h hourly each
+  // have their own single-flight + TTL caches; this test covers all
+  // three implicitly by counting both getLogs and getLogStat invocations.
+  it('caches every upstream call so the second handler call in the same window is free', async () => {
+    let logCalls = 0;
     getLogsMock.mockImplementation(async () => {
-      callCount++;
-      return { items: [logEntry({ id: callCount, quota: 50_000 })], total: 1, page: 0, page_size: 100 };
+      logCalls++;
+      return { items: [logEntry({ id: logCalls, quota: 50_000 })], total: 1, page: 0, page_size: 100 };
+    });
+    let statCalls = 0;
+    getLogStatMock.mockImplementation(async () => {
+      statCalls++;
+      return { quota: 50_000, rpm: 0, tpm: 0 };
     });
 
-    // First call: cache miss. fetchAll paginates until total reached
-    // (1 entry with total=1 → exactly 1 upstream call).
     await usageHandler(makeEvt());
-    const callsAfterFirst = callCount;
-    expect(callsAfterFirst).toBeGreaterThanOrEqual(1);
+    const logsAfterFirst = logCalls;
+    const statsAfterFirst = statCalls;
+    // Fast path: 1 records page + 1 stat + N pages of 24h hourly.
+    // For 1-entry mock with total=1, the 24h hourly loop terminates
+    // after one upstream page.
+    expect(logsAfterFirst).toBeGreaterThanOrEqual(2);
+    expect(statsAfterFirst).toBe(1);
 
-    // Second call within TTL: every read served from cache.
     await usageHandler(makeEvt());
-    expect(callCount).toBe(callsAfterFirst);
+    expect(logCalls).toBe(logsAfterFirst);
+    expect(statCalls).toBe(statsAfterFirst);
   });
 
   // Different windows must NOT share a cache slot — explicit `from`
@@ -220,11 +252,11 @@ describe('usageHandler (newapi-backed)', () => {
   });
 
   // Regression: newapi caps `size` at 100 server-side regardless of what
-  // we ask for. The old loop's "items.length < requestedPerPage" EOF
-  // check tripped on page 0 (100 < 1000), freezing totals at 100.
-  // Make sure we now paginate until res.total is satisfied.
+  // we ask for. With the fast path, totals.calls comes from the upstream
+  // `total` field on the records page response — exact even when we
+  // only fetch one capped page. The 24h hourly loop still paginates
+  // until total is satisfied, exercising the same EOF check.
   it('totals.calls follows newapi total even when server caps page size at 100', async () => {
-    // Simulate a user with 250 entries while newapi caps each page at 100.
     const TOTAL = 250;
     const SERVER_CAP = 100;
     const allEntries = Array.from({ length: TOTAL }, (_, i) =>
@@ -232,18 +264,18 @@ describe('usageHandler (newapi-backed)', () => {
     );
     getLogsMock.mockImplementation(async (q: { page?: number; per_page?: number }) => {
       const page = q.page ?? 0;
-      // newapi ignores per_page > 100 — clamp like the real server.
       const size = Math.min(q.per_page ?? 50, SERVER_CAP);
       const start = page * size;
       const items = allEntries.slice(start, start + size);
       return { items, total: TOTAL, page, page_size: size };
     });
+    // 250 × 10_000 quota = 2_500_000 units = $5.00
+    getLogStatMock.mockResolvedValue({ quota: TOTAL * 10_000, rpm: 0, tpm: 0 });
 
     const res = (await usageHandler(makeEvt())) as APIGatewayProxyStructuredResultV2;
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body!);
     expect(body.totals.calls).toBe(TOTAL);
-    // 250 entries × 10_000 quota × $1 / 500_000 = $5.00
     expect(body.totals.consumed).toBeCloseTo(250 * (10_000 / 500_000), 3);
   });
 });

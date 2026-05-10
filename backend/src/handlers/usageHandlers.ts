@@ -170,7 +170,15 @@ function isoToTimestamp(iso: string | undefined): number | undefined {
  *  cards, not for billing accounting. */
 const DEFAULT_LOOKBACK_DAYS = 30;
 function defaultStartTs(): number {
-  return Math.floor((Date.now() - DEFAULT_LOOKBACK_DAYS * 86400 * 1000) / 1000);
+  // Quantize "now" to the minute before subtracting. Without this, the
+  // returned timestamp drifts every second, which makes the upstream
+  // cache key (username|startTs|endTs) effectively unique per request
+  // and defeats the 60s TTL — neighbouring requests almost never share
+  // a cache slot. With minute-quantization, every request inside the
+  // same minute lands on the same key and the cache actually hits.
+  const minuteMs = 60_000;
+  const nowMinuteMs = Math.floor(Date.now() / minuteMs) * minuteMs;
+  return Math.floor((nowMinuteMs - DEFAULT_LOOKBACK_DAYS * 86400 * 1000) / 1000);
 }
 
 interface FetchAllParams {
@@ -179,78 +187,112 @@ interface FetchAllParams {
   end_timestamp?: number;
 }
 
-// In-memory cache for fetchAllConsumeLogs — a typical dashboard load
-// fires this twice per user (once for totals/hourly, once for keyHint
-// aggregation), and dashboards refresh on focus / poll on a timer, so
-// hits compound. 60s TTL is short enough that "totals don't update for
-// a minute" is acceptable trend-view UX (hero "今日剩" reads sub state
-// directly, not this cache, so billing accuracy is unaffected).
+// In-memory caches for the three upstream call shapes the handler uses.
+// All share the same TTL / size / single-flight semantics:
+//   - 60s TTL — short enough that "trend numbers lag a minute" is fine.
+//     Hero "今日剩" reads sub state directly, not these caches, so
+//     billing accuracy is unaffected.
+//   - FIFO eviction at CACHE_MAX_ENTRIES bounds memory.
+//   - Single-flight: when N callers race on the same cold key, only the
+//     first hits newapi; the rest await the same Promise. Without this,
+//     the dashboard's two simultaneous /v1/usage requests (records list
+//     + keyHint aggregate) both miss the empty cache and both execute
+//     the full pagination — same upstream work doubled. Mirrors the
+//     loginInFlight pattern in newapi.ts.
 //
-// Per-process cache only — no Redis, no cross-instance sharing. Each
-// zeabur replica warms its own cache; eventual consistency is fine.
-// FIFO eviction at CACHE_MAX_ENTRIES bounds memory: ~500 KB/user × 200
-// users ≈ 100 MB worst case.
-interface CacheEntry {
-  expiresAt: number;
-  data: NewapiLogEntry[];
-}
-const consumeLogCache = new Map<string, CacheEntry>();
+// Per-process only — no Redis, no cross-instance sharing. Each zeabur
+// replica warms its own caches; eventual consistency is fine.
 const CACHE_TTL_MS = 60_000;
 const CACHE_MAX_ENTRIES = 200;
+
+interface MemoEntry<T> { expiresAt: number; data: T; }
+
+interface MemoCache<T> {
+  cache: Map<string, MemoEntry<T>>;
+  inFlight: Map<string, Promise<T>>;
+  getOrFetch(key: string, fetch: () => Promise<T>): Promise<T>;
+  clear(): void;
+}
+
+function makeMemoCache<T>(): MemoCache<T> {
+  const cache = new Map<string, MemoEntry<T>>();
+  const inFlight = new Map<string, Promise<T>>();
+  const getOrFetch = async (key: string, fetch: () => Promise<T>): Promise<T> => {
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.data;
+    const existing = inFlight.get(key);
+    if (existing) return existing;
+    const p = (async () => {
+      const data = await fetch();
+      if (cache.size >= CACHE_MAX_ENTRIES) {
+        // Map preserves insertion order, so first key is oldest. Strict
+        // LRU isn't worth the bookkeeping for a 60s TTL.
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, data });
+      return data;
+    })();
+    inFlight.set(key, p);
+    // Drop the in-flight slot once the call settles — success means the
+    // cache is now warm; failure means the next caller can retry on its
+    // own. Use a no-op catch so the unhandled-rejection path stays clean
+    // for callers who didn't subscribe.
+    void p.catch(() => undefined).finally(() => inFlight.delete(key));
+    return p;
+  };
+  const clear = (): void => { cache.clear(); inFlight.clear(); };
+  return { cache, inFlight, getOrFetch, clear };
+}
+
+const consumeLogCache = makeMemoCache<NewapiLogEntry[]>();
+const consumeStatCache = makeMemoCache<{ quota: number }>();
+const consumeRecentPageCache = makeMemoCache<{ items: NewapiLogEntry[]; total: number }>();
 
 function cacheKeyFor(p: FetchAllParams): string {
   return `${p.username}|${p.start_timestamp ?? ''}|${p.end_timestamp ?? ''}`;
 }
 
-/** Test-only: drop the in-memory cache so cases stay isolated. */
+/** Test-only: drop every in-memory cache so cases stay isolated. */
 export function _clearConsumeLogCacheForTests(): void {
   consumeLogCache.clear();
+  consumeStatCache.clear();
+  consumeRecentPageCache.clear();
 }
 
 /** Pull every consume entry for `username` in the given window. Caps at 5000.
- *  Results are cached per (username, window) for 60s — see CacheEntry. */
+ *  Results are cached per (username, window) for 60s with single-flight. */
 async function fetchAllConsumeLogs(p: FetchAllParams): Promise<NewapiLogEntry[]> {
-  const key = cacheKeyFor(p);
-  const now = Date.now();
-  const cached = consumeLogCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.data;
-
-  // newapi's /api/log/ silently caps `size` at 100 server-side regardless
-  // of what we request. The previous "items.length < requestedPerPage"
-  // EOF check therefore always tripped on page 0 (100 < 1000), so totals
-  // and the hourly chart silently froze at the first 100 entries — the
-  // exact symptom users hit ("调用次数停在 100"). Drive the loop off the
-  // response's own `total` instead, with a hard cap to bound memory /
-  // request count for power users.
-  const PER_PAGE = 100;
-  const HARD_CAP_RECORDS = 5000;
-  const HARD_CAP_PAGES = Math.ceil(HARD_CAP_RECORDS / PER_PAGE);
-  const all: NewapiLogEntry[] = [];
-  for (let page = 0; page < HARD_CAP_PAGES; page++) {
-    const res = await newapi.getLogs({
-      page,
-      per_page: PER_PAGE,
-      type: 2, // consume only
-      username: p.username,
-      start_timestamp: p.start_timestamp,
-      end_timestamp: p.end_timestamp,
-    });
-    const items = res?.items ?? [];
-    if (items.length === 0) break;
-    all.push(...items);
-    const total = typeof res?.total === 'number' ? res.total : undefined;
-    if (total !== undefined && all.length >= total) break;
-    if (all.length >= HARD_CAP_RECORDS) break;
-  }
-
-  if (consumeLogCache.size >= CACHE_MAX_ENTRIES) {
-    // FIFO eviction — Map preserves insertion order, so the first key is
-    // the oldest. Strict LRU isn't worth the bookkeeping for a 60s TTL.
-    const oldest = consumeLogCache.keys().next().value;
-    if (oldest !== undefined) consumeLogCache.delete(oldest);
-  }
-  consumeLogCache.set(key, { expiresAt: now + CACHE_TTL_MS, data: all });
-  return all;
+  return consumeLogCache.getOrFetch(cacheKeyFor(p), async () => {
+    // newapi's /api/log/ silently caps `size` at 100 server-side regardless
+    // of what we request. The previous "items.length < requestedPerPage"
+    // EOF check therefore always tripped on page 0 (100 < 1000), so totals
+    // and the hourly chart silently froze at the first 100 entries — the
+    // exact symptom users hit ("调用次数停在 100"). Drive the loop off the
+    // response's own `total` instead, with a hard cap to bound memory /
+    // request count for power users.
+    const PER_PAGE = 100;
+    const HARD_CAP_RECORDS = 5000;
+    const HARD_CAP_PAGES = Math.ceil(HARD_CAP_RECORDS / PER_PAGE);
+    const all: NewapiLogEntry[] = [];
+    for (let page = 0; page < HARD_CAP_PAGES; page++) {
+      const res = await newapi.getLogs({
+        page,
+        per_page: PER_PAGE,
+        type: 2,
+        username: p.username,
+        start_timestamp: p.start_timestamp,
+        end_timestamp: p.end_timestamp,
+      });
+      const items = res?.items ?? [];
+      if (items.length === 0) break;
+      all.push(...items);
+      const total = typeof res?.total === 'number' ? res.total : undefined;
+      if (total !== undefined && all.length >= total) break;
+      if (all.length >= HARD_CAP_RECORDS) break;
+    }
+    return all;
+  });
 }
 
 // ---------- Handler ----------
@@ -432,21 +474,6 @@ const usageHandlerImpl = async (
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 50;
   const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
-  // Pull the full window once (60s cached). We slice the merged
-  // consume + reset list ourselves below — using newapi's own
-  // pagination here would only paginate consume rows, leaving every
-  // page padded with the same full set of reset rows.
-  const all = await fetchAllConsumeLogs({
-    username,
-    start_timestamp: startTs,
-    end_timestamp: endTs,
-  });
-
-  const sourceByEntryId = attachSourcesToLogEntries(userId, all);
-  const consumeRecords = all.map((entry) =>
-    mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
-  );
-
   // Synthesize subscription reset/expire records from the snapshot table
   // so /console/history shows the periodic "作废 + 重置" pair newapi
   // doesn't log natively. listResetSnapshots returns ONLY rows with
@@ -459,9 +486,101 @@ const usageHandlerImpl = async (
   );
   const resetRecords = resetSnapshots.flatMap(snapshotToRecords);
 
-  // Merge + sort newest-first, then slice the requested page. Both
-  // sources participate in pagination so frequent resets don't crowd
-  // every page.
+  // Fast path — small page sizes don't need the full 30d scan. Fetch
+  // ONE upstream page for the records list, ONE stat call for
+  // totals.consumed, and ONE smaller 24h scan for the hourly chart.
+  // Three calls in parallel ≈ one RTT wall-time vs. 50 sequential
+  // pages on the slow path. Falls back to the slow path when the
+  // caller is paginating deep into history (UsageHistory page 6+).
+  //
+  // Correctness: as long as `recordsPageSize ≥ offset + limit`, the
+  // merge of (most-recent N consume) + (all resets in window) sorted
+  // desc is identical at positions [offset, offset+limit) to the merge
+  // of the full set — newapi sorts log pages by created_at desc, so
+  // any consume row pushed past position recordsPageSize is older than
+  // every row we kept and can't appear in the slice.
+  const FAST_PATH_LIMIT = 100;
+  const wantedRecords = offset + limit;
+  if (wantedRecords <= FAST_PATH_LIMIT) {
+    const recordsPageSize = Math.min(FAST_PATH_LIMIT, Math.max(50, wantedRecords));
+    // Quantize the 24h hourly window to the minute, same reason as
+    // defaultStartTs — keeps the cache key stable across requests.
+    const hourly24hStartTs = Math.floor(
+      (Math.floor(Date.now() / 60_000) * 60_000 - 24 * 3600 * 1000) / 1000,
+    );
+    const recordsPageKey = `${username}|${startTs ?? ''}|${endTs ?? ''}|${recordsPageSize}`;
+    const statKey = `${username}|${startTs ?? ''}|${endTs ?? ''}`;
+
+    const [recordsPage, statRes, hourly24hLogs] = await Promise.all([
+      consumeRecentPageCache.getOrFetch(recordsPageKey, async () => {
+        const res = await newapi.getLogs({
+          page: 0,
+          per_page: recordsPageSize,
+          type: 2,
+          username,
+          start_timestamp: startTs,
+          end_timestamp: endTs,
+        });
+        return {
+          items: res?.items ?? [],
+          total: typeof res?.total === 'number' ? res.total : (res?.items?.length ?? 0),
+        };
+      }),
+      consumeStatCache.getOrFetch(statKey, async () => {
+        const s = await newapi.getLogStat({
+          type: 2,
+          username,
+          start_timestamp: startTs,
+          end_timestamp: endTs,
+        });
+        return { quota: s?.quota ?? 0 };
+      }),
+      fetchAllConsumeLogs({
+        username,
+        start_timestamp: hourly24hStartTs,
+        end_timestamp: endTs,
+      }),
+    ]);
+
+    const sourceByEntryId = attachSourcesToLogEntries(userId, recordsPage.items);
+    const consumeRecords = recordsPage.items.map((entry) =>
+      mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
+    );
+    const merged = [...consumeRecords, ...resetRecords].sort((a, b) =>
+      a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+    );
+    const records = merged.slice(offset, offset + limit);
+
+    return jsonResponse(200, {
+      records,
+      totals: {
+        consumed: round6(newapiQuotaToUsd(statRes.quota)),
+        // `calls` is consume-only across the full window — newapi
+        // returns the upstream total even when we only fetch one page.
+        calls: recordsPage.total,
+        // `records` is consume total + synthesized resets in the window.
+        records: recordsPage.total + resetRecords.length,
+      },
+      hourly24h: buildHourly24h(hourly24hLogs),
+    });
+  }
+
+  // Slow path — deep pagination (offset+limit > FAST_PATH_LIMIT). Pull
+  // the full window once (60s cached + single-flighted) and slice the
+  // merged consume + reset list ourselves. Newapi's own pagination would
+  // only paginate consume rows, leaving every page padded with the same
+  // full set of reset rows.
+  const all = await fetchAllConsumeLogs({
+    username,
+    start_timestamp: startTs,
+    end_timestamp: endTs,
+  });
+
+  const sourceByEntryId = attachSourcesToLogEntries(userId, all);
+  const consumeRecords = all.map((entry) =>
+    mapNewapiLog(entry, userId, sourceByEntryId.get(entry.id) ?? 'other'),
+  );
+
   const merged = [...consumeRecords, ...resetRecords].sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
   );
@@ -474,9 +593,6 @@ const usageHandlerImpl = async (
     records,
     totals: {
       consumed: round6(totalConsumed),
-      // `calls` stays consume-only — the UI labels it "X 次调用".
-      // `records` is the merged total (consume + reset) the UI uses
-      // for page-count math.
       calls: all.length,
       records: merged.length,
     },

@@ -17,6 +17,7 @@ import {
 } from "react";
 import * as Sentry from "@sentry/react";
 
+import { clearBucketsCache } from "./bucketsCache";
 import {
   ApiError,
   api,
@@ -184,6 +185,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = getStoredSession();
     setStoredSession(null);
     setState({ user: null, token: null });
+    // Drop any cached account data that lives outside React state so the
+    // next sign-in doesn't briefly render the previous account's
+    // balance / bucket list before the fresh fetch resolves.
+    clearBucketsCache();
     if (!token) return;
     // Fire-and-forget the server-side revoke (bumps tokenVersion). We
     // don't await it: the user has already perceived "logged out", and
@@ -201,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (err instanceof ApiError && err.status === 401) {
         setStoredSession(null);
         setState({ user: null, token: null });
+        clearBucketsCache();
       }
       throw err;
     }

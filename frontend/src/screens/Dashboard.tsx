@@ -9,6 +9,7 @@ import {
   type UsageAggregateGroup,
   type UsageDetailResponse,
 } from '../lib/api';
+import { getBucketsCached, peekBuckets } from '../lib/bucketsCache';
 import { APIKeyList, type KeyStats } from '../components/APIKeyList';
 import { AllKeysModal, CreateKeyModal, DeleteKeyModal, RevealKeyModal } from '../components/KeyModals';
 import { UsageRow } from '../components/UsageRow';
@@ -23,24 +24,27 @@ import { slockBtn } from '../lib/slockBtn';
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
 /**
- * Module-level cache for the four Dashboard fetches. Persists across route
- * unmounts (Dashboard is a route element — react-router throws away the
- * component instance on every navigation), so a user bouncing between
- * /console and a sub-page sees an instant render on return: stale state
- * paints first, the four API calls re-fire in the background and silently
- * upgrade the UI when fresher numbers arrive (stale-while-revalidate).
+ * Module-level cache for the Dashboard's usage / keyHintGroups / keys
+ * fetches. Persists across route unmounts (Dashboard is a route element
+ * — react-router throws away the component instance on every navigation),
+ * so a user bouncing between /console and a sub-page sees an instant
+ * render on return: stale state paints first, the API calls re-fire in
+ * the background and silently upgrade the UI when fresher numbers
+ * arrive (stale-while-revalidate).
+ *
+ * Buckets are NOT held here — they live in `bucketsCache.ts` so
+ * UsageHistory and any future page can share the same cached value
+ * instead of each firing its own /v1/buckets on mount.
  *
  * Scoped by `userId` so logout/login in the same SPA session (logout uses
  * react-router navigate, not a full page reload) doesn't expose the
- * previous account's buckets / usage / keys to a fresh login. The
- * Dashboard guard at the top of the component invalidates the cache
- * whenever the current authenticated userId stops matching the cached
- * one.
+ * previous account's usage / keys to a fresh login. The Dashboard guard
+ * at the top of the component invalidates the cache whenever the
+ * current authenticated userId stops matching the cached one.
  */
 interface DashboardCache {
   /** Auth subject this cache snapshot belongs to. Mismatched user → wipe. */
   userId?: string;
-  buckets?: BucketRecord[];
   usage?: UsageDetailResponse;
   keyHintGroups?: UsageAggregateGroup[];
   keys?: ProxyKeySummary[];
@@ -54,7 +58,6 @@ const dashboardCache: DashboardCache = {};
 /** Wipe every field — used when the cache no longer matches the active user. */
 function resetDashboardCache(): void {
   dashboardCache.userId = undefined;
-  dashboardCache.buckets = undefined;
   dashboardCache.usage = undefined;
   dashboardCache.keyHintGroups = undefined;
   dashboardCache.keys = undefined;
@@ -98,7 +101,9 @@ export default function Dashboard() {
     resetDashboardCache();
   }
 
-  const [buckets, setBuckets] = useState<BucketRecord[]>(dashboardCache.buckets ?? []);
+  const [buckets, setBuckets] = useState<BucketRecord[]>(
+    () => peekBuckets(user?.userId)?.buckets ?? [],
+  );
   const [usage, setUsage] = useState<UsageDetailResponse>(
     dashboardCache.usage ?? { records: [], totals: { consumed: 0, calls: 0 }, hourly24h: [] },
   );
@@ -127,10 +132,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      api.getBuckets().then((r) => {
+      getBucketsCached(user?.userId).then((r) => {
         const b = r.buckets || [];
         setBuckets(b);
-        dashboardCache.buckets = b;
       }),
       // Recent-call list + balance hero totals — keep small.
       // limit 5 — five rows ≈ the height of the right-side 接入 panel,
