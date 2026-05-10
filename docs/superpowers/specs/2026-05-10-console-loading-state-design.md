@@ -87,7 +87,7 @@ function Spinner({ offset = 0 }: { offset?: number }) {
 
 `hydrating` 的现有语义保持：首屏冷启（无 `dashboardCache.cachedAt`）= true；返回访问（命中前端缓存）= false。返回访问者直接走 stale-while-revalidate，加载态完全不出现。
 
-**结构调整：**
+**结构调整：** 顶层就地三元，**不抽组件函数**（避免 prop 透传 + 闭包风险）。把现有 `<main>` 上的 `lg:grid` class 下沉到内层 `<div>`，hydrating 期连 grid 都不渲染：
 
 ```tsx
 return (
@@ -95,17 +95,20 @@ return (
     <AppNav current="console" />
     {bannerForUnverified}
     <main className="max-w-[1200px] mx-auto px-5 sm:px-9 pt-5">
-      {hydrating
-        ? <MonoLogLoader endpoints={['subscription state', 'usage 30d', 'api keys']} />
-        : <DashboardContent ... />
-      }
+      {hydrating ? (
+        <MonoLogLoader endpoints={['subscription state', 'usage 30d', 'api keys']} />
+      ) : (
+        <div className="lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
+          {/* hero <section> + 主列 <div> + 侧栏 <aside> 全部现状 JSX 原封搬入 */}
+        </div>
+      )}
     </main>
     {/* modals 保持外层（独立于 hydrating） */}
   </div>
 );
 ```
 
-`<DashboardContent />` 是同文件内的函数，包裹现有 `lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6` + hero + 主列 + 侧栏的全部现状逻辑。`hydrating && buckets.length === 0` 的组合判断退化成单条件 `hydrating`：因为 `MonoLogLoader` 不依赖 buckets 且加载期下方根本不渲染，"防闪烁 0 余额 hero" 的设计意图被新结构替代。
+`hydrating && buckets.length === 0` 的内层组合判断退化成单条件 `hydrating`：因为 `MonoLogLoader` 不依赖 buckets 且加载期下方根本不渲染，"防闪烁 0 余额 hero" 的设计意图被新结构替代。
 
 ### 3. UsageHistory `/console/history`
 
@@ -214,7 +217,7 @@ if (loading && !order) {
 |---|---|---|
 | 新建 | `frontend/src/components/MonoLogLoader.tsx` | 共享组件 + 内部 `Spinner` 子组件，~50 行 |
 | 新建 | `frontend/src/components/__tests__/MonoLogLoader.test.tsx` | 组件测试 |
-| 修改 | `frontend/src/screens/Dashboard.tsx` | 顶层加 `hydrating` 三元，主区现有内容抽到同文件内的 `<DashboardContent />` 函数。删除现有的 skeleton `<div>`。约 80 行结构调整，无新逻辑 |
+| 修改 | `frontend/src/screens/Dashboard.tsx` | `<main>` 上的 grid class 下沉到内层 `<div>`，加 `hydrating` 三元，删旧 skeleton `<div>`。**就地修改不抽函数**。约 15 行结构调整，无新逻辑 |
 | 修改 | `frontend/src/screens/UsageHistory.tsx` | `loading` fallback 替换为 `<MonoLogLoader />` 块（约 8 行改动） |
 | 修改 | `frontend/src/screens/Settings.tsx` | 加 `loading` state；3 个 fetch 用 `Promise.all().finally`；`loading` 时 fallback `<MonoLogLoader />`（约 25 行改动） |
 | 修改 | `frontend/src/screens/OrderStatus.tsx` | `loading && !order` 分支替换为 `<MonoLogLoader />`（约 6 行改动） |
