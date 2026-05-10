@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useCurrency } from '../lib/currency';
 import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
-import { ULTRA_DROP, useDailyCountdown } from '../lib/dropSchedule';
+import { ULTRA_DROP } from '../lib/dropSchedule';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
 import { TopNav } from '../components/TopNav';
@@ -13,6 +13,7 @@ import { CurrencySwitcher } from '../components/CurrencySwitcher';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { api, type BucketRecord } from '../lib/api';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
+import { MEMBERSHIP_PAUSED_COPY } from '../lib/membership';
 
 export default function Plans() {
   useDocumentMeta({
@@ -60,35 +61,27 @@ export default function Plans() {
     'upgrade' | 'renew' | 'topup' | 'general' | null
   >(null);
 
-  // Ultra slots re-open daily at 9:55 CST (Super preempt — the real
-  // transition moment, since Super grabs everything in 5 min). The hook
-  // auto-rolls to tomorrow's slot when today's passes AND exposes a
-  // 3-phase state so copy can flip through 即将开放 → 抢购中 → 已被抢完
-  // without requiring the user to refresh.
-  const { countdown: ultraCountdown, phase: ultraPhase } = useDailyCountdown(
-    ULTRA_DROP.preemptHourCST,
-    ULTRA_DROP.preemptMinuteCST,
-  );
-
-  // CTA for the 3 paid tiers. Returns null to suppress the button
-  // entirely (used for tiers below the user's current paid plan — no
-  // meaningful action to offer there, and showing "已订阅" on every card
-  // makes the page feel locked-down). Priority chain:
-  //   1. anonymous            → "免费开始 →"        → /register
+  // CTA for the 3 paid tiers. Returns null to suppress the button entirely.
+  // Priority chain:
+  //   1. anonymous            → "免费开始 →"            → /register
   //   2. logged in, paid:
-  //      · this card === current tier → "续费 →"   → ContactSalesModal(renew)
-  //      · this card  >  current tier → "升级 →"   → ContactSalesModal(upgrade)
-  //         (sold-out wins — countdown still shows for sold-out higher tiers
-  //          so users see the real marketing state, not contact-sales)
-  //      · this card  <  current tier → null (no button rendered)
+  //      · this card === current tier → "续费 →"        → ContactSalesModal(renew)
+  //      · this card  <  current tier → null (no CTA)
+  //      · this card  >  current tier:
+  //          · sold-out → "改用按量付费 →"            → /billing/topup
+  //          · normal   → "升级 →"                    → ContactSalesModal(upgrade)
   //   3. logged in, no plan:
-  //      · sold out  → countdown
-  //      · can buy   → "立即开通 →"
+  //      · sold-out → "改用按量付费 →"                 → /billing/topup
+  //      · normal   → "立即开通 →"                     → /billing/pay?plan=...
+  // 售罄态期间（sold-out=true 且 isLoggedIn）原本依赖 ULTRA_DROP 倒计时
+  // 的「下次开放」CTA 替换成统一的「改用按量付费」入口。详见
+  // openspec/changes/pause-membership-tiers/design.md D2/D4。
   const TIER_RANK: Record<'plus' | 'super' | 'ultra', number> = {
     plus: 1,
     super: 2,
     ultra: 3,
   };
+  const goTopup = () => navigate('/billing/topup');
   const tierCta = (
     plan: 'plus' | 'super' | 'ultra',
     soldOut?: boolean,
@@ -96,39 +89,25 @@ export default function Plans() {
     if (!isLoggedIn) return { text: '免费开始 →', onClick: goRegister };
 
     if (paidSku) {
-      // paidSku is 'plan_plus' | 'plan_super' | 'plan_ultra'
       const currentTier = paidSku.replace('plan_', '') as 'plus' | 'super' | 'ultra';
 
       if (plan === currentTier) {
+        // Renewal — same-tier subscribers can renew even when sold-out
+        // (backend has the matching exemption in paymentHandlers).
         return { text: '续费 →', onClick: () => setContactReason('renew') };
       }
       if (TIER_RANK[plan] < TIER_RANK[currentTier]) {
-        // Lower tier than the user already has — no action to offer.
         return null;
       }
-      // Higher tier. Sold-out marketing state takes priority over the
-      // upgrade contact-sales path (a paid super user looking at ultra
-      // should still see the daily-drop countdown).
+      // Higher tier — sold-out 状态走按量付费引导；非售罄走升级洽询。
       if (soldOut) {
-        return {
-          text:
-            ultraPhase === 'transitioning'
-              ? 'SUPER 抢购中…'
-              : `下次开放 ${ultraCountdown}`,
-          onClick: () => goPay(plan),
-        };
+        return { text: MEMBERSHIP_PAUSED_COPY.ctaText, onClick: goTopup };
       }
       return { text: '升级 →', onClick: () => setContactReason('upgrade') };
     }
 
     if (soldOut) {
-      return {
-        text:
-          ultraPhase === 'transitioning'
-            ? 'SUPER 抢购中…'
-            : `下次开放 ${ultraCountdown}`,
-        onClick: () => goPay(plan),
-      };
+      return { text: MEMBERSHIP_PAUSED_COPY.ctaText, onClick: goTopup };
     }
     return { text: '立即开通 →', onClick: () => goPay(plan) };
   };
@@ -141,9 +120,13 @@ export default function Plans() {
   const std = STANDARD_RATE[currency];
   const [plus, sup, ultra] = TIERS;
 
-  // Pre-compute per-card CTA so each TierCard call site is just a
-  // straight prop wire-up, and we don't re-derive the cta on every
-  // render of the 3 cards.
+  // 「会员暂停态」的视觉只对登录用户展开；访客继续看正常营销卡。
+  // 见 openspec/changes/pause-membership-tiers/design.md D3。
+  const plusPaused = isLoggedIn && !!plus.soldOut;
+  const supPaused = isLoggedIn && !!sup.soldOut;
+  const ultraPaused = isLoggedIn && !!ultra.soldOut;
+  const anyPaused = plusPaused || supPaused || ultraPaused;
+
   const plusCta = tierCta('plus', plus.soldOut);
   const superCta = tierCta('super', sup.soldOut);
   const ultraCta = tierCta('ultra', ultra.soldOut);
@@ -269,6 +252,28 @@ export default function Plans() {
           </span>
         </div>
 
+        {/* 会员暂停 banner —— 只对登录用户出现（访客继续看正常营销卡）。
+            ink-stamped 风格跟页面其他模块对齐；不抢戏但比纯灰底文字明显。 */}
+        {anyPaused && (
+          <div
+            className={
+              'mb-5 p-5 md:p-6 ' +
+              'bg-bg-soft border-2 border-ink rounded-md ' +
+              'shadow-[3px_3px_0_0_#1C1917]'
+            }
+          >
+            <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-ink-3 font-bold mb-2">
+              MEMBERSHIP · 暂停中
+            </div>
+            <h3 className="text-[16px] md:text-[17px] font-bold tracking-tight mb-1.5 leading-tight">
+              {MEMBERSHIP_PAUSED_COPY.bannerTitle}
+            </h3>
+            <p className="text-[13px] text-text-secondary leading-relaxed max-w-[640px]">
+              {MEMBERSHIP_PAUSED_COPY.bannerBody}
+            </p>
+          </div>
+        )}
+
         {/* Scenario one-liner — paired with 01 充值's intro to act as a fork
             in the road for the user. Same second-person frame: 你 [doing
             what] · 要 [need] —— [what we give you]. Mechanism specifics
@@ -288,9 +293,11 @@ export default function Plans() {
             models={plus.models}
             ctaText={plusCta?.text}
             onCtaClick={plusCta?.onClick}
-            ctaVariant={plus.soldOut ? 'muted' : 'secondary'}
+            ctaVariant={plusPaused ? 'muted' : 'secondary'}
+            dimmed={plusPaused}
             banner="副驾玩家"
             bannerVariant="subtle"
+            ctaHelper={plusPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
             tooltipPanel={
               <TierTooltip
                 models={['GPT-5.5 · 5.4 · 5.4-mini']}
@@ -311,13 +318,14 @@ export default function Plans() {
             models={sup.models}
             ctaText={superCta?.text}
             onCtaClick={superCta?.onClick}
-            ctaVariant={sup.soldOut ? 'muted' : 'primary'}
-            featured={!sup.soldOut}
+            ctaVariant={supPaused ? 'muted' : 'primary'}
+            dimmed={supPaused}
+            featured={!supPaused}
             banner="主驾玩家"
             bannerVariant="strong"
             ctaHelper={
-              sup.soldOut
-                ? undefined
+              supPaused
+                ? MEMBERSHIP_PAUSED_COPY.shortHint
                 : `+ Ultra 抢购优先权 · ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 提前 5 分钟`
             }
             tooltipPanel={
@@ -340,21 +348,11 @@ export default function Plans() {
             models={ultra.models}
             ctaText={ultraCta?.text}
             onCtaClick={ultraCta?.onClick}
-            ctaVariant={ultra.soldOut ? 'muted' : 'secondary'}
-            dimmed={ultra.soldOut}
-            banner={
-              ultra.soldOut
-                ? ultraPhase === 'before'
-                  ? `今日 ${ULTRA_DROP.slotsPerDay} 席即将开放 · Super 优先`
-                  : ultraPhase === 'transitioning'
-                  ? `Super 正在抢购今日 ${ULTRA_DROP.slotsPerDay} 席…`
-                  : `今日 ${ULTRA_DROP.slotsPerDay} 席已抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
-                : '自动驾驶'
-            }
+            ctaVariant={ultraPaused ? 'muted' : 'secondary'}
+            dimmed={ultraPaused}
+            banner={ultraPaused ? '会员暂停' : '自动驾驶'}
             bannerVariant="dark"
-            ctaHelper={
-              ultra.soldOut ? '通常 1 分钟内抢完' : undefined
-            }
+            ctaHelper={ultraPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
             tooltipPanel={
               <TierTooltip
                 headline="在 Super 基础上增加"

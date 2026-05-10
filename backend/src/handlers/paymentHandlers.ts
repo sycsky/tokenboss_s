@@ -207,6 +207,16 @@ export const createOrderHandler = async (
       return jsonError(400, "invalid_request_error", "planId must be plus|super|ultra.");
     planId = body.planId;
     if (PLANS[planId].soldOut) {
+      // sold-out 期间无条件 410，不区分续费意图。
+      //
+      // 续费理论上应当放行，但 webhook 的 applyPlanToUser 在绑新订阅前会
+      // invalidate 全部活跃订阅（防 Trial+Plus 同时活跃），同档续费走自助
+      // 路径 = 用户损失剩余时长。所以前端 Payment.tsx lockout 也是无条件
+      // 拦截已订阅用户，把续费导到「联系客服」让 admin 手动处理。
+      //
+      // 等以后 applyPlanToUser 改成「同档不 invalidate / 时长累加」之后再
+      // 把续费豁免分支加回来——那时也需要回退一下 getActivePaidPlanId 的
+      // 引入。当前 commit 的 backend/src/lib/subscriptions.ts 保留供届时复用。
       return jsonError(
         410,
         "plan_unavailable",

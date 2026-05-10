@@ -39,6 +39,16 @@ export interface PlanConfig {
   soldOut?: boolean;
 }
 
+// 三档全 sold-out 是「会员制软暂停」的开关——上游模型供应商定价波动期间
+// 关闭所有自助下单（含同档续费，原因详见 design.md D1：webhook
+// applyPlanToUser 会清空旧订阅，自助续费会损失剩余时长）。
+// 现有订阅者的续费走前端「联系客服」路径，admin 手动处理。
+//
+// 恢复方式（**两处必须一起翻**）：
+//   1. 这里：PLANS.{plus,super,ultra}.soldOut → false
+//   2. frontend/src/lib/pricing.ts: TIERS[].soldOut → false（plus/super/ultra
+//      三处）—— 前端 TIERS 是后端的镜像，单独翻后端前端 UI 仍留在售罄态。
+// 详见 openspec/changes/pause-membership-tiers/。
 export const PLANS = {
   plus: {
     displayName: "Plus",
@@ -46,7 +56,7 @@ export const PLANS = {
     priceUSD: 49,
     durationDays: 28,
     group: "plus",
-    soldOut: false,
+    soldOut: true,
   },
   super: {
     displayName: "Super",
@@ -54,7 +64,7 @@ export const PLANS = {
     priceUSD: 119,
     durationDays: 28,
     group: "super",
-    soldOut: false,
+    soldOut: true,
   },
   ultra: {
     displayName: "Ultra",

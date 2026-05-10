@@ -7,6 +7,7 @@ import { api, type BillingChannel, type BillingPlanId, type BucketRecord } from 
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { ChannelOption } from '../components/ChannelOption';
 import { dispatchCheckout } from '../lib/checkoutFlow';
+import { MEMBERSHIP_PAUSED_COPY } from '../lib/membership';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -82,10 +83,26 @@ export default function Payment() {
     );
   }
 
+  // 等 buckets 拿回来再决定走哪条 gate。在 bucketsLoaded=false 时如果直接
+  // 渲染 payment form，sold-out plan 的用户会先看到支付二维码 / 渠道选择
+  // 一闪（点进去后端再 410），体验抖动；已订阅用户也会先看支付表单再
+  // 跳 lockout。统一 loading guard 把这两种闪屏都消掉。
+  if (!bucketsLoaded) {
+    return (
+      <div className="min-h-screen bg-bg pb-12">
+        <AppNav current="console" />
+        <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-10">
+          <div className="font-mono text-[11px] text-ink-3 tracking-tight">载入中…</div>
+        </main>
+      </div>
+    );
+  }
+
   // Lock-out: user already has a paid plan, can't self-checkout for
-  // another. Tell them clearly + provide a "联系客服" path. Wait for the
-  // buckets fetch so we don't flash this page on every mount.
-  if (bucketsLoaded && paidSku) {
+  // another (含同档想续费的用户)。webhook 的 applyPlanToUser 在绑新订阅前
+  // 会 invalidate 全部活跃订阅，同档续费走这条路 = 用户损失剩余时长。
+  // 续费走「联系客服」路径，admin 手动处理避开陷阱。
+  if (paidSku) {
     const tierName = paidSku.replace('plan_', '').toUpperCase();
     return (
       <div className="min-h-screen bg-bg pb-12">
@@ -146,12 +163,10 @@ export default function Payment() {
   const price = tierPrice(plan, displayCurrency);
 
   // Direct-nav guard for sold-out tiers — Plans.tsx hides the CTA, but a
-  // bookmarked or shared /billing/pay?plan=ultra URL would otherwise still
-  // POST to the API. Backend also returns 410; this page is the marketing
-  // surface that explains *why* the tier is gated and gives users a
-  // reason to come back tomorrow.
+  // bookmarked or shared /billing/pay?plan=plus URL would otherwise still
+  // POST to the API. 到这里的人一定是 bucketsLoaded=true 且 paidSku=null。
   if (plan.soldOut) {
-    return <UltraSoldOutPage price={price} />;
+    return <MembershipPausedPage planName={plan.name} />;
   }
 
   async function submit() {
@@ -289,6 +304,63 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
         {label}
       </dt>
       <dd className="text-right text-ink">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Direct-link 拦截：登录用户访问 /billing/pay?plan=<sold-out-plan> 且不持有
+ * 该档活跃订阅时显示。引导用户改用按量付费。续费用户走 isRenewal 例外不到这里。
+ *
+ * 这跟 UltraSoldOutPage 是两个不同的语义：
+ * - UltraSoldOutPage: 「Ultra 每天放票，下次开放 12:34:56」—— 稀缺感营销
+ * - MembershipPausedPage: 「会员暂停中，上游变动频繁」—— 软关闭说明
+ * 当前 paused 状态下两者只用 paused 这个；以后只 Ultra 售罄时再切回 Ultra-only。
+ */
+function MembershipPausedPage({ planName }: { planName: string }) {
+  return (
+    <div className="min-h-screen bg-bg pb-12">
+      <AppNav current="console" />
+      <main className="max-w-[680px] mx-auto px-5 sm:px-9 pt-10">
+        <Breadcrumb
+          items={[
+            { label: '控制台', to: '/console' },
+            { label: '套餐', to: '/pricing' },
+            { label: `${planName} · 暂时售罄` },
+          ]}
+        />
+
+        <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3 mt-2">
+          MEMBERSHIP · 暂停中
+        </div>
+        <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-4">
+          {planName} 套餐暂时售罄
+        </h1>
+        <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
+          {MEMBERSHIP_PAUSED_COPY.paymentDirectBlocked}
+        </p>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <Link
+            to="/billing/topup"
+            className={
+              'px-5 py-2.5 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold ' +
+              'shadow-[3px_3px_0_0_#1C1917] ' +
+              'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+              'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+              'transition-all'
+            }
+          >
+            {MEMBERSHIP_PAUSED_COPY.ctaText}
+          </Link>
+          <Link
+            to="/console"
+            className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
+          >
+            ← 返回控制台
+          </Link>
+        </div>
+      </main>
     </div>
   );
 }

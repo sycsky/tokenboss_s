@@ -60,11 +60,16 @@ describe('createOrderHandler — sold-out gate', () => {
     expect(xunhupay.statusCode).toBe(410);
   });
 
-  it('does NOT 410 for non-sold-out plans (Plus, Super)', async () => {
+  it('410 sold-out fires for Plus and Super too (membership-paused)', async () => {
+    // 自 pause-membership-tiers 改造起，三档都 soldOut=true。任何无该档
+    // 活跃订阅的用户下单都被 410 拦下，文案带对应 plan 的 displayName。
     const plus = await run({ planId: 'plus', channel: 'xunhupay' });
-    expect(plus.statusCode).not.toBe(410);
+    expect(plus.statusCode).toBe(410);
+    expect(JSON.parse(plus.body as string).error.code).toBe('plan_sold_out');
+
     const sup = await run({ planId: 'super', channel: 'epusdt' });
-    expect(sup.statusCode).not.toBe(410);
+    expect(sup.statusCode).toBe(410);
+    expect(JSON.parse(sup.body as string).error.code).toBe('plan_sold_out');
   });
 
   it('still validates planId / channel before checking sold-out', async () => {
@@ -72,6 +77,66 @@ describe('createOrderHandler — sold-out gate', () => {
     expect(badPlan.statusCode).toBe(400);
     const badChannel = await run({ planId: 'ultra', channel: 'paypal' });
     expect(badChannel.statusCode).toBe(400);
+  });
+});
+
+describe('createOrderHandler — sold-out 全员拦截（含同档持有者）', () => {
+  // 设计修正：webhook applyPlanToUser 会 invalidate 旧订阅，同档自助续费
+  // 会损失剩余时长，因此 sold-out 期间所有用户（含现有同档订阅者）一律 410。
+  // 续费走 contact sales modal，admin 手动处理避开 applyPlanToUser 陷阱。
+  // 这些 case 是回归测试，确保即便其他用户字段被设置也不会意外放行。
+  const sameUser = 'u_test_same_tier_holder';
+  let sameUserToken: string;
+
+  beforeAll(() => {
+    putUser({
+      userId: sameUser,
+      email: 'same@test.local',
+      createdAt: new Date().toISOString(),
+      plan: 'ultra', // 即便本地 plan 字段被设置（V3 之前的脏数据），仍然要 410
+    });
+    sameUserToken = signSession(sameUser);
+  });
+
+  function runAs(user: { token: string }, body: Record<string, unknown>) {
+    const evt = {
+      headers: { authorization: `Bearer ${user.token}` },
+      body: JSON.stringify(body),
+      isBase64Encoded: false,
+    } as unknown as Parameters<typeof createOrderHandler>[0];
+    return createOrderHandler(evt) as Promise<APIGatewayProxyStructuredResultV2>;
+  }
+
+  it('已持有 Ultra 的用户提交 Ultra 下单仍 410（无续费豁免）', async () => {
+    const res = await runAs({ token: sameUserToken }, {
+      planId: 'ultra',
+      channel: 'xunhupay',
+    });
+    expect(res.statusCode).toBe(410);
+    expect(JSON.parse(res.body as string).error.code).toBe('plan_sold_out');
+  });
+
+  it('已持有 Plus 的用户跨档买 Ultra 仍 410', async () => {
+    const plusUserId = 'u_test_plus_subscriber';
+    putUser({
+      userId: plusUserId,
+      email: 'plus@test.local',
+      createdAt: new Date().toISOString(),
+      plan: 'plus',
+    });
+    const plusToken = signSession(plusUserId);
+    const res = await runAs({ token: plusToken }, {
+      planId: 'ultra',
+      channel: 'xunhupay',
+    });
+    expect(res.statusCode).toBe(410);
+  });
+
+  it('无订阅用户买任意 sold-out 档都 410', async () => {
+    const res = await run({ planId: 'ultra', channel: 'xunhupay' });
+    expect(res.statusCode).toBe(410);
+    const body = JSON.parse(res.body as string);
+    expect(body.error.code).toBe('plan_sold_out');
   });
 });
 

@@ -9,8 +9,8 @@ import { useAuth } from '../lib/auth';
 import { useCurrency } from '../lib/currency';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
-import { ULTRA_DROP } from '../lib/dropSchedule';
 import { slockBtn } from '../lib/slockBtn';
+import { MEMBERSHIP_PAUSED_COPY } from '../lib/membership';
 import openClawIcon from '../assets/agents/openclaw.svg';
 import hermesIcon from '../assets/agents/hermes.png';
 
@@ -158,18 +158,32 @@ export default function Landing() {
   const isLoggedIn = !!user;
   const navigate = useNavigate();
   const goRegister = () => navigate('/register');
+  const goTopup = () => navigate('/billing/topup');
   const std = STANDARD_RATE[currency];
   const [plusTier, superTier, ultraTier] = TIERS;
 
-  // v1.0 has no self-checkout. Visitors → /register; logged-in → contact 客服.
-  // Ultra is sold-out for logged-in users per spec, but visitors still see the
-  // try CTA so we can funnel them into /register first.
-  const tierCta = isLoggedIn
-    ? { text: '联系客服购买', onClick: undefined }
-    : { text: '免费开始 →', onClick: goRegister };
-  const ultraCta = isLoggedIn
-    ? { text: '名额已满', onClick: undefined, soldOut: true, variant: 'disabled' as const }
-    : { text: '免费开始 →', onClick: goRegister, soldOut: false, variant: 'secondary' as const };
+  // 「会员暂停态」只对登录用户展开；访客继续看正常营销卡。
+  // 见 openspec/changes/pause-membership-tiers/design.md D3。
+  const plusPaused = isLoggedIn && !!plusTier.soldOut;
+  const supPaused = isLoggedIn && !!superTier.soldOut;
+  const ultraPaused = isLoggedIn && !!ultraTier.soldOut;
+  const anyPaused = plusPaused || supPaused || ultraPaused;
+
+  // CTA 矩阵：
+  //   访客              → "免费开始 →"      → /register
+  //   登录 + 已暂停      → "改用按量付费 →"  → /billing/topup
+  //   登录 + 未暂停      → "联系客服购买"    → 无动作（v1 没自助续费/升级）
+  function ctaFor(paused: boolean): {
+    text: string;
+    onClick: (() => void) | undefined;
+  } {
+    if (!isLoggedIn) return { text: '免费开始 →', onClick: goRegister };
+    if (paused) return { text: MEMBERSHIP_PAUSED_COPY.ctaText, onClick: goTopup };
+    return { text: '联系客服购买', onClick: undefined };
+  }
+  const plusCta = ctaFor(plusPaused);
+  const supCta = ctaFor(supPaused);
+  const ultraCta = ctaFor(ultraPaused);
   const standardCta:
     | { text: string; onClick: () => void; href?: undefined }
     | { text: string; href: string; onClick?: undefined } = isLoggedIn
@@ -277,6 +291,28 @@ export default function Landing() {
           <SectionHeader num="01" cn="套餐" en="Membership" />
           <CurrencySwitcher className="mt-1" />
         </div>
+
+        {/* 会员暂停 banner —— 只对登录用户出现（访客继续看正常营销卡） */}
+        {anyPaused && (
+          <div
+            className={
+              'mt-5 mb-1 p-5 md:p-6 ' +
+              'bg-bg-soft border-2 border-ink rounded-md ' +
+              'shadow-[3px_3px_0_0_#1C1917]'
+            }
+          >
+            <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-ink-3 font-bold mb-2">
+              MEMBERSHIP · 暂停中
+            </div>
+            <h3 className="text-[16px] md:text-[17px] font-bold tracking-tight mb-1.5 leading-tight">
+              {MEMBERSHIP_PAUSED_COPY.bannerTitle}
+            </h3>
+            <p className="text-[13px] text-text-secondary leading-relaxed max-w-[640px]">
+              {MEMBERSHIP_PAUSED_COPY.bannerBody}
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 mt-6">
           <TierCard
             name={plusTier.name}
@@ -285,11 +321,13 @@ export default function Landing() {
             totalUsd={plusTier.totalQuota}
             dailyCap={plusTier.dailyCap}
             models={plusTier.models}
-            ctaText={tierCta.text}
-            onCtaClick={tierCta.onClick}
-            ctaVariant="secondary"
+            ctaText={plusCta.text}
+            onCtaClick={plusCta.onClick}
+            ctaVariant={plusPaused ? 'muted' : 'secondary'}
+            dimmed={plusPaused}
             banner="副驾玩家"
             bannerVariant="subtle"
+            ctaHelper={plusPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
           />
           <TierCard
             name={superTier.name}
@@ -298,12 +336,14 @@ export default function Landing() {
             totalUsd={superTier.totalQuota}
             dailyCap={superTier.dailyCap}
             models={superTier.models}
-            ctaText={tierCta.text}
-            onCtaClick={tierCta.onClick}
-            ctaVariant="primary"
-            featured
+            ctaText={supCta.text}
+            onCtaClick={supCta.onClick}
+            ctaVariant={supPaused ? 'muted' : 'primary'}
+            dimmed={supPaused}
+            featured={!supPaused}
             banner="主驾玩家"
             bannerVariant="strong"
+            ctaHelper={supPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
           />
           <TierCard
             name={ultraTier.name}
@@ -314,14 +354,11 @@ export default function Landing() {
             models={ultraTier.models}
             ctaText={ultraCta.text}
             onCtaClick={ultraCta.onClick}
-            ctaVariant={ultraCta.variant}
-            dimmed={ultraCta.soldOut}
-            banner={
-              ultraCta.soldOut
-                ? `今日 ${ULTRA_DROP.slotsPerDay} 席已抢完 · 明日 ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 再开`
-                : '自动驾驶'
-            }
+            ctaVariant={ultraPaused ? 'muted' : 'secondary'}
+            dimmed={ultraPaused}
+            banner={ultraPaused ? '会员暂停' : '自动驾驶'}
             bannerVariant="dark"
+            ctaHelper={ultraPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
           />
         </div>
       </section>

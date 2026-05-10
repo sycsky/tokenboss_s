@@ -49,6 +49,7 @@ export const TIERS: readonly TierEntry[] = [
     totalQuota: '≈ $840 调用额度',
     dailyCap: '$30 每日 Cap',
     models: ['Agent 日常跑，Codex 够用'],
+    soldOut: true,
   },
   {
     name: 'Super',
@@ -58,6 +59,7 @@ export const TIERS: readonly TierEntry[] = [
     totalQuota: '≈ $2,240 调用额度',
     dailyCap: '$80 每日 Cap',
     models: ['Agent 重度跑，Codex + Claude 双线'],
+    soldOut: true,
   },
   {
     name: 'Ultra',
