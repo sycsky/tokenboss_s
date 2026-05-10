@@ -77,6 +77,11 @@ function resetDashboardCache(): void {
  */
 function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
   const m = new Map<string, KeyStats>();
+  // Defensive: if state ever drifts to non-array (malformed response,
+  // serialized cache replay, etc.), render empty rather than crash with
+  // "groups is not iterable" — TS guarantees the type but runtime can
+  // still slip past via `as unknown` boundaries on the network seam.
+  if (!Array.isArray(groups)) return m;
   for (const g of groups) {
     if (!g.groupKey) continue;
     m.set(g.groupKey, {
@@ -131,24 +136,40 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    // Each fetch carries its own .catch so one failing call (e.g. backend
+    // returning 502 because newapi is down) doesn't cascade — the page
+    // renders the data it COULD load and falls back to empty for the
+    // rest. Without this, Promise.all rejects on the first failure and
+    // .finally still runs, but .then setters from the other resolved
+    // calls may race with the unhandled rejection in surprising ways.
     Promise.all([
-      getBucketsCached(user?.userId).then((r) => {
-        const b = r.buckets || [];
-        setBuckets(b);
-      }),
+      getBucketsCached(user?.userId)
+        .then((r) => setBuckets(Array.isArray(r?.buckets) ? r.buckets : []))
+        .catch(() => setBuckets([])),
       // Recent-call list + balance hero totals — keep small.
       // limit 5 — five rows ≈ the height of the right-side 接入 panel,
       // so the two columns end at roughly the same baseline without
       // tricks like flex-1 stretching or scrolling overflow.
-      api.getUsage({ limit: 5 }).then((r) => {
-        setUsage(r);
-        dashboardCache.usage = r;
-      }),
+      api.getUsage({ limit: 5 })
+        .then((r) => {
+          setUsage(r);
+          dashboardCache.usage = r;
+        })
+        .catch(() => {
+          // Keep whatever the cache already painted; don't overwrite
+          // good stale data with an empty error state.
+        }),
       // Per-key stats — server-side GROUP BY keyHint.
-      api.getUsageAggregate('keyHint').then((r) => {
-        setKeyHintGroups(r.groups);
-        dashboardCache.keyHintGroups = r.groups;
-      }),
+      api.getUsageAggregate('keyHint')
+        .then((r) => {
+          const groups = Array.isArray(r?.groups) ? r.groups : [];
+          setKeyHintGroups(groups);
+          dashboardCache.keyHintGroups = groups;
+        })
+        .catch(() => {
+          setKeyHintGroups([]);
+          dashboardCache.keyHintGroups = [];
+        }),
       reloadKeys(),
     ]).finally(() => {
       dashboardCache.cachedAt = Date.now();
