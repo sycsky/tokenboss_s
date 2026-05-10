@@ -177,7 +177,7 @@ if (loading) {
 
 每个 fetch 加 `.catch(() => {})` 让单个失败不阻塞全局 loading 翻 false（同 Dashboard 在 commit `a16f15a` 里已采用的 resilience 模式）。
 
-### 5. OrderStatus `/billing/order/:id`
+### 5. OrderStatus `/billing/orders/:id`
 
 **当前：**
 

@@ -604,9 +604,9 @@ beforeEach(() => {
 
 const renderOrder = (orderId = 'ord_test_123') =>
   render(
-    <MemoryRouter initialEntries={[`/billing/order/${orderId}`]}>
+    <MemoryRouter initialEntries={[`/billing/orders/${orderId}`]}>
       <Routes>
-        <Route path="/billing/order/:orderId" element={<OrderStatus />} />
+        <Route path="/billing/orders/:id" element={<OrderStatus />} />
       </Routes>
     </MemoryRouter>,
   );
