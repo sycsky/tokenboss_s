@@ -20,6 +20,7 @@ import { AppNav, SectionLabel } from '../components/AppNav';
 import { TerminalBlock } from '../components/TerminalBlock';
 import { ContactSalesModal } from '../components/ContactSalesModal';
 import { slockBtn } from '../lib/slockBtn';
+import { MonoLogLoader } from '../components/MonoLogLoader';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -321,7 +322,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      <main className="max-w-[1200px] mx-auto px-5 sm:px-9 pt-5 lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
+      <main className="max-w-[1200px] mx-auto px-5 sm:px-9 pt-5">
+        {hydrating ? (
+          <MonoLogLoader endpoints={['subscription state', 'usage 30d', 'api keys']} />
+        ) : (
+        <div className="lg:grid lg:grid-cols-[2fr_1fr] lg:gap-6">
         {/* Subscription hero — uniform treatment for any active tier
               (trial / plus / super / ultra). All three say "今日剩" since
               trial is also a 24h day-card. Mini progress bar lives on the
@@ -332,24 +337,7 @@ export default function Dashboard() {
                                      v1 has no self-serve upgrade across tiers,
                                      so within-tier renew + wallet topup are
                                      the only meaningful actions.
-              No active subscription → "Agent 余额" + "开通套餐 →".
-
-              First-paint skeleton: when `hydrating` (no cache yet) and
-              buckets hasn't loaded, show a muted version of the hero so
-              we don't flash the "no subscription" branch before the
-              real bucket data arrives. */}
-        {hydrating && buckets.length === 0 ? (
-          <div
-            aria-hidden="true"
-            className={
-              'lg:col-span-2 bg-accent/30 border-2 border-ink rounded-lg ' +
-              'shadow-[4px_4px_0_0_#1C1917] mb-5 ' +
-              // Match the real hero's height profile so layout doesn't
-              // jump when the skeleton swaps out.
-              'h-[110px] sm:h-[120px] animate-pulse'
-            }
-          />
-        ) : (
+              No active subscription → "Agent 余额" + "开通套餐 →". */}
         <section className="lg:col-span-2 bg-accent text-white border-2 border-ink rounded-lg shadow-[4px_4px_0_0_#1C1917] px-5 py-4 sm:px-7 sm:py-5 mb-5 overflow-hidden">
           {/* Single-column hero with sectioned content:
                 · Subscription section — headline + tier + days + 续费,
@@ -519,7 +507,6 @@ export default function Dashboard() {
             </div>
           )}
         </section>
-        )}
 
         {/* MAIN COL */}
         <div className="space-y-5">
@@ -660,6 +647,8 @@ export default function Dashboard() {
           </section>
 
         </aside>
+        </div>
+        )}
       </main>
 
       <ContactSalesModal
