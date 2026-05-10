@@ -7,7 +7,7 @@ describe('<TerminalBlock>', () => {
   it('renders cmd + COPY button', () => {
     render(<TerminalBlock cmd="set up tokenboss.co/skill.md" />);
     expect(screen.getByText('set up tokenboss.co/skill.md')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复制命令' })).toBeInTheDocument();
   });
 
   it('copies to clipboard on click', async () => {

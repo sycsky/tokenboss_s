@@ -150,7 +150,7 @@ export default function Landing() {
   useDocumentMeta({
     title: 'TokenBoss · 你的 Agent 立刻用得起好模型',
     description:
-      'TokenBoss 让 AI Agent 用户（OpenClaw / Hermes / Claude Code / Codex）以更低门槛调用前沿大模型。订阅制、统一计费、即开即用。',
+      'TokenBoss 让 Agent 用户（OpenClaw / Hermes）和 Coding 工具用户（Claude Code / Codex）以更低门槛调用前沿大模型。订阅制、统一计费、即开即用。',
     ogImage: 'https://tokenboss.co/og-cover.png',
   });
   const { user } = useAuth();

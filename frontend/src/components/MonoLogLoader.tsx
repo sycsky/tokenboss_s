@@ -43,7 +43,7 @@ export function MonoLogLoader({
           {endpoint} <Spinner offset={i * 3} />
         </div>
       ))}
-      <span className="sr-only">正在加载</span>
+      <span className="sr-only">正在加载 {endpoints.join('、')}</span>
     </div>
   );
 }

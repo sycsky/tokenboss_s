@@ -109,8 +109,6 @@ export default function OnboardInstall() {
             <span aria-hidden="true" className="mr-1.5">↓</span>
             把这两行整体发给你的 Agent
             <span className="text-white/40 mx-1.5">·</span>
-            30 秒自动接入
-            <span className="text-white/40 mx-1.5">·</span>
             <span className="text-white">$10 试用立刻能用</span>
           </>
         }

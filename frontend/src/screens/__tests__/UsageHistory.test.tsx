@@ -32,8 +32,9 @@ describe('UsageHistory loading state', () => {
     renderHistory();
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(screen.getByText('tokenboss · syncing')).toBeInTheDocument();
-    expect(screen.getByText(/subscription state/)).toBeInTheDocument();
-    expect(screen.getByText(/usage 7d window/)).toBeInTheDocument();
+    // Endpoints appear twice — visible spinner row + sr-only announcement.
+    expect(screen.getAllByText(/subscription state/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/usage 7d window/).length).toBeGreaterThanOrEqual(1);
     // 旧的"加载中…"裸文字不应再出现
     expect(screen.queryByText('加载中…')).toBeNull();
   });

@@ -142,7 +142,7 @@ export default function Settings() {
           <div className="grid grid-cols-2 gap-0">
             <div className="border-r-2 border-ink/10 pr-5">
               <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-2">
-                消耗
+                已用
               </div>
               <div className="font-mono text-[28px] font-bold leading-none text-ink">
                 ${(stats.consumed ?? 0).toFixed(4)}

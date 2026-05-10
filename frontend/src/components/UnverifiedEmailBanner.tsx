@@ -45,10 +45,10 @@ export function UnverifiedEmailBanner({ email }: { email: string }) {
         </svg>
       </span>
       <div className="flex-1 text-[13px] leading-snug">
-        <span className="font-bold text-ink">邮箱待验证</span>
-        <span className="text-[#6B5E52]"> · 我们已把验证链接发到 </span>
+        <span className="font-bold text-ink">验证邮箱</span>
+        <span className="text-[#6B5E52]"> · 链接已发到 </span>
         <span className="font-mono font-semibold text-ink break-all">{email}</span>
-        <span className="text-[#6B5E52]">，链接 24 小时内有效。</span>
+        <span className="text-[#6B5E52]">，24 小时内有效。</span>
       </div>
       <button
         type="button"

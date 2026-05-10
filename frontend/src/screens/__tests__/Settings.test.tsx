@@ -32,9 +32,10 @@ describe('Settings loading state', () => {
 
     renderSettings();
     expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.getByText(/account/)).toBeInTheDocument();
-    expect(screen.getByText(/subscription/)).toBeInTheDocument();
-    expect(screen.getByText(/usage stats/)).toBeInTheDocument();
+    // Endpoints appear twice — visible spinner row + sr-only announcement.
+    expect(screen.getAllByText(/account/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/subscription/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/usage stats/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('flips loading off even if one fetch rejects', async () => {

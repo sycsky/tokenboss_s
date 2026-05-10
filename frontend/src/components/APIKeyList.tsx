@@ -69,7 +69,7 @@ export function APIKeyList({
 
       {keys.length === 0 && (
         <div className="font-mono text-[11px] text-[#A89A8D] py-2 text-center">
-          还没有 Key · 点上面 + 创建 一个
+          暂无 API Key · 点右上角创建按钮
         </div>
       )}
 

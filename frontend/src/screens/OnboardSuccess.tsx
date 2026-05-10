@@ -133,7 +133,6 @@ export default function OnboardSuccess() {
           }}
         >
           <span className="flex items-center gap-2 text-[13.5px] font-bold tracking-tight">
-            <span aria-hidden="true" className="text-[14px] leading-none">✨</span>
             <span>
               <span className="text-[16px]">$10</span> 已发到你账上
             </span>

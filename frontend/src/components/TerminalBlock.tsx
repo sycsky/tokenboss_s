@@ -91,7 +91,7 @@ export function TerminalBlock({
   const copyBtn = (
     <button
       onClick={handleCopy}
-      aria-label="copy command"
+      aria-label="复制命令"
       className={
         'font-mono text-[9.5px] sm:text-[10px] font-bold tracking-[0.14em] uppercase ' +
         'border-2 rounded ' +
@@ -121,7 +121,7 @@ export function TerminalBlock({
       <div className={`text-[#FFF8F0] ${lineWrap}`}>{cmd}</div>
       {loading ? (
         <div className={`mt-1.5 ${lineWrap} text-[#A89A8D] italic`}>
-          正在为你生成 default key…
+          生成中…
         </div>
       ) : (
         visibleExtra && (

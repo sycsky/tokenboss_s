@@ -219,7 +219,7 @@ export default function UsageHistory() {
             ))
           ) : (
             <div className="text-center text-[#A89A8D] text-[13px] p-8 font-mono">
-              暂无使用记录 · 试着用一次 Agent，再回来这里看
+              暂无记录 · 在 Agent 中调一次模型，数据会出现这里
             </div>
           )}
         </div>
@@ -253,7 +253,7 @@ export default function UsageHistory() {
               ) : (
                 <tr>
                   <td colSpan={5} className="text-center text-[#A89A8D] text-[13px] p-8 font-mono">
-                    暂无使用记录 · 试着用一次 Agent，再回来这里看
+                    暂无记录 · 在 Agent 中调一次模型，数据会出现这里
                   </td>
                 </tr>
               )}

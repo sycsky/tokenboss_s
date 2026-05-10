@@ -469,7 +469,7 @@ export default function Dashboard() {
                     />
                   </div>
                   <span className="font-mono text-[11.5px] font-bold text-white/90 tabular-nums whitespace-nowrap">
-                    剩 {Math.round(periodRemainingPct)}%
+                    {Math.round(periodRemainingPct)}%
                   </span>
                 </div>
               )}

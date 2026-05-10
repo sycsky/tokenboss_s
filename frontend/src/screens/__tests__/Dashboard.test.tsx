@@ -54,9 +54,11 @@ describe('Dashboard loading state', () => {
     renderDashboard();
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(screen.getByText('tokenboss · syncing')).toBeInTheDocument();
-    expect(screen.getByText(/subscription state/)).toBeInTheDocument();
-    expect(screen.getByText(/usage 30d/)).toBeInTheDocument();
-    expect(screen.getByText(/api keys/)).toBeInTheDocument();
+    // Each endpoint appears twice in the DOM — once in the visible
+    // spinner row, once in the sr-only "正在加载 …" line.
+    expect(screen.getAllByText(/subscription state/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/usage 30d/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/api keys/).length).toBeGreaterThanOrEqual(1);
     // No real hero content visible during loading.
     expect(screen.queryByText(/本期剩|Agent 余额/)).toBeNull();
   });
@@ -262,6 +264,6 @@ describe('Dashboard install spell — always-placeholder', () => {
         screen.getByText(/TOKENBOSS_API_KEY="<your-api-key>"/),
       ).toBeInTheDocument();
     });
-    expect(screen.getByText(/还没有 Key/)).toBeInTheDocument();
+    expect(screen.getByText(/暂无 API Key/)).toBeInTheDocument();
   });
 });

@@ -33,7 +33,8 @@ describe('OrderStatus loading state', () => {
     renderOrder();
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(screen.getByText('tokenboss · loading order')).toBeInTheDocument();
-    expect(screen.getByText(/order status/)).toBeInTheDocument();
+    // Endpoint appears twice — visible spinner row + sr-only announcement.
+    expect(screen.getAllByText(/order status/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('加载订单中…')).toBeNull();
   });
 });
