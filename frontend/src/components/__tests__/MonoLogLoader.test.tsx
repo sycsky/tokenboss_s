@@ -1,0 +1,34 @@
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { MonoLogLoader } from '../MonoLogLoader';
+
+describe('<MonoLogLoader>', () => {
+  it('renders default header and given endpoints', () => {
+    render(<MonoLogLoader endpoints={['subscription state', 'usage 30d', 'api keys']} />);
+    expect(screen.getByText('tokenboss · syncing')).toBeInTheDocument();
+    expect(screen.getByText(/subscription state/)).toBeInTheDocument();
+    expect(screen.getByText(/usage 30d/)).toBeInTheDocument();
+    expect(screen.getByText(/api keys/)).toBeInTheDocument();
+  });
+
+  it('accepts a custom title', () => {
+    render(<MonoLogLoader title="tokenboss · loading order" endpoints={['order status']} />);
+    expect(screen.getByText('tokenboss · loading order')).toBeInTheDocument();
+  });
+
+  it('exposes role=status and aria-busy for screen readers', () => {
+    render(<MonoLogLoader endpoints={['x']} />);
+    const status = screen.getByRole('status');
+    expect(status).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('正在加载')).toBeInTheDocument();
+  });
+
+  it('renders one of the 8 braille spinner frames per endpoint', () => {
+    render(<MonoLogLoader endpoints={['a', 'b', 'c']} />);
+    const frames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧'];
+    const root = screen.getByRole('status');
+    const text = root.textContent ?? '';
+    const matches = frames.filter(f => text.includes(f));
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+});
