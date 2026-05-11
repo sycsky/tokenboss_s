@@ -13,6 +13,12 @@ samconfig.toml
 .gstack/
 vendor/
 
+# Claude Code session state, custom slash commands, vendored skills
+.claude/
+
+# OpenSpec spec-driven workflow working dir
+openspec/
+
 # brainstorming visual companion
 .superpowers/
 
