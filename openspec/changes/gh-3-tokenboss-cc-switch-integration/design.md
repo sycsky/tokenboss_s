@@ -515,4 +515,27 @@ async function handleClick() {
 
 > Stage 3 实施期间发现 spec / design 跟现实偏离时记录在这里。Stage 6 archive 时反向回写到 [[proposal.md]] 和 [[specs/cc-switch-integration/spec.md]]。
 
-（空）
+### SD-1 · `runMessagesCore` 签名统一为 writer-based（来自 Task 4 commit 1c0f92b）
+
+**Design 原版（§3.2）：** `runMessagesCore` 返回 `APIGatewayProxyResultV2`（非 stream）或 `void`（stream）— union return shape。
+
+**实际实现：** `runMessagesCore(event, writer): Promise<void>` 统一用 `StreamWriter` 接口处理 stream 和 non-stream 两种路径（non-stream 时用 in-memory `bufferingWriter`）。这跟现有 `streamChatCore` / `streamResponsesCore` 签名一致，避免 local.ts handler dispatch 走两条分叉路径。
+
+**影响：** 没有破坏 API 行为（HTTP 输入输出形状跟 design.md §3.2 完全一致），只是内部函数签名跟原 design.md 不匹配。Stage 6 archive 时把 design.md §3.2 的 internal flow 描述更新为统一 writer 模式。
+
+### SD-2 · 流式 `meta.messageId` 来源固定为 backend 合成（来自 Task 4）
+
+**Design 原版（§3.2）：** 提到 `id` 可以是 "透传 chatProxy 的 completion id 或重新生成 msg_..."。
+
+**实际实现：** Streaming 路径**永远** synthesize `msg_<24hex>` (via `crypto.randomBytes(12).toString('hex')`)。Non-stream 路径仍由 `responseToAnthropic` 决定（实际上 Task 1 选择透传 OpenAI 的 chatcmpl-xxx — 见 Task 1 spec review）。
+
+**影响：** Streaming 客户端看到的 `id` 跟 chatProxy 内部 completion id 没有关联，调试时需要 cross-reference 时间戳 / userId。Stage 6 archive 时把这条作为 design.md §3.2 的明确决策记录。
+
+### SD-3 · `input_tokens` 估算策略（来自 Task 4）
+
+**Design 原版（§3.2）：** Anthropic SSE `message_start.message.usage.input_tokens` 期望来自上游真实 token count。
+
+**实际实现：** Streaming 路径用 `Math.ceil(body.length / 4)` 作为 input_tokens 估算（emitted in `message_start`）。Anthropic 协议规定 `message_delta.usage` 只承载 `output_tokens`，不更新 `input_tokens` — 因此客户端看到的 input_tokens 始终是估算值。
+
+**影响：** 客户端的 token 计费如果依赖 streaming 路径的 `message_start.usage.input_tokens`，会有偏差。Non-stream 路径不受影响（直接用 OpenAI `usage.prompt_tokens`）。Stage 6 archive 时考虑是否需要 backend 在 streaming 开始前先做一次 tokenize 计算精确 input_tokens（v2 任务）。
+
