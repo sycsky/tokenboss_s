@@ -539,3 +539,11 @@ async function handleClick() {
 
 **影响：** 客户端的 token 计费如果依赖 streaming 路径的 `message_start.usage.input_tokens`，会有偏差。Non-stream 路径不受影响（直接用 OpenAI `usage.prompt_tokens`）。Stage 6 archive 时考虑是否需要 backend 在 streaming 开始前先做一次 tokenize 计算精确 input_tokens（v2 任务）。
 
+### SD-4 · E2E 用 `page.on('request')` 而非 `window.location.assign` 重写（来自 Task 10）
+
+**Design / tasks.md 原版（§Task 10 template）：** 用 `page.addInitScript` 重写 `window.location.assign = (url) => { __assignCalls.push(url) }` 来捕获 5 次 deep-link 触发。
+
+**实际实现：** Chromium 把 `Location` 当 WebIDL host object，`assign` 槽位走 internal slot，JS 层面任何方式（`Object.defineProperty` 改 instance、改 `Location.prototype`、改 `window.location`）都被静默忽略 — 实测捕获数组始终为空，但 `/v1/deep-link` mock 命中、按钮状态机正常转换。改为用 Playwright 的 `page.on('request')` 监听 `ccswitch://` 开头的 navigation request — `assign(ccswitch://…)` 在浏览器内部发起一次主框架导航请求，Playwright 在 schema 未注册时仍能截获 URL，事件层比 JS 层稳定。
+
+**影响：** 测试结果等价（仍断言 5 次触发 + URL 含正确 app 参数），但实现路径跟 plan template 不同。Stage 6 archive 时把 tasks.md §10.2 template 换成 request-event 模式，免得未来 maintainer 走同一条死胡同。
+
