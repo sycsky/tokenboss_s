@@ -96,6 +96,7 @@ import {
   streamResponsesCore,
   type StreamWriter,
 } from "./lib/chatProxyCore.js";
+import { runMessagesCore } from "./lib/messagesProxyCore.js";
 import { putUser } from "./lib/store.js";
 import { startSubscriptionPoller } from "./lib/subscriptionPoller.js";
 import { extractBearerToken } from "./lib/auth.js";
@@ -179,6 +180,7 @@ const routes: Route[] = [
 const STREAM_ROUTES: { method: string; path: string }[] = [
   { method: "POST", path: "/v1/chat/completions" },
   { method: "POST", path: "/v1/responses" },
+  { method: "POST", path: "/v1/messages" },
 ];
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -496,6 +498,8 @@ async function handleChatStream(
   try {
     if (pathname === "/v1/responses") {
       await streamResponsesCore(event, writer);
+    } else if (pathname === "/v1/messages") {
+      await runMessagesCore(event, writer);
     } else {
       await streamChatCore(event, writer);
     }
