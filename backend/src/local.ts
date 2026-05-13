@@ -77,6 +77,7 @@ import {
   deleteKeyHandler,
   listKeysHandler,
 } from "./handlers/keysHandlers.js";
+import { deepLinkHandler } from "./handlers/deepLinkHandler.js";
 import { modelsHandler } from "./handlers/modelsHandler.js";
 import {
   createOrderHandler,
@@ -156,6 +157,7 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/keys", handler: listKeysHandler },
   { method: "POST", path: "/v1/keys", handler: createKeyHandler },
   { method: "DELETE", path: "/v1/keys/{keyId}", handler: deleteKeyHandler },
+  { method: "POST", path: "/v1/deep-link", handler: deepLinkHandler },
   { method: "GET", path: "/v1/usage", handler: usageHandler },
   { method: "GET", path: "/v1/buckets", handler: listBucketsHandler as LambdaHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
