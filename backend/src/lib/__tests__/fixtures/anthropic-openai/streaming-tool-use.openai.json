@@ -1,0 +1,88 @@
+{
+  "chunks": [
+    {
+      "id": "chatcmpl-stream-tool-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000700,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": { "role": "assistant", "content": "" }, "finish_reason": null }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-tool-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000700,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": { "content": "Let me check." }, "finish_reason": null }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-tool-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000700,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "toolu_stream_01",
+                "type": "function",
+                "function": { "name": "get_weather", "arguments": "" }
+              }
+            ]
+          },
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-tool-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000700,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "tool_calls": [
+              { "index": 0, "function": { "arguments": "{\"city\":\"" } }
+            ]
+          },
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-tool-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000700,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "tool_calls": [
+              { "index": 0, "function": { "arguments": "Tokyo\"}" } }
+            ]
+          },
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-tool-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000700,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": {}, "finish_reason": "tool_calls" }
+      ],
+      "usage": { "prompt_tokens": 55, "completion_tokens": 14, "total_tokens": 69 }
+    }
+  ]
+}

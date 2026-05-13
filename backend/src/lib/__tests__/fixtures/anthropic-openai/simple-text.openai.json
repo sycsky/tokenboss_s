@@ -1,0 +1,26 @@
+{
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "messages": [
+      { "role": "user", "content": "Hello, world!" }
+    ]
+  },
+  "response": {
+    "id": "chatcmpl-abc123",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "claude-sonnet-4-5",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello! How can I help you today?"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 8, "completion_tokens": 11, "total_tokens": 19 }
+  }
+}
