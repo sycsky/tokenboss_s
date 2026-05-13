@@ -15,6 +15,9 @@ import Primitive from './screens/Primitive';
 import Payment from './screens/Payment';
 import OrderStatus from './screens/OrderStatus';
 import ManualConfigPC from './screens/ManualConfigPC';
+import ProtocolOpenAICompat from './screens/docs/ProtocolOpenAICompat';
+import ProtocolAnthropicShim from './screens/docs/ProtocolAnthropicShim';
+import ProtocolGeminiProxy from './screens/docs/ProtocolGeminiProxy';
 import Topup from './screens/Topup';
 import AdminLogin from './screens/AdminLogin';
 import AdminUsers from './screens/AdminUsers';
@@ -49,6 +52,13 @@ export default function App() {
       <Route path="/billing/success" element={<RequireAuth><OrderStatus /></RequireAuth>} />
 
       <Route path="/install/manual" element={<ManualConfigPC />} />
+
+      {/* Public protocol docs — extended reading from /install/manual's
+          ProtocolFamilyLinks. No auth required (these are reference docs
+          a user may hit before signing up). */}
+      <Route path="/docs/protocols/openai-compat" element={<ProtocolOpenAICompat />} />
+      <Route path="/docs/protocols/anthropic-shim" element={<ProtocolAnthropicShim />} />
+      <Route path="/docs/protocols/gemini-proxy" element={<ProtocolGeminiProxy />} />
 
       <Route path="/admin/login" element={<AdminLogin />} />
       <Route path="/admin/users" element={<RequireAdmin><AdminUsers /></RequireAdmin>} />
