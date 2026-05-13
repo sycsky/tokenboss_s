@@ -1,34 +1,28 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PrimaryImportButton } from "../PrimaryImportButton";
 import * as apiModule from "../../lib/api";
+import * as triggerModule from "../../lib/triggerDeepLink";
 
 /**
- * window.location.assign in jsdom is a no-op getter on a non-configurable
- * property — directly spying on it throws "Cannot redefine property:
- * location" in some Node builds. Stubbing the whole `location` with a
- * plain object that has a spyable `assign` works in every recent jsdom.
+ * Spy on `triggerDeepLinkBatch` (the lib that internally creates hidden
+ * iframes per URL — see lib/triggerDeepLink.ts). We don't reach into iframe
+ * DOM in tests because that's the lib's concern; this test verifies the
+ * component fires the batch with the right URLs in the right order.
+ *
+ * Background: an earlier impl used `window.location.assign` directly and
+ * gh-3 Stage 3.5 Vertical Slice caught that only 1 of 5 URLs ever reached
+ * the OS handler. See design.md §10 SD-5.
  */
-function mockLocationAssign(): ReturnType<typeof vi.fn> {
-  const assign = vi.fn();
-  // Use vi.stubGlobal so the original `window.location` is restored after
-  // tests via vi.unstubAllGlobals (called in afterEach below).
-  vi.stubGlobal("location", { ...window.location, assign });
-  return assign;
-}
 
 beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("PrimaryImportButton", () => {
-  it("calls api.getDeepLink and fires window.location.assign 5 times (once per CLI app) on click", async () => {
-    const assignSpy = mockLocationAssign();
+  it("calls api.getDeepLink then triggerDeepLinkBatch with all 5 URLs in order", async () => {
+    const batchSpy = vi.spyOn(triggerModule, "triggerDeepLinkBatch").mockResolvedValue();
     vi.spyOn(apiModule.api, "getDeepLink").mockResolvedValue({
       user_id: "u1",
       key_name: "CC Switch",
@@ -47,20 +41,15 @@ describe("PrimaryImportButton", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /一键导入/ }));
 
-    // The component fires 5 assigns with 200ms sleeps between them — give
-    // waitFor enough budget (default 1s would be tight; 3s is comfy).
-    await waitFor(
-      () => {
-        expect(assignSpy).toHaveBeenCalledTimes(5);
-      },
-      { timeout: 3000 },
-    );
-    expect(assignSpy.mock.calls[0][0]).toBe("ccswitch://v1/import?app=openclaw");
-    expect(assignSpy.mock.calls[4][0]).toBe("ccswitch://v1/import?app=claude");
+    await waitFor(() => expect(batchSpy).toHaveBeenCalledTimes(1));
+    const urls = batchSpy.mock.calls[0][0] as readonly string[];
+    expect(urls).toHaveLength(5);
+    expect(urls[0]).toBe("ccswitch://v1/import?app=openclaw");
+    expect(urls[4]).toBe("ccswitch://v1/import?app=claude");
   });
 
   it("shows an inline error when getDeepLink fails", async () => {
-    mockLocationAssign();
+    vi.spyOn(triggerModule, "triggerDeepLinkBatch").mockResolvedValue();
     vi.spyOn(apiModule.api, "getDeepLink").mockRejectedValue(new Error("network down"));
 
     render(<PrimaryImportButton />);

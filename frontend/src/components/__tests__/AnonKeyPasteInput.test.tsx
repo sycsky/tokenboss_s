@@ -1,20 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AnonKeyPasteInput } from "../AnonKeyPasteInput";
+import * as triggerModule from "../../lib/triggerDeepLink";
 
-function mockLocationAssign(): ReturnType<typeof vi.fn> {
-  const assign = vi.fn();
-  vi.stubGlobal("location", { ...window.location, assign });
-  return assign;
-}
+/**
+ * Spy on `triggerDeepLinkBatch` (the lib that internally creates hidden
+ * iframes per URL — see lib/triggerDeepLink.ts). We don't reach into iframe
+ * DOM in tests; we verify the component calls the batch with all 5 unique
+ * ccswitch:// URLs.
+ */
 
 beforeEach(() => {
   vi.restoreAllMocks();
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
 });
 
 // 48 alphanumeric chars — matches the production sk- + 48 chars format.
@@ -24,7 +22,7 @@ const NO_PREFIX = "A".repeat(48);
 
 describe("AnonKeyPasteInput", () => {
   it("submit button is disabled while the input is empty or invalid", async () => {
-    mockLocationAssign();
+    vi.spyOn(triggerModule, "triggerDeepLinkBatch").mockResolvedValue();
     render(<AnonKeyPasteInput />);
     const user = userEvent.setup();
 
@@ -44,8 +42,8 @@ describe("AnonKeyPasteInput", () => {
     expect(screen.getByText(/格式不对/)).toBeInTheDocument();
   });
 
-  it("once a valid sk- + 48-char key is typed, button enables and clicking fires 5 location.assign", async () => {
-    const assignSpy = mockLocationAssign();
+  it("once a valid sk- + 48-char key is typed, button enables and clicking fires triggerDeepLinkBatch with 5 unique URLs", async () => {
+    const batchSpy = vi.spyOn(triggerModule, "triggerDeepLinkBatch").mockResolvedValue();
     render(<AnonKeyPasteInput />);
     const user = userEvent.setup();
 
@@ -60,16 +58,11 @@ describe("AnonKeyPasteInput", () => {
 
     await user.click(button);
 
-    await waitFor(
-      () => {
-        expect(assignSpy).toHaveBeenCalledTimes(5);
-      },
-      { timeout: 3000 },
-    );
-    // Sanity check: the URLs are ccswitch:// scheme, and each is unique
-    // per app (so 5 distinct URLs, not 5 copies of the same).
-    const urls = assignSpy.mock.calls.map((c) => c[0] as string);
+    await waitFor(() => expect(batchSpy).toHaveBeenCalledTimes(1));
+    const urls = batchSpy.mock.calls[0][0] as readonly string[];
+    expect(urls).toHaveLength(5);
     expect(urls.every((u) => u.startsWith("ccswitch://v1/import?"))).toBe(true);
+    // Each URL is unique per app (so 5 distinct, not 5 copies of the same).
     expect(new Set(urls).size).toBe(5);
   });
 });

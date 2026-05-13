@@ -19,14 +19,12 @@
 
 import { useId, useMemo, useState } from "react";
 import { buildAllCCSwitchUrls } from "../lib/ccSwitchUrl";
+import { triggerDeepLinkBatch } from "../lib/triggerDeepLink";
 
 /** Strict shape: `sk-` + exactly 48 case-insensitive alphanumeric chars.
  *  Trailing whitespace would slip past a `.trim()` skip, so we anchor at
  *  both ends. */
 const KEY_REGEX = /^sk-[A-Za-z0-9]{48}$/;
-
-const ASSIGN_DELAY_MS = 200;
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type FlowState = "idle" | "triggering";
 
@@ -47,10 +45,9 @@ export function AnonKeyPasteInput() {
     setState("triggering");
     try {
       const urls = buildAllCCSwitchUrls(trimmed);
-      for (const u of urls) {
-        window.location.assign(u.url);
-        await sleep(ASSIGN_DELAY_MS);
-      }
+      // Fire via hidden iframes per URL — successive window.location.assign
+      // is silently dropped after the 1st. See lib/triggerDeepLink.ts.
+      await triggerDeepLinkBatch(urls.map((u) => u.url));
     } finally {
       setState("idle");
     }

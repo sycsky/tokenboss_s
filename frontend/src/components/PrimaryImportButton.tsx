@@ -23,6 +23,7 @@
 import { useState } from "react";
 import { ApiError } from "../lib/api";
 import { api } from "../lib/api";
+import { triggerDeepLinkBatch } from "../lib/triggerDeepLink";
 
 type FlowState = "idle" | "fetching" | "triggering";
 
@@ -31,13 +32,6 @@ const STATE_LABEL: Record<FlowState, string> = {
   fetching: "正在生成密钥…",
   triggering: "正在发送到 CC Switch…",
 };
-
-/** Empirical inter-assign delay. Chromium will drop a same-tab URL
- *  scheme handoff that comes too soon after the previous one — 200ms
- *  is the smallest gap we've seen reliably accepted on macOS. */
-const ASSIGN_DELAY_MS = 200;
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function PrimaryImportButton() {
   const [state, setState] = useState<FlowState>("idle");
@@ -49,14 +43,12 @@ export function PrimaryImportButton() {
     try {
       const { deep_links } = await api.getDeepLink();
       setState("triggering");
-      for (const dl of deep_links) {
-        // `window.location.assign` is the standard browser-safe way to
-        // ask the OS to hand off a custom-scheme URL. It does NOT
-        // navigate the page when the scheme is registered to a desktop
-        // app — the call resolves to a no-op in the tab.
-        window.location.assign(dl.url);
-        await sleep(ASSIGN_DELAY_MS);
-      }
+      // Fire 5 ccswitch:// URLs via per-URL hidden iframes (not
+      // window.location.assign, which silently drops 2..N successive
+      // custom-scheme handoffs — see lib/triggerDeepLink.ts header for
+      // the gory details). All 5 CC Switch confirmation cards now
+      // reliably appear.
+      await triggerDeepLinkBatch(deep_links.map((dl) => dl.url));
     } catch (err) {
       // ApiError carries a friendly Chinese-tilted message; raw Errors
       // fall back to their .message. Either way we phrase the failure

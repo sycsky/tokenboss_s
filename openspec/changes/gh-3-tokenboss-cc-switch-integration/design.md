@@ -531,6 +531,18 @@ async function handleClick() {
 
 **影响：** Streaming 客户端看到的 `id` 跟 chatProxy 内部 completion id 没有关联，调试时需要 cross-reference 时间戳 / userId。Stage 6 archive 时把这条作为 design.md §3.2 的明确决策记录。
 
+### SD-5 · `window.location.assign` 多次连续调用被浏览器吞 — 改 hidden iframe per URL（来自 Task 11 Vertical Slice）
+
+**Design 原版（§7.2 PrimaryImportButton state machine）：** 用 `window.location.assign(url)` 循环 fire 5 个 `ccswitch://` URL，中间 sleep 200ms。
+
+**实际实现（commit 待加）：** 改用 `triggerDeepLinkBatch(urls)`，内部为每个 URL 创建一个 hidden `<iframe>` 设 `src=url`（每个 iframe 是独立 navigation context，OS scheme handler 一定触发）。
+
+**触发场景：** Stage 3.5 Vertical Slice 实测用户报告：点 "一键导入" 后 CC Switch **只弹了 1 张卡片**（openclaw，第一个 URL）。CC Switch log 也只收到 1 个 `Deep Link Event Received`。结论：Chromium / Safari 对同一 tab 内连续 `window.location.assign(customScheme)` 有内置 throttle — 第一个 assign 触发 OS handoff 后页面进 navigation-pending 状态，后续 2-5 个 assign 被静默 drop（无任何 console 错误）。200ms gap 不够，1s gap 也不够（浏览器策略，不是时序问题）。
+
+**修复：** `frontend/src/lib/triggerDeepLink.ts` 新 helper，PrimaryImportButton + AnonKeyPasteInput 都 import 用。每个 URL 独立 iframe，OS handler 一定响应。Stage 4 / Stage 5 用户人工实测验证 5 张卡片都弹（pending 用户回报）。
+
+**影响：** v1.0 必修。E2E playwright test 不需要改（`page.on('request')` 捕获 iframe.src navigation 跟 window.location.assign navigation 同样有效）。frontend 单元测试改 spy 目标从 `window.location.assign` → `triggerDeepLinkBatch`。Stage 6 archive 时把 design.md §7.2 改成 iframe-based 方案。
+
 ### SD-3 · `input_tokens` 估算策略（来自 Task 4）
 
 **Design 原版（§3.2）：** Anthropic SSE `message_start.message.usage.input_tokens` 期望来自上游真实 token count。
