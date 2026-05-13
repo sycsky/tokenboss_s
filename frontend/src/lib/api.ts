@@ -11,6 +11,8 @@
  *                    in local dev; in prod this is a Lambda Function URL)
  */
 
+import type { CLIAppId } from "./agentDefs";
+
 // Prefer build-time Vite env, fall back to runtime injection via /env.js (Docker entrypoint)
 declare global { interface Window { __ENV__?: { VITE_API_URL?: string; VITE_CHAT_URL?: string; VITE_SENTRY_DSN?: string } } }
 const API_URL =
@@ -303,6 +305,29 @@ export interface MeResponse {
   user: UserProfile;
 }
 
+// ---------- deep-link types (CC Switch / one-click CLI import) ----------
+
+/** One importable URL per CLI app. The frontend renders a tile per
+ *  entry; clicking it hands the URL off to the OS (`ccswitch://...`),
+ *  which the target CLI registers as its custom protocol handler. */
+export interface DeepLink {
+  app: CLIAppId;
+  display_name: string;
+  url: string;
+}
+
+/** Response from POST /v1/deep-link. `key_id` identifies the proxy key
+ *  the backend (re)provisioned for this import; `key_name` is the
+ *  human label ("CC Switch") it was given. `issued_at` is ISO-8601
+ *  and lets the UI show "已生成于 X 分钟前" without re-fetching. */
+export interface DeepLinkResponse {
+  user_id: string;
+  key_name: string;
+  key_id: number;
+  deep_links: DeepLink[];
+  issued_at: string;
+}
+
 // ---------- billing types ----------
 
 export type BillingPlanId = "plus" | "super" | "ultra";
@@ -516,5 +541,16 @@ export const api = {
       "/v1/billing/redeem",
       { method: "POST", body: { code } },
     );
+  },
+
+  // deep-link (CC Switch one-click CLI import)
+  /**
+   * Mint a fresh CC-Switch key and return one `ccswitch://` URL per
+   * supported CLI. Backend deletes any prior key labeled "CC Switch"
+   * first, so each call rotates — the URLs returned previously stop
+   * working. Caller is the user's logged-in session.
+   */
+  getDeepLink(): Promise<DeepLinkResponse> {
+    return request<DeepLinkResponse>("/v1/deep-link", { method: "POST" });
   },
 };
