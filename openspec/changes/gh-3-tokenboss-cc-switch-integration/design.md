@@ -531,6 +531,28 @@ async function handleClick() {
 
 **影响：** Streaming 客户端看到的 `id` 跟 chatProxy 内部 completion id 没有关联，调试时需要 cross-reference 时间戳 / userId。Stage 6 archive 时把这条作为 design.md §3.2 的明确决策记录。
 
+### SD-7 · Deep link 默认 model name 跟 TokenBoss newapi channel 不一致（来自 Task 11 Vertical Slice 实测）
+
+**Design 原版（§5 + tasks.md Task 2）：** ccSwitchUrl 把 `claude-sonnet-4-5` / `claude-haiku-4-5` / `claude-opus-4` 硬编码进 deep link 的 Claude env 块 + Codex 的 TOML general.model（"empirically 选 Anthropic SDK 最新模型名称"）。
+
+**实际触发场景：** Stage 3.5 Vertical Slice 用真实 sk- key + `claude-sonnet-4-5` 调 `POST /v1/messages` → backend → upstream newapi → **503 "No available channel for model claude-sonnet-4-5 under group auto"**。原因：用户 newapi 实际 channel 配的模型是 `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-opus-4-7`（无 `-4-5`，无 haiku 系列）。Claude Code 客户端默认调 deep link 设的 `ANTHROPIC_MODEL` env → 503。
+
+**实测可用模型**（`GET /v1/models`）：
+- `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.5`
+- `claude-sonnet-4-6`、`claude-opus-4-6`、`claude-opus-4-7`
+- `nemotron-3-super-120b-a12b` / `hermes-3-llama-3.1-405b` / `minimax-m2.5` / `hy3-preview`
+
+**Fix:** ccSwitchUrl.ts (backend + frontend mirror) Claude env 改：
+- `ANTHROPIC_MODEL` → `claude-sonnet-4-6`
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL` → `claude-sonnet-4-6`（无 haiku，sonnet 顶；slower 但 work；用户可在 CC Switch UI 自调）
+- `ANTHROPIC_DEFAULT_SONNET_MODEL` → `claude-sonnet-4-6`
+- `ANTHROPIC_DEFAULT_OPUS_MODEL` → `claude-opus-4-7`（最新）
+- Codex `[general].model` 同步 → `claude-sonnet-4-6`
+
+**实测验证：** 用真实 key + `claude-sonnet-4-6` 跑 `claude -p "say only the single word: pong"` → 返回 "pong" 退出 0 ✓。streaming SSE 完整 7-event 序列也 verified。
+
+**长期方案（v1.0.1+）：** 把 model defaults 改成动态 — backend `/v1/deep-link` handler 在生成时调一次 `/v1/models`，从 owned_by="vertex-ai" 的 Claude 列表里挑最新版本动态填。避免 model name 升级一次就要改 deep link hardcode。但这是 nice-to-have，不阻塞 v1.0 ship。
+
 ### SD-6 · UX 改 per-agent grid · 放弃"1 个按钮触发 5 个 URL"模型（来自 Task 11 Vertical Slice + 用户决策）
 
 **Design 原版（§2 + §7.2）：** 1 个 `<PrimaryImportButton>` 主按钮，点击后 frontend 自动触发 5 个 `ccswitch://` URL，CC Switch 弹 5 张确认卡片。`<ImportScopeNote>` 提前告知用户会弹 5 张。

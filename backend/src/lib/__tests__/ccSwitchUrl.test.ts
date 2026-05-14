@@ -38,7 +38,7 @@ describe("buildCCSwitchUrl", () => {
     const decoded = JSON.parse(Buffer.from(configParam, "base64").toString());
     expect(decoded.env.ANTHROPIC_AUTH_TOKEN).toBe(baseParams.apiKey);
     expect(decoded.env.ANTHROPIC_BASE_URL).toBe("https://api.tokenboss.co"); // 不带 /v1
-    expect(decoded.env.ANTHROPIC_MODEL).toBe("claude-sonnet-4-5");
+    expect(decoded.env.ANTHROPIC_MODEL).toBe("claude-sonnet-4-6");
   });
 
   it("URL-encodes the API key", () => {

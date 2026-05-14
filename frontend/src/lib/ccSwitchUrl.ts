@@ -73,7 +73,7 @@ export function buildCCSwitchUrl(p: CCSwitchUrlParams): string {
     case "codex": {
       const config = {
         auth: { OPENAI_API_KEY: p.apiKey },
-        config: `[model_providers.tokenboss]\nbase_url = "${p.endpoint}"\n\n[general]\nmodel = "claude-sonnet-4-5"`,
+        config: `[model_providers.tokenboss]\nbase_url = "${p.endpoint}"\n\n[general]\nmodel = "claude-sonnet-4-6"`,
       };
       const b64 = utf8ToBase64(JSON.stringify(config));
       const q = new URLSearchParams({
@@ -90,10 +90,12 @@ export function buildCCSwitchUrl(p: CCSwitchUrlParams): string {
         env: {
           ANTHROPIC_AUTH_TOKEN: p.apiKey,
           ANTHROPIC_BASE_URL: baseUrlNoV1, // D8: 不带 /v1
-          ANTHROPIC_MODEL: "claude-sonnet-4-5",
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-4-5",
-          ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-5",
-          ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4",
+          // SD-7: model names 必须跟 TokenBoss newapi 实际 channel 一致
+          // (无 haiku → sonnet 顶；详见 backend mirror 注释).
+          ANTHROPIC_MODEL: "claude-sonnet-4-6",
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-sonnet-4-6",
+          ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-6",
+          ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-7",
         },
       };
       const b64 = utf8ToBase64(JSON.stringify(config));
