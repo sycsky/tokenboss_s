@@ -39,20 +39,23 @@ export default function ManualConfigPC() {
       <main className="max-w-4xl mx-auto px-5 sm:px-9 pt-6">
         <Breadcrumb items={[{ label: '控制台', to: '/console' }, { label: '配置教程' }]} />
 
-        {/* Hero — sets context (what page, what tool) above the CTA. */}
-        <section className="mt-2 space-y-6">
-          <header>
-            <h1 className="text-[32px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3">
-              一键把 TokenBoss 接进你的 Agent CLI
-            </h1>
-            <p className="text-[14px] text-text-secondary leading-relaxed max-w-[640px]">
-              通过 CC Switch 桌面应用一键导入，免去手动改配置文件。
-            </p>
-          </header>
+        {/* Hero — sets context (what page, what tool) above the steps. */}
+        <header className="mt-2">
+          <h1 className="text-[32px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3">
+            一键把 TokenBoss 接进你的 Agent CLI
+          </h1>
+          <p className="text-[14px] text-text-secondary leading-relaxed max-w-[640px]">
+            通过 CC Switch 桌面应用一键导入，免去手动改配置文件。
+            两步走 — Step 1 装 CC Switch · Step 2 选你的 CLI。
+          </p>
+        </header>
+
+        {/* Step 1 — install CC Switch desktop app */}
+        <section className="mt-7">
           <CCSwitchDetector />
         </section>
 
-        {/* Main — the actual import flow. Branches on auth state. */}
+        {/* Step 2 — per-agent grid + key injection (auth-branch). */}
         <section className="mt-8">
           <KeyInjectionFlow />
         </section>

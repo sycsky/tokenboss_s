@@ -35,8 +35,9 @@ describe('ManualConfigPC', () => {
       </MemoryRouter>,
     );
 
-    // Hero — CCSwitchDetector copy.
-    expect(screen.getByText(/还没装 CC Switch/i)).toBeInTheDocument();
+    // Step 1 — CCSwitchDetector copy (post P0-2/P0-3 hot-fix: now framed
+    // as "Step 1: 先装 CC Switch" not "还没装").
+    expect(screen.getByText(/先装 CC Switch/i)).toBeInTheDocument();
 
     // KeyInjectionFlow (anon branch) — AnonKeyPasteInput renders the label.
     expect(screen.getByLabelText(/API Key/i)).toBeInTheDocument();

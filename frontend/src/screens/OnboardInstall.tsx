@@ -165,9 +165,25 @@ export default function OnboardInstall() {
         </div>
       )}
 
-      <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-9">
+      <p className="font-mono text-[11px] tracking-[0.08em] text-[#A89A8D] mb-3">
         已支持 <span className="text-ink font-semibold">OpenClaw</span> ·{' '}
         <span className="text-ink font-semibold">Hermes Agent</span>
+      </p>
+
+      {/* P0-1 hot-fix: alternate path for users on Claude Code / Codex /
+          OpenCode where the "paste magic command" flow above doesn't apply.
+          CC Switch one-click covers all 5 Agent CLIs uniformly. Discovered
+          via gh-3 Stage 7 new-user journey audit. */}
+      <p className="text-[12px] text-text-secondary mb-9 leading-relaxed">
+        <span className="font-bold text-ink">用 Claude Code / Codex / OpenCode？</span>{' '}
+        走{' '}
+        <a
+          href="/install/manual"
+          className="text-accent font-semibold underline underline-offset-2"
+        >
+          CC Switch 一键导入
+        </a>
+        {' '}— 5 个 CLI 都支持，免去手动改配置。
       </p>
 
       {waiting || !apiKey ? (

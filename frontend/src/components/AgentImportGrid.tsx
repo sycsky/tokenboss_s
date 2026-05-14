@@ -101,6 +101,20 @@ function AgentImportCard({
             ? "再发一次给 CC Switch"
             : `导入到 ${app.displayName}`}
       </button>
+      {/* P1-5: every card carries a 'haven't installed X CLI?' link.
+          New users likely don't even have the Agent CLI binary yet —
+          adding a TokenBoss provider to a non-existent CLI is wasted. */}
+      <p className="mt-3 text-[11px] text-ink-3 font-mono leading-relaxed">
+        还没装 {app.displayName}?{" "}
+        <a
+          href={app.homepage}
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent hover:underline"
+        >
+          去官网装 ↗
+        </a>
+      </p>
     </div>
   );
 }
@@ -162,17 +176,30 @@ export function AgentImportGrid({ getUrls }: AgentImportGridProps) {
 
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-[15px] font-bold text-ink">
-          选 Agent 工具，逐个导入到 CC Switch
-        </h2>
+      <div className="flex items-start gap-3 mb-4">
         <span
-          className="text-[13px] text-ink-3 font-mono"
-          aria-live="polite"
-          aria-atomic="true"
+          aria-hidden="true"
+          className="flex-shrink-0 w-9 h-9 inline-flex items-center justify-center bg-ink text-white font-bold text-[15px] rounded-full"
         >
-          {doneCount}/{totalCount} 已导入
+          2
         </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[16px] font-bold text-ink">
+              选你在用的 Agent CLI，逐个点导入
+            </h2>
+            <span
+              className="text-[13px] text-ink-3 font-mono"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {doneCount}/{totalCount} 已导入
+            </span>
+          </div>
+          <p className="text-[12px] text-ink-3 mt-1 leading-relaxed">
+            只点你实际用的 CLI 即可 — 不需要 5 张都点。每点 1 张 CC Switch 会弹 1 张确认卡片，accept 就完成那个 CLI 的配置。
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
