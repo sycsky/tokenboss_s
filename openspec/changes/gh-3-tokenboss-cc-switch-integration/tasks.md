@@ -1244,14 +1244,14 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 **Sub-steps:**
 
-- [ ] **Step 10.1: 探明现有 playwright 配置**
+- [x] **Step 10.1: 探明现有 playwright 配置**
 
 ```bash
 ls /Users/Sirius/Developer/tokenboss/.playwright-mcp/
 cat /Users/Sirius/Developer/tokenboss/frontend/playwright.config.ts 2>&1 || echo "no config — use default"
 ```
 
-- [ ] **Step 10.2: 写 E2E test — 主路径（mock API）**
+- [x] **Step 10.2: 写 E2E test — 主路径（mock API）**
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -1300,13 +1300,13 @@ test.describe("/install/manual 一键导入", () => {
 });
 ```
 
-- [ ] **Step 10.3: Run E2E** — Expected: PASS
+- [x] **Step 10.3: Run E2E** — Expected: PASS (✅ 2/2 passing, ~5s 总耗时)
 
 ```bash
 cd frontend && npx playwright test install-manual
 ```
 
-- [ ] **Step 10.4: Commit**
+- [x] **Step 10.4: Commit**
 
 ```bash
 git add frontend/e2e/install-manual.spec.ts

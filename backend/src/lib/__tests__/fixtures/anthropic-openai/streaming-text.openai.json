@@ -1,0 +1,50 @@
+{
+  "chunks": [
+    {
+      "id": "chatcmpl-stream-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000600,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": { "role": "assistant", "content": "" }, "finish_reason": null }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000600,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": { "content": "Hello" }, "finish_reason": null }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000600,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": { "content": ", world" }, "finish_reason": null }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000600,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": { "content": "!" }, "finish_reason": null }
+      ]
+    },
+    {
+      "id": "chatcmpl-stream-1",
+      "object": "chat.completion.chunk",
+      "created": 1700000600,
+      "model": "claude-sonnet-4-5",
+      "choices": [
+        { "index": 0, "delta": {}, "finish_reason": "stop" }
+      ],
+      "usage": { "prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11 }
+    }
+  ]
+}

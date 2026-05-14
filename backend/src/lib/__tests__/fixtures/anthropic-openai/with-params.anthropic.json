@@ -1,0 +1,25 @@
+{
+  "request": {
+    "model": "claude-haiku-4-5",
+    "max_tokens": 50,
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "top_k": 40,
+    "stop_sequences": ["END", "STOP"],
+    "messages": [
+      { "role": "user", "content": "Write a short poem about TypeScript." }
+    ]
+  },
+  "response": {
+    "id": "chatcmpl-poem-len",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      { "type": "text", "text": "Types align,\ncode shines bright,\nstrict in the night," }
+    ],
+    "model": "claude-haiku-4-5",
+    "stop_reason": "max_tokens",
+    "stop_sequence": null,
+    "usage": { "input_tokens": 12, "output_tokens": 50 }
+  }
+}

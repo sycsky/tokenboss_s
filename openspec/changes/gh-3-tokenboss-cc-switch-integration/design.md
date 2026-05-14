@@ -515,4 +515,91 @@ async function handleClick() {
 
 > Stage 3 实施期间发现 spec / design 跟现实偏离时记录在这里。Stage 6 archive 时反向回写到 [[proposal.md]] 和 [[specs/cc-switch-integration/spec.md]]。
 
-（空）
+### SD-1 · `runMessagesCore` 签名统一为 writer-based（来自 Task 4 commit 1c0f92b）
+
+**Design 原版（§3.2）：** `runMessagesCore` 返回 `APIGatewayProxyResultV2`（非 stream）或 `void`（stream）— union return shape。
+
+**实际实现：** `runMessagesCore(event, writer): Promise<void>` 统一用 `StreamWriter` 接口处理 stream 和 non-stream 两种路径（non-stream 时用 in-memory `bufferingWriter`）。这跟现有 `streamChatCore` / `streamResponsesCore` 签名一致，避免 local.ts handler dispatch 走两条分叉路径。
+
+**影响：** 没有破坏 API 行为（HTTP 输入输出形状跟 design.md §3.2 完全一致），只是内部函数签名跟原 design.md 不匹配。Stage 6 archive 时把 design.md §3.2 的 internal flow 描述更新为统一 writer 模式。
+
+### SD-2 · 流式 `meta.messageId` 来源固定为 backend 合成（来自 Task 4）
+
+**Design 原版（§3.2）：** 提到 `id` 可以是 "透传 chatProxy 的 completion id 或重新生成 msg_..."。
+
+**实际实现：** Streaming 路径**永远** synthesize `msg_<24hex>` (via `crypto.randomBytes(12).toString('hex')`)。Non-stream 路径仍由 `responseToAnthropic` 决定（实际上 Task 1 选择透传 OpenAI 的 chatcmpl-xxx — 见 Task 1 spec review）。
+
+**影响：** Streaming 客户端看到的 `id` 跟 chatProxy 内部 completion id 没有关联，调试时需要 cross-reference 时间戳 / userId。Stage 6 archive 时把这条作为 design.md §3.2 的明确决策记录。
+
+### SD-7 · Deep link 默认 model name 跟 TokenBoss newapi channel 不一致（来自 Task 11 Vertical Slice 实测）
+
+**Design 原版（§5 + tasks.md Task 2）：** ccSwitchUrl 把 `claude-sonnet-4-5` / `claude-haiku-4-5` / `claude-opus-4` 硬编码进 deep link 的 Claude env 块 + Codex 的 TOML general.model（"empirically 选 Anthropic SDK 最新模型名称"）。
+
+**实际触发场景：** Stage 3.5 Vertical Slice 用真实 sk- key + `claude-sonnet-4-5` 调 `POST /v1/messages` → backend → upstream newapi → **503 "No available channel for model claude-sonnet-4-5 under group auto"**。原因：用户 newapi 实际 channel 配的模型是 `claude-sonnet-4-6` / `claude-opus-4-6` / `claude-opus-4-7`（无 `-4-5`，无 haiku 系列）。Claude Code 客户端默认调 deep link 设的 `ANTHROPIC_MODEL` env → 503。
+
+**实测可用模型**（`GET /v1/models`）：
+- `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.5`
+- `claude-sonnet-4-6`、`claude-opus-4-6`、`claude-opus-4-7`
+- `nemotron-3-super-120b-a12b` / `hermes-3-llama-3.1-405b` / `minimax-m2.5` / `hy3-preview`
+
+**Fix:** ccSwitchUrl.ts (backend + frontend mirror) Claude env 改：
+- `ANTHROPIC_MODEL` → `claude-sonnet-4-6`
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL` → `claude-sonnet-4-6`（无 haiku，sonnet 顶；slower 但 work；用户可在 CC Switch UI 自调）
+- `ANTHROPIC_DEFAULT_SONNET_MODEL` → `claude-sonnet-4-6`
+- `ANTHROPIC_DEFAULT_OPUS_MODEL` → `claude-opus-4-7`（最新）
+- Codex `[general].model` 同步 → `claude-sonnet-4-6`
+
+**实测验证：** 用真实 key + `claude-sonnet-4-6` 跑 `claude -p "say only the single word: pong"` → 返回 "pong" 退出 0 ✓。streaming SSE 完整 7-event 序列也 verified。
+
+**长期方案（v1.0.1+）：** 把 model defaults 改成动态 — backend `/v1/deep-link` handler 在生成时调一次 `/v1/models`，从 owned_by="vertex-ai" 的 Claude 列表里挑最新版本动态填。避免 model name 升级一次就要改 deep link hardcode。但这是 nice-to-have，不阻塞 v1.0 ship。
+
+### SD-6 · UX 改 per-agent grid · 放弃"1 个按钮触发 5 个 URL"模型（来自 Task 11 Vertical Slice + 用户决策）
+
+**Design 原版（§2 + §7.2）：** 1 个 `<PrimaryImportButton>` 主按钮，点击后 frontend 自动触发 5 个 `ccswitch://` URL，CC Switch 弹 5 张确认卡片。`<ImportScopeNote>` 提前告知用户会弹 5 张。
+
+**实际实现（commits fba7507 + 待加）：** 改用 `<AgentImportGrid>` — 5 张 agent 卡片，用户**逐个点击**每个 CLI 的"导入到 X"按钮，每次点击触发 **1 个** `ccswitch://` URL。
+
+**触发原因：**
+
+1. **SD-5 hot-fix（iframe）只解决了 1 → 5 的事；浏览器底层对同一页面短时间内多次唤起 OS scheme handler 仍有不可预测的 throttle**，即使 iframe 每个独立 navigation context 也不能保证 5 个都到 OS。Stage 3.5 Vertical Slice 用户实测 fba7507 hot-fix 后仍**只看到 OpenClaw 一张卡片**（其余 4 个 ccswitch:// URL 在 iframe 触发后被 OS / Chrome 静默吞）。
+2. **CC Switch 上游不支持"universal provider" deep link**（实证：`docs/user-manual/zh/5-faq/5.3-deeplink.md` + `src-tauri/src/deeplink/parser.rs` 明确只支持 `resource` ∈ {provider, prompt, mcp, skill}，**provider 是 per-app**；universal provider 是 GUI-only feature）。
+3. **per-click UX 更诚实**：用户看见 5 张卡片自己点 = 1 user gesture = 1 deep link = 浏览器一定放行；且勾✓ 进度反馈比"自动 1 主按钮 + 静默 5 个 URL"更可控。
+
+**架构变化：**
+
+- 新增：`frontend/src/components/AgentImportGrid.tsx`（5 张 card + lazy-fetch + per-click trigger + 进度 + 完成 celebration）
+- 删除：`frontend/src/components/PrimaryImportButton.tsx`、`frontend/src/components/ImportScopeNote.tsx`（已被替代，无 lingering 引用）
+- 更新：`LoggedInKeyPicker.tsx`（直接 render AgentImportGrid，注入 server-side fetcher 调用 `api.getDeepLink`）+ `AnonKeyPasteInput.tsx`（key 校验通过后 render AgentImportGrid，注入 client-side fetcher 调用 `buildAllCCSwitchUrls`）
+
+**D7 缓存关键点：** AgentImportGrid 在**第一次任意 card 点击**时 lazy-call fetcher 拿 5 URL 缓存到 React state；后续 card 点击复用缓存。Backend `POST /v1/deep-link` 是"删旧建新"（D7）— 如果每张 card 点都重新 fetch，会得到 5 个不同的 key，只有最后一个 work，前 4 张 card 接受后写入 CLI config 的 key 已失效。Test 用 `expect(deepLinkCallCount).toBe(1)` 锁住该 invariant。
+
+**影响：** v1.0 必修。Stage 6 archive 时把 design.md §2 + §7.2 + 11 部分（11 关键不变量）改成 per-card grid 模型。E2E playwright test 已更新为依次点 5 张 card + 验证 5 ccswitch:// 触发 + fetch 仅 1 次（commit 待加）。
+
+### SD-5 · `window.location.assign` 多次连续调用被浏览器吞 — 改 hidden iframe per URL（来自 Task 11 Vertical Slice）
+
+**Design 原版（§7.2 PrimaryImportButton state machine）：** 用 `window.location.assign(url)` 循环 fire 5 个 `ccswitch://` URL，中间 sleep 200ms。
+
+**实际实现（commit 待加）：** 改用 `triggerDeepLinkBatch(urls)`，内部为每个 URL 创建一个 hidden `<iframe>` 设 `src=url`（每个 iframe 是独立 navigation context，OS scheme handler 一定触发）。
+
+**触发场景：** Stage 3.5 Vertical Slice 实测用户报告：点 "一键导入" 后 CC Switch **只弹了 1 张卡片**（openclaw，第一个 URL）。CC Switch log 也只收到 1 个 `Deep Link Event Received`。结论：Chromium / Safari 对同一 tab 内连续 `window.location.assign(customScheme)` 有内置 throttle — 第一个 assign 触发 OS handoff 后页面进 navigation-pending 状态，后续 2-5 个 assign 被静默 drop（无任何 console 错误）。200ms gap 不够，1s gap 也不够（浏览器策略，不是时序问题）。
+
+**修复：** `frontend/src/lib/triggerDeepLink.ts` 新 helper，PrimaryImportButton + AnonKeyPasteInput 都 import 用。每个 URL 独立 iframe，OS handler 一定响应。Stage 4 / Stage 5 用户人工实测验证 5 张卡片都弹（pending 用户回报）。
+
+**影响：** v1.0 必修。E2E playwright test 不需要改（`page.on('request')` 捕获 iframe.src navigation 跟 window.location.assign navigation 同样有效）。frontend 单元测试改 spy 目标从 `window.location.assign` → `triggerDeepLinkBatch`。Stage 6 archive 时把 design.md §7.2 改成 iframe-based 方案。
+
+### SD-3 · `input_tokens` 估算策略（来自 Task 4）
+
+**Design 原版（§3.2）：** Anthropic SSE `message_start.message.usage.input_tokens` 期望来自上游真实 token count。
+
+**实际实现：** Streaming 路径用 `Math.ceil(body.length / 4)` 作为 input_tokens 估算（emitted in `message_start`）。Anthropic 协议规定 `message_delta.usage` 只承载 `output_tokens`，不更新 `input_tokens` — 因此客户端看到的 input_tokens 始终是估算值。
+
+**影响：** 客户端的 token 计费如果依赖 streaming 路径的 `message_start.usage.input_tokens`，会有偏差。Non-stream 路径不受影响（直接用 OpenAI `usage.prompt_tokens`）。Stage 6 archive 时考虑是否需要 backend 在 streaming 开始前先做一次 tokenize 计算精确 input_tokens（v2 任务）。
+
+### SD-4 · E2E 用 `page.on('request')` 而非 `window.location.assign` 重写（来自 Task 10）
+
+**Design / tasks.md 原版（§Task 10 template）：** 用 `page.addInitScript` 重写 `window.location.assign = (url) => { __assignCalls.push(url) }` 来捕获 5 次 deep-link 触发。
+
+**实际实现：** Chromium 把 `Location` 当 WebIDL host object，`assign` 槽位走 internal slot，JS 层面任何方式（`Object.defineProperty` 改 instance、改 `Location.prototype`、改 `window.location`）都被静默忽略 — 实测捕获数组始终为空，但 `/v1/deep-link` mock 命中、按钮状态机正常转换。改为用 Playwright 的 `page.on('request')` 监听 `ccswitch://` 开头的 navigation request — `assign(ccswitch://…)` 在浏览器内部发起一次主框架导航请求，Playwright 在 schema 未注册时仍能截获 URL，事件层比 JS 层稳定。
+
+**影响：** 测试结果等价（仍断言 5 次触发 + URL 含正确 app 参数），但实现路径跟 plan template 不同。Stage 6 archive 时把 tasks.md §10.2 template 换成 request-event 模式，免得未来 maintainer 走同一条死胡同。
+

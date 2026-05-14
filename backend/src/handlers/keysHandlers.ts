@@ -29,7 +29,7 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-function jsonResponse(
+export function jsonResponse(
   statusCode: number,
   body: unknown,
 ): APIGatewayProxyResultV2 {
@@ -40,7 +40,7 @@ function jsonResponse(
   };
 }
 
-function jsonError(
+export function jsonError(
   statusCode: number,
   type: string,
   message: string,
@@ -77,7 +77,7 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
  * user must be linked to a newapi account" check. Without it there's
  * nothing meaningful to proxy to.
  */
-function requireNewapiLink(
+export function requireNewapiLink(
   auth: AuthContext,
 ): APIGatewayProxyResultV2 | null {
   if (!isNewapiConfigured()) {
@@ -99,7 +99,7 @@ function requireNewapiLink(
   return null;
 }
 
-function handleNewapiError(err: unknown): APIGatewayProxyResultV2 {
+export function handleNewapiError(err: unknown): APIGatewayProxyResultV2 {
   const msg = err instanceof NewapiError ? err.message : (err as Error).message;
   const status = err instanceof NewapiError ? err.status || 502 : 502;
   // Translate the per-IP login rate-limit (newapi 429) into a clearer

@@ -1,3 +1,16 @@
+> **本文档已归档 · 2026-05-13**
+>
+> 内容已重组到三个协议族子路由：
+> - [/docs/protocols/openai-compat](/docs/protocols/openai-compat) — OpenAI-compat 协议详解
+> - [/docs/protocols/anthropic-shim](/docs/protocols/anthropic-shim) — Claude 协议经 shim 接入
+> - [/docs/protocols/gemini-proxy](/docs/protocols/gemini-proxy) — Gemini 经 CC Switch local proxy 手动配
+>
+> 一键导入流程见 [/install/manual](/install/manual)。
+>
+> 原文档保留作为历史归档。
+
+---
+
 # TokenBoss 模型厂商配置指令
 
 > 本文档是写给 **AI 助手**（OpenClaw / Claude Code / Cursor 等）读的执行说明。

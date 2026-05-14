@@ -1,0 +1,54 @@
+{
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "tools": [
+      {
+        "name": "get_weather",
+        "description": "Get current weather for a city.",
+        "input_schema": {
+          "type": "object",
+          "properties": { "city": { "type": "string" } },
+          "required": ["city"]
+        }
+      }
+    ],
+    "tool_choice": { "type": "tool", "name": "get_weather" },
+    "messages": [
+      { "role": "user", "content": "What's the weather in Tokyo?" },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01abc",
+            "name": "get_weather",
+            "input": { "city": "Tokyo" }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01abc",
+            "content": "{\"tempC\":21,\"sky\":\"clear\"}"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "id": "chatcmpl-tool-result-1",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      { "type": "text", "text": "It's 21°C and clear in Tokyo." }
+    ],
+    "model": "claude-sonnet-4-5",
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": { "input_tokens": 78, "output_tokens": 10 }
+  }
+}

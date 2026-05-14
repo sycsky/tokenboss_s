@@ -11,7 +11,7 @@ npm install          # 安装开发依赖（tsup、vitest 等）
 
 ```bash
 # 创建 .env.local（不会被提交）
-echo 'TOKENBOSS_API_URL=https://tokenboss-backend.zeabur.app' > .env.local
+echo 'TOKENBOSS_API_URL=https://api.tokenboss.co' > .env.local
 echo 'TOKENBOSS_API_KEY=你的sk-xxx' >> .env.local
 ```
 
@@ -26,7 +26,7 @@ npm run dev          # tsup watch 模式，改代码自动重编译
 另开一个终端，以独立 CLI 模式跑代理（不依赖 openclaw）：
 
 ```bash
-TOKENBOSS_API_URL=https://tokenboss-backend.zeabur.app \
+TOKENBOSS_API_URL=https://api.tokenboss.co \
 TOKENBOSS_API_KEY=sk-xxx \
 node dist/cli.js start --port 8402
 ```
@@ -126,7 +126,7 @@ openclaw → 本地代理 :8402 → TokenBoss 后端 → newapi → 真实 LLM
 
 | 变量名 | 说明 |
 |---|---|
-| `TOKENBOSS_API_URL` | TokenBoss 后端地址，如 `https://tokenboss-backend.zeabur.app` |
+| `TOKENBOSS_API_URL` | TokenBoss 后端地址，如 `https://api.tokenboss.co` |
 | `TOKENBOSS_API_KEY` | 用户的代理 key（`tb_live_xxx`），由后端 dashboard 生成 |
 | `TOKENBOSS_PROXY_PORT` | 本地代理端口，默认 8402 |
 

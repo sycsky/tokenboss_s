@@ -1,0 +1,25 @@
+{
+  "request": {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "messages": [
+      { "role": "user", "content": "Let's count. Say one." },
+      { "role": "assistant", "content": "One." },
+      { "role": "user", "content": "Now two." },
+      { "role": "assistant", "content": [{ "type": "text", "text": "Two." }] },
+      { "role": "user", "content": [{ "type": "text", "text": "Now three." }] }
+    ]
+  },
+  "response": {
+    "id": "chatcmpl-count-3",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      { "type": "text", "text": "Three." }
+    ],
+    "model": "claude-sonnet-4-5",
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": { "input_tokens": 30, "output_tokens": 2 }
+  }
+}
