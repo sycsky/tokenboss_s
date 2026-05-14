@@ -45,6 +45,34 @@ TokenBoss 是一个面向 **AI Agent 使用者**的 token 经济产品 — OpenC
 - **用户本地 review 后才推 — 永远不要 auto-push**
 - 不强制 dev 集成分支（小团队，feature/<slug> 直接 PR 到 main）
 
+## GitHub PR Operations · 多账号 gh CLI
+
+`sycsky/tokenboss_s` repo 属于 `sycsky` 个人 owner，访问/创建/merge PR 需要 `loop2zero` token。但 gh CLI active account 可能默认是别的（如 `stablehunter-dev` 用于 Goldfin 项目）。
+
+**模式：** 临时 switch → 操作 → switch back。
+
+```bash
+# 创建 PR
+gh auth switch --user loop2zero
+gh pr create --base main --head feature/<slug> --title "..." --body-file /tmp/pr-body.md --label "enhancement"
+gh auth switch --user stablehunter-dev   # 切回
+
+# Merge PR
+gh auth switch --user loop2zero
+gh pr merge <N> --merge --delete-branch
+gh auth switch --user stablehunter-dev   # 切回
+
+# 查 issue / PR status (read-only 也需要切，因为某些 graphql 路径要 collaborator 权限)
+gh auth switch --user loop2zero
+gh pr view <N> --json state,mergedAt
+gh issue view <N> --json state,closedAt
+gh auth switch --user stablehunter-dev
+```
+
+**日常 `git push` / `pull` 不需要切** — `~/.gitconfig` 已经配 owner-based credential helper 自动用 loop2zero token。只有 `gh` CLI 命令要 switch。
+
+来源：REQ gh-3 PR #4 创建 + merge 经验。如果 active 是 stablehunter-dev 时直接 `gh pr create` 会报 `must be a collaborator (createPullRequest)`。
+
 ## 部署
 
 | Stream | 主路径 | 备选 |

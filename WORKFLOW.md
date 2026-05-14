@@ -363,26 +363,42 @@ PostToolUse hook 在 agent 每次写文件后自动触发（按 stream 分流）
 
 ### 🟡 规则 — 先 1 后 N
 
-不让所有 subagent 同时跑 1-4h 再回头 review。**先让 1 个 subagent 跑通最小 happy path（不 robust 也行）**，30 min 内人工实际操作一遍：
+不让所有 subagent 同时跑 1-4h 再回头 review。**先让 1 个 subagent 跑通最小 happy path（不 robust 也行）**，30 min 内人工实际操作一遍。
 
-- 流程能不能走通？
-- 数据对得上 mock 预期？
-- design.md 有没有遗漏？
+### 🔴 VS gate 必须满足的实测条件（REQ gh-3 实证修正）
+
+VS 验证不是 unit tests 通过 + curl 200 就算 pass。必须**同时**：
+
+1. **Backend 跑 real upstream**（不是 `dev:mock`）
+   - `ps` 看不出 mock 状态。要 grep 启动命令的 env：`MOCK_UPSTREAM=1` 在不在？
+   - Mock 模式下任何 happy-path "成功响应" 都不算 verified（实测可能是 mock echo，不是真上游）
+2. **真实 SDK 客户端端到端跑一次**（不是 curl）
+   - 用真客户端 CLI / SDK subprocess spawn + assert exit code 0 + 输出符合预期
+   - Unit test fixture 里的字符串值（如 model 名）在真客户端会触发 upstream provisioning 检查
+3. **协议契约具体场景全覆盖**
+   - 流程能不能走通？happy path
+   - 数据对得上 mock 预期？non-happy edge case
+   - design.md 有没有遗漏？spec drift catch
+4. 跨平台 / 跨浏览器假设全部当场实测一次（不要靠 "理论上应该工作"）
+
+> **REQ gh-3 实证数据：** 7 个 spec drift 里 **5 个（SD-4/5/6/7/+1）是 VS gate 阶段才发现**的。Backend 跑 mock 模式导致 "pong" 假成功 →  最后 kill + 重启 real mode 才暴露真问题（model name -4-5 在 real Vertex AI 是 503，但 mock 永远返回 echo）。如果跳过 VS 直接走 Stage 4-6，这些 SD 会被生产用户找出来，代价高 10x+。**VS gate 是 HARD-GATE 不可砍。**
 
 ### 🟢 通过后 — 其余 stream 并行展开
 
 Stage 3 完整版按原计划跑（其余 stream subagent + TDD + Lint Hook 并行）。
 
-### 🔴 不通过 — 回 Stage 2
+### 🔴 不通过 — 回 Stage 2 或 spec drift
 
-发现方向偏差，**不要在 Stage 3 内修补**，回 Stage 2 重写 design.md（必要时改 Stage 2.5 mock）。
+发现方向偏差，分两种处理：
+- **design 假设错（需要重新决策）** → 回 Stage 2 重写 design.md（必要时改 Stage 2.5 mock）
+- **design 假设可保留但实现细节有更优解** → spec drift logging（见 §11 SD-N template），继续 Stage 3 修复
 
 > 成本对比：1 worktree 1h 错 = 损失 1h；3 worktree 4h 错 = 损失 12h + 3 个分支 discard。Vertical slice 是**便宜的早失败**。
 
 ### 何时跳过
 
 - 纯 chore / schema migration / refactor 类（无新交互流程）→ 可跳过
-- UI / 新功能 / 跨 stream contract → **必跑**
+- UI / 新功能 / 跨 stream contract / **protocol shim 类** → **必跑**
 
 ---
 
@@ -470,6 +486,26 @@ PR 合并到 main 后**自动触发**：
 3. **`/opsx:archive`** 同步 delta spec 到 capability spec
 4. **清理：** worktree + `feature/<slug>` branch refs 删除
 5. **GitHub Issue 关闭：** PR description 含 `Closes #N`（merge 后 GitHub 自动关闭）；merge 后 `gh issue comment <N> --body "Implemented in <PR-url>. Spec archived at openspec/changes/archive/<...>"` 留 audit trail
+
+### 📝 SD-N 模板（design.md `## Spec Drift` 章节，Stage 3 实施期间持续追加）
+
+每条 spec drift 用 SD-N 编号，固定结构：
+
+```markdown
+### SD-<N> · <一句话描述> （来自 Task <X> / Stage <X.X>）
+
+**Design 原版（§<section>）：** <design.md 原本怎么写>
+
+**实际实现（commit <SHA>）：** <实际怎么实现，跟 design 哪里不一样>
+
+**触发原因：** <为什么 design 假设撞墙；reality check 抓到的 evidence>
+
+**修复：** <具体改了哪些文件 / 加了什么 helper / 选了哪条 trade-off>
+
+**影响：** <Stage 6 archive 时反向回写到哪份 spec / 是否升级测试 / 是否触发后续 REQ>
+```
+
+> REQ gh-3 共 7 个 SD entry 是 living example，归档于 `openspec/changes/archive/2026-05-14-gh-3-tokenboss-cc-switch-integration/design.md` §10。
 
 ### 🟡 人工
 
@@ -582,3 +618,21 @@ PR 合并到 main 后**自动触发**：
 - GitHub Issue 模板沉淀（`.github/ISSUE_TEMPLATE/` 三种类型，把 Stage 1 用户视角分流前置到 issue 创建时）
 - Agent demo 形式的自动化测试（用 demo.md 当 fixture 直接跑）
 - ClawRouter 独立发布流程跟主 monorepo PR 的协调（目前未明确）
+
+### 候选可重用 skill（独立 session 走 TDD 走完才正式 ship）
+
+从 REQ gh-3 Stage 7 飞轮分析得，3 个 cross-project 技术值得沉淀为 skill：
+
+1. **`browser-custom-scheme-fanout`** — Web app 触发 N 个 custom-scheme URL（ccswitch:// / mailto: / 等）。核心：`window.location.assign` 多次连续吞 N-1，hidden iframe 不可靠，唯一稳是 1 user gesture = 1 URL per-click。来源 SD-5/6。
+2. **`verify-mock-vs-real-upstream`** — 调试 proxy / BFF / shim layer 有 mock mode。核心：`ps` / `lsof` 看不出 mock 状态；要 grep 启动命令 env / 看 response signature；mock 的"成功"不算 verified。来源 REQ gh-3 PID 14276 事件。
+3. **`real-sdk-roundtrip-before-shim-ship`** — 实施 protocol shim（Anthropic-shim 等）准备 ship 前。核心：unit tests + curl 测不到 real-client SDK quirks（如 model name fixture 在 real client 触发 503）；必须 spawn 真 SDK CLI subprocess + assert exit 0。来源 SD-7。
+
+**写 skill 流程：** writing-skills skill 要求 Iron Law — NO SKILL WITHOUT FAILING TEST FIRST。每个 skill 要先用 pressure scenario subagent 跑 baseline 观察 rationalization，再写 skill，再重测加 loopholes。这个 TDD 过程 45-60 min/skill，需要独立 session。
+
+### 待开 REQ（gh-3 Follow-up）
+
+- v1.0.1: backend `/v1/deep-link` 动态 query `/v1/models` 选最新 Claude 模型（避免每次 model 升级改 hardcode；详见 SD-7 长期方案）
+- v1.0.1: 清掉 13 minor + 3 important deferred reviewer findings（详见 PR #4 PR description）
+- v1.1: 扩散入口（onboarding 嵌入 + landing CTA + dashboard widget）
+- REQ-B: Fork CC Switch 为 "TokenBoss Desktop"（独立 spec）
+- Upstream PR: `farion1231/cc-switch` 加 TokenBoss 为内置 preset
