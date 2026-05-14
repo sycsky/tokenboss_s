@@ -1,23 +1,23 @@
 /**
  * Logged-in branch of the KeyInjectionFlow.
  *
- * Wraps PrimaryImportButton + ImportScopeNote in a single composition so
- * the parent (KeyInjectionFlow) stays declarative. Currently this is
- * just the button + a static note, but the wrapper exists so future
- * additions (e.g. "let me pick a different key", "import to a subset of
- * CLIs") have a natural home without bloating the flow component.
+ * Renders the AgentImportGrid with a server-side URL fetcher: each first
+ * card click triggers POST /v1/deep-link which mints a fresh "CC Switch"
+ * reserved newapi token (per D7 delete-and-recreate). All 5 URLs share
+ * that fresh key. Cached for the rest of the user's session.
  *
- * 参考: openspec/changes/gh-3-tokenboss-cc-switch-integration/design.md §2
+ * 参考: openspec/changes/gh-3-tokenboss-cc-switch-integration/design.md §2 + §7
  */
 
-import { PrimaryImportButton } from "./PrimaryImportButton";
-import { ImportScopeNote } from "./ImportScopeNote";
+import { api } from "../lib/api";
+import { AgentImportGrid } from "./AgentImportGrid";
+import type { CLIAppId } from "../lib/agentDefs";
+
+async function fetchLoggedInUrls(): Promise<Map<CLIAppId, string>> {
+  const r = await api.getDeepLink();
+  return new Map(r.deep_links.map((dl) => [dl.app, dl.url]));
+}
 
 export function LoggedInKeyPicker() {
-  return (
-    <div>
-      <PrimaryImportButton />
-      <ImportScopeNote />
-    </div>
-  );
+  return <AgentImportGrid getUrls={fetchLoggedInUrls} />;
 }

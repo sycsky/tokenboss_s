@@ -5,10 +5,11 @@ import { AnonKeyPasteInput } from "../AnonKeyPasteInput";
 import * as triggerModule from "../../lib/triggerDeepLink";
 
 /**
- * Spy on `triggerDeepLinkBatch` (the lib that internally creates hidden
- * iframes per URL — see lib/triggerDeepLink.ts). We don't reach into iframe
- * DOM in tests; we verify the component calls the batch with all 5 unique
- * ccswitch:// URLs.
+ * AnonKeyPasteInput renders the paste input + (when key is valid) the
+ * AgentImportGrid below. Tests focus on:
+ * 1. Key format validation (button / grid hidden until valid)
+ * 2. Once valid, the grid appears and per-card clicks fire ccswitch:// URLs
+ *    built client-side from the pasted key.
  */
 
 beforeEach(() => {
@@ -21,29 +22,28 @@ const SHORT_KEY = "sk-too-short";
 const NO_PREFIX = "A".repeat(48);
 
 describe("AnonKeyPasteInput", () => {
-  it("submit button is disabled while the input is empty or invalid", async () => {
-    vi.spyOn(triggerModule, "triggerDeepLinkBatch").mockResolvedValue();
+  it("does NOT render the agent grid while input is empty or invalid", async () => {
     render(<AnonKeyPasteInput />);
     const user = userEvent.setup();
 
-    // The visible button text varies per state; locate it by its role +
-    // a stable accessible-name pattern.
-    const button = screen.getByRole("button", { name: /导入到 CC Switch/ });
-    expect(button).toBeDisabled();
+    // No agent buttons visible until a valid key is typed.
+    expect(screen.queryByRole("button", { name: /导入到 OpenClaw/ })).toBeNull();
 
     const input = screen.getByLabelText(/API Key/);
     await user.type(input, SHORT_KEY);
-    expect(button).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /导入到 OpenClaw/ })).toBeNull();
     expect(screen.getByText(/格式不对/)).toBeInTheDocument();
 
     await user.clear(input);
     await user.type(input, NO_PREFIX);
-    expect(button).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /导入到 OpenClaw/ })).toBeNull();
     expect(screen.getByText(/格式不对/)).toBeInTheDocument();
   });
 
-  it("once a valid sk- + 48-char key is typed, button enables and clicking fires triggerDeepLinkBatch with 5 unique URLs", async () => {
-    const batchSpy = vi.spyOn(triggerModule, "triggerDeepLinkBatch").mockResolvedValue();
+  it("once a valid sk- + 48-char key is pasted, agent grid appears and per-card clicks fire ccswitch:// URLs", async () => {
+    const triggerSpy = vi
+      .spyOn(triggerModule, "triggerDeepLink")
+      .mockImplementation(() => {});
     render(<AnonKeyPasteInput />);
     const user = userEvent.setup();
 
@@ -53,16 +53,23 @@ describe("AnonKeyPasteInput", () => {
     await user.click(input);
     await user.paste(VALID_KEY);
 
-    const button = screen.getByRole("button", { name: /导入到 CC Switch/ });
-    await waitFor(() => expect(button).not.toBeDisabled());
+    // Grid + 5 cards appear.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).toBeInTheDocument();
+    });
 
-    await user.click(button);
+    // Click OpenClaw card → triggerDeepLink fires with a URL containing the pasted key.
+    await user.click(screen.getByRole("button", { name: /导入到 OpenClaw/ }));
+    await waitFor(() => expect(triggerSpy).toHaveBeenCalledTimes(1));
+    const firstUrl = triggerSpy.mock.calls[0][0] as string;
+    expect(firstUrl).toMatch(/^ccswitch:\/\/v1\/import\?/);
+    expect(firstUrl).toContain("app=openclaw");
+    // URL contains the pasted key (URL-encoded).
+    expect(firstUrl).toContain(encodeURIComponent(VALID_KEY));
 
-    await waitFor(() => expect(batchSpy).toHaveBeenCalledTimes(1));
-    const urls = batchSpy.mock.calls[0][0] as readonly string[];
-    expect(urls).toHaveLength(5);
-    expect(urls.every((u) => u.startsWith("ccswitch://v1/import?"))).toBe(true);
-    // Each URL is unique per app (so 5 distinct, not 5 copies of the same).
-    expect(new Set(urls).size).toBe(5);
+    // Click a second card → cache reused, no second URL-building round-trip needed.
+    await user.click(screen.getByRole("button", { name: /导入到 Codex CLI/ }));
+    await waitFor(() => expect(triggerSpy).toHaveBeenCalledTimes(2));
+    expect(triggerSpy.mock.calls[1][0]).toContain("app=codex");
   });
 });

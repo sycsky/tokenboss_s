@@ -531,6 +531,28 @@ async function handleClick() {
 
 **影响：** Streaming 客户端看到的 `id` 跟 chatProxy 内部 completion id 没有关联，调试时需要 cross-reference 时间戳 / userId。Stage 6 archive 时把这条作为 design.md §3.2 的明确决策记录。
 
+### SD-6 · UX 改 per-agent grid · 放弃"1 个按钮触发 5 个 URL"模型（来自 Task 11 Vertical Slice + 用户决策）
+
+**Design 原版（§2 + §7.2）：** 1 个 `<PrimaryImportButton>` 主按钮，点击后 frontend 自动触发 5 个 `ccswitch://` URL，CC Switch 弹 5 张确认卡片。`<ImportScopeNote>` 提前告知用户会弹 5 张。
+
+**实际实现（commits fba7507 + 待加）：** 改用 `<AgentImportGrid>` — 5 张 agent 卡片，用户**逐个点击**每个 CLI 的"导入到 X"按钮，每次点击触发 **1 个** `ccswitch://` URL。
+
+**触发原因：**
+
+1. **SD-5 hot-fix（iframe）只解决了 1 → 5 的事；浏览器底层对同一页面短时间内多次唤起 OS scheme handler 仍有不可预测的 throttle**，即使 iframe 每个独立 navigation context 也不能保证 5 个都到 OS。Stage 3.5 Vertical Slice 用户实测 fba7507 hot-fix 后仍**只看到 OpenClaw 一张卡片**（其余 4 个 ccswitch:// URL 在 iframe 触发后被 OS / Chrome 静默吞）。
+2. **CC Switch 上游不支持"universal provider" deep link**（实证：`docs/user-manual/zh/5-faq/5.3-deeplink.md` + `src-tauri/src/deeplink/parser.rs` 明确只支持 `resource` ∈ {provider, prompt, mcp, skill}，**provider 是 per-app**；universal provider 是 GUI-only feature）。
+3. **per-click UX 更诚实**：用户看见 5 张卡片自己点 = 1 user gesture = 1 deep link = 浏览器一定放行；且勾✓ 进度反馈比"自动 1 主按钮 + 静默 5 个 URL"更可控。
+
+**架构变化：**
+
+- 新增：`frontend/src/components/AgentImportGrid.tsx`（5 张 card + lazy-fetch + per-click trigger + 进度 + 完成 celebration）
+- 删除：`frontend/src/components/PrimaryImportButton.tsx`、`frontend/src/components/ImportScopeNote.tsx`（已被替代，无 lingering 引用）
+- 更新：`LoggedInKeyPicker.tsx`（直接 render AgentImportGrid，注入 server-side fetcher 调用 `api.getDeepLink`）+ `AnonKeyPasteInput.tsx`（key 校验通过后 render AgentImportGrid，注入 client-side fetcher 调用 `buildAllCCSwitchUrls`）
+
+**D7 缓存关键点：** AgentImportGrid 在**第一次任意 card 点击**时 lazy-call fetcher 拿 5 URL 缓存到 React state；后续 card 点击复用缓存。Backend `POST /v1/deep-link` 是"删旧建新"（D7）— 如果每张 card 点都重新 fetch，会得到 5 个不同的 key，只有最后一个 work，前 4 张 card 接受后写入 CLI config 的 key 已失效。Test 用 `expect(deepLinkCallCount).toBe(1)` 锁住该 invariant。
+
+**影响：** v1.0 必修。Stage 6 archive 时把 design.md §2 + §7.2 + 11 部分（11 关键不变量）改成 per-card grid 模型。E2E playwright test 已更新为依次点 5 张 card + 验证 5 ccswitch:// 触发 + fetch 仅 1 次（commit 待加）。
+
 ### SD-5 · `window.location.assign` 多次连续调用被浏览器吞 — 改 hidden iframe per URL（来自 Task 11 Vertical Slice）
 
 **Design 原版（§7.2 PrimaryImportButton state machine）：** 用 `window.location.assign(url)` 循环 fire 5 个 `ccswitch://` URL，中间 sleep 200ms。

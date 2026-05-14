@@ -1,29 +1,34 @@
 /**
- * E2E coverage for `/install/manual` — the gh-3 one-click CC Switch flow.
+ * E2E coverage for `/install/manual` — the gh-3 per-agent CC Switch import.
  *
  * Two scenarios:
  *
- *   1. Logged-in user → PrimaryImportButton fires 5 × `window.location.assign`
- *      with the deep-link URLs returned by `POST /v1/deep-link`. We mock
- *      both `/v1/me` (so AuthProvider hydrates as logged-in) and
- *      `/v1/deep-link` (so the test doesn't depend on the backend) and
- *      observe the 5 navigation attempts via Playwright's `request`
- *      event — Chromium's real `Location.assign` can't be JS-overridden,
- *      so we lean on the navigation side effect each call produces.
+ *   1. Logged-in user → AgentImportGrid: 5 per-agent cards. Each click
+ *      fires ONE `ccswitch://` deep link for that CLI. We click all 5 in
+ *      sequence and verify each fired the correct URL. The first click
+ *      lazily fetches /v1/deep-link and caches all 5 URLs (D7 backend
+ *      "delete-and-recreate" means we MUST fetch only once per session).
  *
  *   2. Anonymous user → AnonKeyPasteInput. No session, so the auth path
- *      falls through to the paste-key UI. Verify the format gate:
- *      button disabled until the user types a valid `sk-` + 48 alphanum
- *      key (matches the regex in AnonKeyPasteInput.tsx).
+ *      falls through to the paste-key UI. Verify the format gate: agent
+ *      grid hidden until a valid `sk-` + 48 alphanum key is typed; once
+ *      valid, the grid appears and each per-card click fires a
+ *      client-side-built `ccswitch://` URL.
  *
- * Why we mock `/v1/me`: the AuthProvider boots with `user: undefined`
+ * Why mock `/v1/me`: the AuthProvider boots with `user: undefined`
  * (hydrating) and the KeyInjectionFlow renders the anon path during
- * that window. If `/v1/me` 401s or times out, the user stays anon and
- * the LoggedIn path never renders — defeating the whole "logged-in"
- * test. Mocking with a real user shape flips us to LoggedIn on first
- * render after auth hydration.
+ * that window. If `/v1/me` 401s or times out, the user stays anon. We
+ * mock with a real user shape (test 1) to flip us to LoggedIn on first
+ * render after auth hydration, or 401 (test 2) to confirm the anon path.
  *
- * 参考: openspec/changes/gh-3-tokenboss-cc-switch-integration/design.md §2 + §7
+ * Why we observe via page.on("request") instead of overriding
+ * triggerDeepLink: Chromium navigation requests (including iframe.src
+ * navigation to custom schemes) fire request events regardless of
+ * whether the scheme has a registered handler. This gives us a stable
+ * observation point that doesn't depend on JS-level mocking of our own
+ * internal lib.
+ *
+ * 参考: openspec/changes/gh-3-tokenboss-cc-switch-integration/design.md §2 + §7 + SD-5/SD-6
  */
 
 import { test, expect } from "@playwright/test";
@@ -50,27 +55,34 @@ const DEEP_LINK_RESPONSE = {
   issued_at: "2026-05-13T00:00:00.000Z",
 };
 
-test.describe("/install/manual 一键导入", () => {
-  test("登录态用户点按钮 → 5 个 window.location.assign 调用", async ({ page }) => {
-    // Surface page-side failures (e.g. unhandled promise rejections in
-    // PrimaryImportButton's click handler) to the test logs so a silent
-    // mismatch on `/v1/deep-link` doesn't look like a timing bug.
+const APP_DISPLAY_NAMES: Record<string, string> = {
+  openclaw: "OpenClaw",
+  hermes: "Hermes Agent",
+  codex: "Codex CLI",
+  opencode: "OpenCode",
+  claude: "Claude Code",
+};
+
+test.describe("/install/manual per-agent import", () => {
+  test("登录态用户依次点 5 张卡片 → 5 个 ccswitch:// 触发 + fetch 只 1 次", async ({ page }) => {
     page.on("pageerror", (err) => console.error("[page error]", err.message));
     page.on("console", (msg) => {
       if (msg.type() === "error") console.error("[console error]", msg.text());
     });
 
-    // Intercept the backend calls BEFORE any navigation so AuthProvider's
-    // initial /v1/me on mount hits the mock.
+    // Track how many times /v1/deep-link was hit — must be exactly 1
+    // (D7: each call mints a fresh key + invalidates the previous, so
+    // calling N times would leave only the last key valid).
+    let deepLinkCallCount = 0;
+
     await page.route("**/v1/me", (route) =>
       route.fulfill({ json: { user: FAKE_USER } }),
     );
-    await page.route("**/v1/deep-link", (route) =>
-      route.fulfill({ json: DEEP_LINK_RESPONSE }),
-    );
+    await page.route("**/v1/deep-link", (route) => {
+      deepLinkCallCount += 1;
+      return route.fulfill({ json: DEEP_LINK_RESPONSE });
+    });
 
-    // Fake a session: AuthProvider reads `tb_session` from localStorage
-    // on mount, then calls `/v1/me` to hydrate the profile.
     await page.addInitScript(
       ([sessionKey, token]) => {
         localStorage.setItem(sessionKey, token);
@@ -78,14 +90,9 @@ test.describe("/install/manual 一键导入", () => {
       ["tb_session", FAKE_TOKEN],
     );
 
-    // Capture `window.location.assign` calls. Chromium's real `Location`
-    // resists every JS-level override (`Object.defineProperty` on the
-    // instance, the prototype, or `window.location` itself all
-    // silently fail because Location is a WebIDL host object with
-    // internal slots). So instead we observe the SIDE EFFECT: each
-    // `assign(ccswitch://…)` triggers a main-frame navigation request,
-    // which Playwright's `page.on("request")` event fires for
-    // regardless of whether the scheme has a registered handler.
+    // See lib/triggerDeepLink.ts — we render a hidden iframe with
+    // src=ccswitch://… and Playwright fires a request event for that
+    // navigation, even though the scheme has no real handler in CI.
     const capturedUrls: string[] = [];
     page.on("request", (req) => {
       const u = req.url();
@@ -96,37 +103,38 @@ test.describe("/install/manual 一键导入", () => {
 
     await page.goto("/install/manual");
 
-    // PrimaryImportButton's idle label — verbatim from
-    // PrimaryImportButton.tsx so a copy change here surfaces fast.
-    const importBtn = page.getByRole("button", {
-      name: "一键导入到 CC Switch（5 个 CLI 全部）",
-    });
-    await expect(importBtn).toBeVisible();
-    await importBtn.click();
-
-    // 5 assigns × 200ms gap ≈ 1s + fetch round trip. 5s gives slack
-    // without making a healthy run wait too long. Poll `capturedUrls`
-    // length because the request events fire asynchronously.
-    await expect
-      .poll(() => capturedUrls.length, { timeout: 5_000, intervals: [100, 200, 500] })
-      .toBe(5);
+    // Click each of the 5 agent cards in turn. Click order matters for
+    // the captured-URL ordering assertion below.
+    const appsInOrder = ["openclaw", "hermes", "codex", "opencode", "claude"] as const;
+    for (const app of appsInOrder) {
+      const btn = page.getByRole("button", {
+        name: new RegExp(`导入到 ${APP_DISPLAY_NAMES[app]}`),
+      });
+      await expect(btn).toBeVisible();
+      await btn.click();
+      // Wait until that card's URL shows up in our captured stream,
+      // so subsequent clicks don't race ahead.
+      await expect
+        .poll(() => capturedUrls.some((u) => u.includes(`app=${app}`)), {
+          timeout: 3_000,
+          intervals: [50, 100, 200],
+        })
+        .toBe(true);
+    }
 
     expect(capturedUrls).toHaveLength(5);
     expect(capturedUrls[0]).toContain("app=openclaw");
-    expect(capturedUrls[1]).toContain("app=hermes");
-    expect(capturedUrls[2]).toContain("app=codex");
-    expect(capturedUrls[3]).toContain("app=opencode");
     expect(capturedUrls[4]).toContain("app=claude");
-    for (const url of capturedUrls) {
-      expect(url.startsWith("ccswitch://")).toBe(true);
-    }
+
+    // D7 cache contract: fetch ONLY ONCE across all 5 card clicks.
+    expect(deepLinkCallCount).toBe(1);
+
+    // Progress indicator should read 5/5 and celebration block visible.
+    await expect(page.getByText(/5\/5 已导入/)).toBeVisible();
+    await expect(page.getByRole("status")).toContainText(/都发到 CC Switch/);
   });
 
-  test("未登录用户走贴 key 兜底 + 校验格式", async ({ page }) => {
-    // No session, but we still need `/v1/me` to resolve so the
-    // AuthProvider settles into `user: null` instead of hanging on
-    // `undefined` (which renders anon path too, but cleaner to short-circuit
-    // via 401). Returning 401 mirrors the real "no token" backend behavior.
+  test("未登录用户走贴 key 兜底 + agent grid 仅 valid key 后才显示", async ({ page }) => {
     await page.route("**/v1/me", (route) =>
       route.fulfill({
         status: 401,
@@ -136,32 +144,21 @@ test.describe("/install/manual 一键导入", () => {
 
     await page.goto("/install/manual");
 
-    // AnonKeyPasteInput renders an <input placeholder="sk-XXX…"> next to
-    // the disabled CTA. Use the placeholder regex — robust to copy tweaks
-    // that keep the `sk-` prefix.
     const keyInput = page.getByPlaceholder(/^sk-/);
     await expect(keyInput).toBeVisible();
 
-    // Anon button label — distinct from PrimaryImportButton's "一键导入"
-    // by leading verb. Using exact match would lock us to the idle copy;
-    // partial via getByRole + name regex tolerates "正在发送…" state.
-    const anonBtn = page.getByRole("button", {
-      name: "导入到 CC Switch（5 个 CLI 全部）",
-    });
-    await expect(anonBtn).toBeVisible();
-    // Starts disabled — empty input fails the regex.
-    await expect(anonBtn).toBeDisabled();
+    // Before a valid key is typed, no agent grid is rendered.
+    await expect(page.getByRole("button", { name: /导入到 OpenClaw/ })).toHaveCount(0);
 
-    // Invalid key — passes the "non-empty" check, still fails regex.
+    // Invalid key — agent grid stays hidden + error text appears.
     await keyInput.fill("not-a-real-key");
-    await expect(anonBtn).toBeDisabled();
-    // The help text flips to the error variant once the user types.
     await expect(page.getByText(/格式不对/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /导入到 OpenClaw/ })).toHaveCount(0);
 
-    // Valid key — `sk-` + 48 alphanum chars. Anything longer/shorter
-    // or with non-alphanum gets rejected.
+    // Valid key — `sk-` + 48 alphanum chars → grid appears.
     const validKey = "sk-" + "a".repeat(48);
     await keyInput.fill(validKey);
-    await expect(anonBtn).toBeEnabled();
+    await expect(page.getByRole("button", { name: /导入到 OpenClaw/ })).toBeVisible();
+    await expect(page.getByText(/0\/5 已导入/)).toBeVisible();
   });
 });
