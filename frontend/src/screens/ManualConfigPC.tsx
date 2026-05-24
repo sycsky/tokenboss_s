@@ -67,17 +67,19 @@ export default function ManualConfigPC() {
           <KeyInjectionFlow />
         </section>
 
-        {/* Footer — deeper protocol docs for the long tail. */}
-        <section className="mt-12">
-          <h2 className="text-[18px] font-bold mb-4">延伸阅读 · 协议族文档</h2>
-          <ProtocolFamilyLinks />
-        </section>
-
         {/* Advanced disclosure — legacy per-Agent recipe cards, hidden by
             default. Power users editing config files by hand can still
             grab the exact templates. */}
         <section className="mt-12 pt-6 border-t-2 border-ink/10">
           <AdvancedManualRecipes />
+        </section>
+
+        {/* Footer — compact links to protocol-family docs. Used to sit
+            between Step 2 and AdvancedManualRecipes as a heavy 3-card
+            grid; /design-review F1+F4 sank it to footer-tier so it stops
+            outranking the core flow. */}
+        <section className="mt-10 pt-5 border-t border-ink/15">
+          <ProtocolFamilyLinks />
         </section>
       </main>
     </div>
