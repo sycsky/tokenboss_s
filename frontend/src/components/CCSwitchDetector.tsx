@@ -25,9 +25,9 @@ export function CCSwitchDetector() {
           1
         </span>
         <div className="flex-1 min-w-0">
-          <h3 className="text-[16px] font-bold text-ink mb-1.5">
+          <h2 className="text-[18px] font-bold text-ink mb-1.5">
             先装 CC Switch 桌面 App
-          </h3>
+          </h2>
           <p className="text-[13px] text-text-secondary leading-relaxed mb-3">
             CC Switch 是开源跨平台的 Agent CLI provider 管理器（Mac / Windows / Linux 都有）。
             装完后下面 Step 2 的按钮会直接调它一键把 TokenBoss 导入到你选的 CLI。

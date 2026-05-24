@@ -201,7 +201,7 @@ export function AgentImportGrid({
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-[16px] font-bold text-ink">
+            <h2 className="text-[18px] font-bold text-ink">
               选你在用的 Agent CLI，逐个点导入
             </h2>
             <span
