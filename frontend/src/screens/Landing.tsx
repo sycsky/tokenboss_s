@@ -97,7 +97,7 @@ function FooterCol({ label, links }: { label: string; links: FooterLink[] }) {
  * Animated terminal demo on the hero right side. Pure CSS keyframes loop a
  * 6-second cycle showing the four steps after a user runs the install
  * command in their Agent: typing the command → fetching → registering skill
- * → activating $10 trial → idle waiting for instructions.
+ * → activating trial → idle waiting for instructions.
  */
 function HeroTerminalDemo() {
   return (
@@ -133,7 +133,7 @@ function HeroTerminalDemo() {
 
         <div className="td-line td-line-3 mt-1 flex items-center gap-2">
           <span className="text-[#34D399]">✓</span>
-          <span>activated <span className="text-[#FFF8F0]">$10</span> · <span className="opacity-60">24 h trial</span></span>
+          <span>activated <span className="text-[#FFF8F0]">trial</span> · <span className="opacity-60">24 h</span></span>
         </div>
 
         <div className="td-line td-line-4 mt-4 flex items-center gap-2 text-[#FFF8F0]">
@@ -225,7 +225,7 @@ export default function Landing() {
                     <span className="inline-flex items-baseline gap-2">
                       免费开始
                       <span className="font-mono text-[12px] font-bold tracking-tight px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
-                        送 $10
+                        免费试用
                       </span>
                     </span>
                   </Link>
@@ -267,7 +267,7 @@ export default function Landing() {
           <FeatureCard
             tag="01"
             title="开局立刻用得起好模型"
-            body="$10 免费额度直接到账。Claude Opus / GPT-5 等顶级模型给你的 Agent 随便调，不用懂 API key。"
+            body="试用额度直接到账。Claude Opus / GPT-5 等顶级模型给你的 Agent 随便调，不用懂 API key。"
             accentBg="bg-[#FFF4E6]"
           />
           <FeatureCard
@@ -405,12 +405,8 @@ export default function Landing() {
             <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-4">
               现在试试？
             </h2>
-            <p className="text-white/90 text-[15px] md:text-[17px] mb-8 inline-flex items-baseline gap-2 flex-wrap justify-center">
-              免费开始 · 送
-              <span className="font-mono text-[13px] font-bold tracking-tight px-2 py-0.5 bg-lime-stamp text-lime-stamp-ink border-2 border-ink rounded">
-                $10
-              </span>
-              体验额度 · 无需绑卡。
+            <p className="text-white/90 text-[15px] md:text-[17px] mb-8">
+              免费开始 · 试用额度直接到账 · 无需绑卡。
             </p>
             <div className="flex items-center justify-center gap-5 flex-wrap">
               <Link to="/register" className={slockBtn('secondary')}>

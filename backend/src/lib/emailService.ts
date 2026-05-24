@@ -102,7 +102,7 @@ export async function sendVerifyLinkEmail(
 
 ${link}
 
-验证完成后，你的 $10 / 24h 试用额度立刻可用。如果不是你本人在注册，请忽略本邮件。
+验证完成后，你的 24h 试用额度立刻可用。如果不是你本人在注册，请忽略本邮件。
 
 — TokenBoss`,
     html:
@@ -110,7 +110,7 @@ ${link}
 <p>请点击下方按钮完成邮箱验证（24 小时内有效）：</p>
 <p><a href="${link}" style="display:inline-block;background:#E8692A;color:#fff;font-weight:700;padding:12px 24px;border:2px solid #1C1917;border-radius:6px;text-decoration:none;box-shadow:3px 3px 0 0 #1C1917">验证我的邮箱 →</a></p>
 <p style="color:#6B5E52;font-size:13px;">或复制此链接到浏览器：<br><span style="font-family:monospace;word-break:break-all;">${link}</span></p>
-<p style="color:#6B5E52;font-size:13px;">验证完成后，你的 $10 / 24h 试用额度立刻可用。如果不是你本人在注册，请忽略本邮件。</p>
+<p style="color:#6B5E52;font-size:13px;">验证完成后，你的 24h 试用额度立刻可用。如果不是你本人在注册，请忽略本邮件。</p>
 <p style="color:#A89A8D;font-size:12px;">— TokenBoss</p>`,
   });
 }

@@ -17,7 +17,7 @@ const STEPS = [
  *   1. h1 + sub: tell the user what's connected — Agent has wired up.
  *   2. Checklist of "what's next" inside a single white card with the
  *      ✓ marks stamping in 200 ms apart.
- *   3. Surprise pill: "$10 已发到你账上" + live 24h countdown. Treats
+ *   3. Surprise pill: "试用 token 已发到你账上" + live 24h countdown. Treats
  *      the trial credit as a gift reveal, not the lead message; the
  *      ticking clock nudges them to actually use it.
  *
@@ -46,7 +46,7 @@ export default function OnboardSuccess() {
       setTimeout(() => setEnterStep(1), 250),   // ✓ 1
       setTimeout(() => setEnterStep(2), 550),   // ✓ 2
       setTimeout(() => setEnterStep(3), 850),   // ✓ 3
-      setTimeout(() => setEnterStep(4), 1550),  // pill ($10) — 700ms pause
+      setTimeout(() => setEnterStep(4), 1550),  // pill (trial token) — 700ms pause
       setTimeout(() => setEnterStep(5), 2050),  // confetti — 500ms after pill
     ];
     return () => timers.forEach(clearTimeout);
@@ -134,7 +134,7 @@ export default function OnboardSuccess() {
         >
           <span className="flex items-center gap-2 text-[13.5px] font-bold tracking-tight">
             <span>
-              <span className="text-[16px]">$10</span> 已发到你账上
+              <span className="text-[14px] font-bold">试用 token</span> 已发到你账上
             </span>
           </span>
           <span className="font-mono text-[13px] font-bold tabular-nums leading-none flex items-baseline gap-1">

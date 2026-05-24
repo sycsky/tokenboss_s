@@ -80,7 +80,10 @@ export interface StandardRate {
   quota: string;
   /** Min top-up label, e.g. "充值 ¥50 起" or "充值 $10 USD 起 = $70 调用额度". */
   minTopup: string;
-  /** Trial pill copy used inline, e.g. "$10 / 24h". */
+  /** Trial pill copy used inline, e.g. "试用 / 24h". Currency-neutral —
+   *  we don't display a specific monetary amount because the upstream
+   *  trial allowance is sourced from newapi's plan config, not hardcoded
+   *  in TokenBoss copy. Marketing pages reference "试用额度" instead. */
   trialPill: string;
 }
 
@@ -89,13 +92,13 @@ export const STANDARD_RATE: Record<Currency, StandardRate> = {
     unit: '¥1',
     quota: '$1',
     minTopup: '¥1 起充 · 永不过期 · 全模型解锁',
-    trialPill: '$10 / 24h',
+    trialPill: '试用 / 24h',
   },
   usd: {
     unit: '$1 USD',
     quota: '$7',
     minTopup: '$1 起充 = $7 调用额度 · 永不过期 · 全模型解锁',
-    trialPill: '$10 / 24h',
+    trialPill: '试用 / 24h',
   },
 };
 
