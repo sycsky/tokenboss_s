@@ -66,64 +66,43 @@ function AgentImportCard({
   return (
     <div
       className={[
-        "border-2 border-ink rounded-md p-4 transition-all",
+        "flex items-center gap-3 border-2 border-ink rounded-md px-3 py-2.5 transition-all",
         "bg-white shadow-[3px_3px_0_0_#1C1917]",
         isDone ? "bg-green-50" : "",
       ].join(" ")}
     >
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-bold text-ink text-[15px] flex items-center gap-2">
-            {app.displayName}
-            {isDone && (
-              <span
-                className="text-green-700 text-[18px]"
-                aria-label="已发送到 CC Switch"
-              >
-                ✓
-              </span>
-            )}
-          </h3>
-          <p className="text-[12px] text-ink-3 mt-0.5">{app.description}</p>
-        </div>
+      <div className="flex-1 min-w-0 flex items-baseline gap-2">
+        <h3 className="font-bold text-ink text-[14px] truncate">{app.displayName}</h3>
+        <a
+          href={app.homepage}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`${app.displayName} 官网`}
+          title={`${app.displayName} 官网`}
+          className="text-ink-3 hover:text-accent text-[11px] font-mono no-underline"
+        >
+          ↗
+        </a>
       </div>
       <button
         type="button"
         onClick={onClick}
         disabled={isBusy || disabled}
+        aria-label={isDone ? `再发一次到 ${app.displayName}` : `导入到 ${app.displayName}`}
         className={[
-          "w-full inline-flex items-center justify-center",
-          "font-semibold text-[13px] tracking-[-0.01em]",
-          "px-4 py-2 rounded-md",
-          "border-2 border-ink",
+          "flex-shrink-0 inline-flex items-center justify-center",
+          "font-semibold text-[12.5px]",
+          "px-3 py-1.5 rounded border-2 border-ink",
           isDone
-            ? "bg-white text-ink shadow-[2px_2px_0_0_#1C1917]"
-            : "bg-accent text-white shadow-[3px_3px_0_0_#1C1917] hover:bg-accent-hover",
-          "disabled:opacity-60 disabled:cursor-not-allowed",
+            ? "bg-green-50 text-green-900"
+            : "bg-accent text-white hover:bg-accent-hover",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
           "active:translate-x-[1px] active:translate-y-[1px]",
           "transition-all duration-100",
         ].join(" ")}
       >
-        {isBusy
-          ? "正在生成密钥…"
-          : isDone
-            ? "再发一次给 CC Switch"
-            : `导入到 ${app.displayName}`}
+        {isBusy ? "…" : isDone ? "✓ 再发" : "导入 →"}
       </button>
-      {/* P1-5: every card carries a 'haven't installed X CLI?' link.
-          New users likely don't even have the Agent CLI binary yet —
-          adding a TokenBoss provider to a non-existent CLI is wasted. */}
-      <p className="mt-3 text-[11px] text-ink-3 font-mono leading-relaxed">
-        还没装 {app.displayName}?{" "}
-        <a
-          href={app.homepage}
-          target="_blank"
-          rel="noreferrer"
-          className="text-accent hover:underline"
-        >
-          去官网装 ↗
-        </a>
-      </p>
     </div>
   );
 }

@@ -50,9 +50,9 @@ describe("AgentImportGrid", () => {
     expect(triggerSpy).toHaveBeenCalledWith("ccswitch://v1/import?app=openclaw");
     expect(getUrls).toHaveBeenCalledTimes(1);
 
-    // Card now shows "再发一次给 CC Switch" (done state).
+    // Card now in done state — aria-label switches to "再发一次到 {app}".
     expect(
-      screen.getByRole("button", { name: /再发一次给 CC Switch/ }),
+      screen.getByRole("button", { name: /再发一次到 OpenClaw/ }),
     ).toBeInTheDocument();
     expect(screen.getByText(/^1\/5$/)).toBeInTheDocument();
   });
