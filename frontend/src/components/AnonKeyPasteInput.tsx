@@ -71,15 +71,47 @@ export function AnonKeyPasteInput() {
             ? "格式不对：Key 应该是 sk- 开头 + 48 位字母/数字（共 51 字符）。"
             : "Key 不会发到我们的服务器；浏览器直接把 5 张 CC Switch 卡片交给桌面 App。"}
         </p>
+        {/* Cold-start affordances for users without a key handy. Both open
+            in a new tab so the current paste flow context isn't lost. The
+            console route only shows masked key metadata — by policy we
+            don't re-reveal plaintext for previously-issued keys, so users
+            who lost their key must "快速生成" a new one. */}
+        <p className="text-[12px] text-ink-3 leading-relaxed">
+          还没有 Key？
+          <a
+            href="/register"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent font-semibold hover:underline mx-1"
+          >
+            注册免费拿（送 $10） ↗
+          </a>
+          <span className="text-ink/30 mx-1.5">·</span>
+          已有账户？
+          <a
+            href="/login"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent font-semibold hover:underline mx-1"
+          >
+            登录看我的 Keys ↗
+          </a>
+        </p>
       </div>
 
-      {isValid && (
-        // Re-mount the grid on key change so cached URLs don't go stale
-        // (the cache lives inside AgentImportGrid state).
-        <div className="pt-2 border-t-2 border-stone-200">
-          <AgentImportGrid key={trimmed} getUrls={getUrls} />
-        </div>
-      )}
+      {/* Grid is always visible so users see the 5 target CLIs up front
+          (Step 2 framing). When the key isn't a valid TokenBoss key yet,
+          we disable card clicks and show a hint above the grid. Re-mount
+          on transition between disabled/enabled so the cached-URL state
+          inside the grid resets cleanly when a fresh key arrives. */}
+      <div className="pt-2 border-t-2 border-stone-200">
+        <AgentImportGrid
+          key={isValid ? trimmed : "anon-pending"}
+          getUrls={getUrls}
+          disabled={!isValid}
+          disabledReason="先在上面粘贴你的 TokenBoss API Key，下面 5 张就能点了。"
+        />
+      </div>
     </div>
   );
 }

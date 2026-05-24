@@ -39,6 +39,15 @@ export interface AgentImportGridProps {
    * client-side build, no network.
    */
   getUrls: () => Promise<Map<CLIAppId, string>>;
+  /**
+   * When true, all cards render in a non-clickable preview state with the
+   * `disabledReason` shown as a banner above the grid. Used by
+   * AnonKeyPasteInput to always reveal "here are the 5 CLIs you'll import
+   * to" up-front, even before the user has pasted a valid key.
+   */
+  disabled?: boolean;
+  /** Human-readable reason for the disabled state (e.g., "请先粘贴 key"). */
+  disabledReason?: string;
 }
 
 /** Single card UI helper — declared inside this file so the grid stays
@@ -47,10 +56,12 @@ function AgentImportCard({
   app,
   state,
   onClick,
+  disabled = false,
 }: {
   app: CLIAppDef;
   state: CardState;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   const isDone = state === "triggered";
   const isBusy = state === "fetching";
@@ -81,7 +92,7 @@ function AgentImportCard({
       <button
         type="button"
         onClick={onClick}
-        disabled={isBusy}
+        disabled={isBusy || disabled}
         className={[
           "w-full inline-flex items-center justify-center",
           "font-semibold text-[13px] tracking-[-0.01em]",
@@ -119,7 +130,11 @@ function AgentImportCard({
   );
 }
 
-export function AgentImportGrid({ getUrls }: AgentImportGridProps) {
+export function AgentImportGrid({
+  getUrls,
+  disabled = false,
+  disabledReason,
+}: AgentImportGridProps) {
   const [urls, setUrls] = useState<Map<CLIAppId, string> | null>(null);
   const [cardStates, setCardStates] = useState<Record<CLIAppId, CardState>>(
     () =>
@@ -132,6 +147,7 @@ export function AgentImportGrid({ getUrls }: AgentImportGridProps) {
 
   const handleCardClick = useCallback(
     async (appId: CLIAppId) => {
+      if (disabled) return;
       setError(null);
 
       // First click: fetch + cache. Subsequent clicks: use cache.
@@ -164,7 +180,7 @@ export function AgentImportGrid({ getUrls }: AgentImportGridProps) {
       triggerDeepLink(url);
       setCardStates((prev) => ({ ...prev, [appId]: "triggered" }));
     },
-    [urls, getUrls],
+    [urls, getUrls, disabled],
   );
 
   const doneCount = useMemo(
@@ -202,13 +218,29 @@ export function AgentImportGrid({ getUrls }: AgentImportGridProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {disabled && disabledReason && (
+        <div
+          role="status"
+          className="mb-3 border-2 border-ink/30 rounded-md p-3 bg-stone-50 text-[12.5px] text-ink-2 leading-relaxed"
+        >
+          {disabledReason}
+        </div>
+      )}
+
+      <div
+        className={[
+          "grid grid-cols-1 sm:grid-cols-2 gap-3",
+          disabled ? "opacity-55" : "",
+        ].join(" ")}
+        aria-disabled={disabled || undefined}
+      >
         {CLI_APPS.map((app) => (
           <AgentImportCard
             key={app.id}
             app={app}
             state={cardStates[app.id]}
             onClick={() => void handleCardClick(app.id)}
+            disabled={disabled}
           />
         ))}
       </div>

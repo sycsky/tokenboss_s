@@ -5,11 +5,12 @@ import { AnonKeyPasteInput } from "../AnonKeyPasteInput";
 import * as triggerModule from "../../lib/triggerDeepLink";
 
 /**
- * AnonKeyPasteInput renders the paste input + (when key is valid) the
- * AgentImportGrid below. Tests focus on:
- * 1. Key format validation (button / grid hidden until valid)
- * 2. Once valid, the grid appears and per-card clicks fire ccswitch:// URLs
- *    built client-side from the pasted key.
+ * AnonKeyPasteInput renders the paste input + AgentImportGrid below. The
+ * grid is always visible (Step 2 framing) but disabled until a valid key
+ * is pasted. Tests focus on:
+ * 1. Disabled state: grid renders, hint banner shown, card clicks no-op.
+ * 2. Cold-start CTAs: register + login links open in new tab.
+ * 3. Once valid, hint disappears and per-card clicks fire ccswitch:// URLs.
  */
 
 beforeEach(() => {
@@ -22,25 +23,47 @@ const SHORT_KEY = "sk-too-short";
 const NO_PREFIX = "A".repeat(48);
 
 describe("AnonKeyPasteInput", () => {
-  it("does NOT render the agent grid while input is empty or invalid", async () => {
+  it("renders the agent grid in a disabled preview state when no valid key is pasted", async () => {
+    const triggerSpy = vi
+      .spyOn(triggerModule, "triggerDeepLink")
+      .mockImplementation(() => {});
     render(<AnonKeyPasteInput />);
     const user = userEvent.setup();
 
-    // No agent buttons visible until a valid key is typed.
-    expect(screen.queryByRole("button", { name: /导入到 OpenClaw/ })).toBeNull();
+    // Grid is visible up-front (Step 2 framing) so users see the 5
+    // target CLIs before they've pasted anything.
+    const openclawBtn = screen.getByRole("button", { name: /导入到 OpenClaw/ });
+    expect(openclawBtn).toBeInTheDocument();
+    expect(openclawBtn).toBeDisabled();
+    expect(screen.getByText(/先在上面粘贴你的 TokenBoss API Key/)).toBeInTheDocument();
 
+    // Clicking a disabled card must NOT fire a ccswitch:// URL.
+    await user.click(openclawBtn);
+    expect(triggerSpy).not.toHaveBeenCalled();
+
+    // Format errors keep the grid disabled.
     const input = screen.getByLabelText(/API Key/);
     await user.type(input, SHORT_KEY);
-    expect(screen.queryByRole("button", { name: /导入到 OpenClaw/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).toBeDisabled();
     expect(screen.getByText(/格式不对/)).toBeInTheDocument();
 
     await user.clear(input);
     await user.type(input, NO_PREFIX);
-    expect(screen.queryByRole("button", { name: /导入到 OpenClaw/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).toBeDisabled();
     expect(screen.getByText(/格式不对/)).toBeInTheDocument();
   });
 
-  it("once a valid sk- + 48-char key is pasted, agent grid appears and per-card clicks fire ccswitch:// URLs", async () => {
+  it("renders cold-start CTAs (register + login) opening in a new tab", () => {
+    render(<AnonKeyPasteInput />);
+    const register = screen.getByRole("link", { name: /注册免费拿/ });
+    const login = screen.getByRole("link", { name: /登录看我的 Keys/ });
+    expect(register).toHaveAttribute("href", "/register");
+    expect(register).toHaveAttribute("target", "_blank");
+    expect(login).toHaveAttribute("href", "/login");
+    expect(login).toHaveAttribute("target", "_blank");
+  });
+
+  it("once a valid sk- + 48-char key is pasted, agent grid becomes enabled and per-card clicks fire ccswitch:// URLs", async () => {
     const triggerSpy = vi
       .spyOn(triggerModule, "triggerDeepLink")
       .mockImplementation(() => {});
@@ -53,10 +76,11 @@ describe("AnonKeyPasteInput", () => {
     await user.click(input);
     await user.paste(VALID_KEY);
 
-    // Grid + 5 cards appear.
+    // Grid 5 cards transition from disabled to enabled, hint disappears.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).not.toBeDisabled();
     });
+    expect(screen.queryByText(/先在上面粘贴你的 TokenBoss API Key/)).toBeNull();
 
     // Click OpenClaw card → triggerDeepLink fires with a URL containing the pasted key.
     await user.click(screen.getByRole("button", { name: /导入到 OpenClaw/ }));
