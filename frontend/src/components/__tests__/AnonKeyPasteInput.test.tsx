@@ -55,7 +55,7 @@ describe("AnonKeyPasteInput", () => {
 
   it("renders cold-start CTAs (register + login) opening in a new tab", () => {
     render(<AnonKeyPasteInput />);
-    const register = screen.getByRole("link", { name: /注册送/ });
+    const register = screen.getByRole("link", { name: /注册免费拿试用 token/ });
     const login = screen.getByRole("link", { name: /登录看我的 Keys/ });
     expect(register).toHaveAttribute("href", "/register");
     expect(register).toHaveAttribute("target", "_blank");

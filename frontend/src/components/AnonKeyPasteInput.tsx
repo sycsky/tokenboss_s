@@ -84,7 +84,7 @@ export function AnonKeyPasteInput() {
             rel="noreferrer"
             className="text-accent font-semibold hover:underline mx-1"
           >
-            注册送 $10 ↗
+            注册免费拿试用 token ↗
           </a>
           <span className="text-ink/30 mx-1.5">·</span>
           <a
