@@ -33,7 +33,7 @@ describe("AgentImportGrid", () => {
         screen.getByRole("heading", { name: new RegExp(app.displayName) }),
       ).toBeInTheDocument();
     }
-    expect(screen.getByText(/0\/5 已导入/)).toBeInTheDocument();
+    expect(screen.getByText(/^0\/5$/)).toBeInTheDocument();
   });
 
   it("first card click: fetches URLs once, triggers that one URL, marks done", async () => {
@@ -54,7 +54,7 @@ describe("AgentImportGrid", () => {
     expect(
       screen.getByRole("button", { name: /再发一次给 CC Switch/ }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/1\/5 已导入/)).toBeInTheDocument();
+    expect(screen.getByText(/^1\/5$/)).toBeInTheDocument();
   });
 
   it("subsequent card clicks use cached URLs (getUrls NOT called again)", async () => {
@@ -72,7 +72,7 @@ describe("AgentImportGrid", () => {
     // getUrls only ever called once — second click used cache.
     expect(getUrls).toHaveBeenCalledTimes(1);
     expect(triggerSpy.mock.calls[1][0]).toBe("ccswitch://v1/import?app=codex");
-    expect(screen.getByText(/2\/5 已导入/)).toBeInTheDocument();
+    expect(screen.getByText(/^2\/5$/)).toBeInTheDocument();
   });
 
   it("shows celebration block after all 5 cards triggered", async () => {
@@ -84,7 +84,7 @@ describe("AgentImportGrid", () => {
       await user.click(screen.getByRole("button", { name: new RegExp(`导入到 ${app.displayName}`) }));
     }
 
-    await waitFor(() => expect(screen.getByText(/5\/5 已导入/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/^5\/5$/)).toBeInTheDocument());
     expect(screen.getByRole("status")).toHaveTextContent(/都发到 CC Switch/);
   });
 

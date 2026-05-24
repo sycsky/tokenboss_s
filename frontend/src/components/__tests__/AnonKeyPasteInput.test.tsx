@@ -35,7 +35,7 @@ describe("AnonKeyPasteInput", () => {
     const openclawBtn = screen.getByRole("button", { name: /导入到 OpenClaw/ });
     expect(openclawBtn).toBeInTheDocument();
     expect(openclawBtn).toBeDisabled();
-    expect(screen.getByText(/先在上面粘贴你的 TokenBoss API Key/)).toBeInTheDocument();
+    expect(screen.getByText(/粘 Key 后启用/)).toBeInTheDocument();
 
     // Clicking a disabled card must NOT fire a ccswitch:// URL.
     await user.click(openclawBtn);
@@ -45,17 +45,17 @@ describe("AnonKeyPasteInput", () => {
     const input = screen.getByLabelText(/API Key/);
     await user.type(input, SHORT_KEY);
     expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).toBeDisabled();
-    expect(screen.getByText(/格式不对/)).toBeInTheDocument();
+    expect(screen.getByText(/^格式：/)).toBeInTheDocument();
 
     await user.clear(input);
     await user.type(input, NO_PREFIX);
     expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).toBeDisabled();
-    expect(screen.getByText(/格式不对/)).toBeInTheDocument();
+    expect(screen.getByText(/^格式：/)).toBeInTheDocument();
   });
 
   it("renders cold-start CTAs (register + login) opening in a new tab", () => {
     render(<AnonKeyPasteInput />);
-    const register = screen.getByRole("link", { name: /注册免费拿/ });
+    const register = screen.getByRole("link", { name: /注册送/ });
     const login = screen.getByRole("link", { name: /登录看我的 Keys/ });
     expect(register).toHaveAttribute("href", "/register");
     expect(register).toHaveAttribute("target", "_blank");
@@ -80,7 +80,7 @@ describe("AnonKeyPasteInput", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /导入到 OpenClaw/ })).not.toBeDisabled();
     });
-    expect(screen.queryByText(/先在上面粘贴你的 TokenBoss API Key/)).toBeNull();
+    expect(screen.queryByText(/粘 Key 后启用/)).toBeNull();
 
     // Click OpenClaw card → triggerDeepLink fires with a URL containing the pasted key.
     await user.click(screen.getByRole("button", { name: /导入到 OpenClaw/ }));

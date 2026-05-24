@@ -40,14 +40,12 @@ export interface AgentImportGridProps {
    */
   getUrls: () => Promise<Map<CLIAppId, string>>;
   /**
-   * When true, all cards render in a non-clickable preview state with the
-   * `disabledReason` shown as a banner above the grid. Used by
-   * AnonKeyPasteInput to always reveal "here are the 5 CLIs you'll import
-   * to" up-front, even before the user has pasted a valid key.
+   * When true, all cards render in a non-clickable preview state. The
+   * progress badge in the header changes to "粘 Key 后启用" to explain
+   * what's blocking. Used by AnonKeyPasteInput to always reveal "here
+   * are the 5 CLIs you'll import to" up-front.
    */
   disabled?: boolean;
-  /** Human-readable reason for the disabled state (e.g., "请先粘贴 key"). */
-  disabledReason?: string;
 }
 
 /** Single card UI helper — declared inside this file so the grid stays
@@ -133,7 +131,6 @@ function AgentImportCard({
 export function AgentImportGrid({
   getUrls,
   disabled = false,
-  disabledReason,
 }: AgentImportGridProps) {
   const [urls, setUrls] = useState<Map<CLIAppId, string> | null>(null);
   const [cardStates, setCardStates] = useState<Record<CLIAppId, CardState>>(
@@ -200,32 +197,20 @@ export function AgentImportGrid({
           2
         </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline justify-between">
+          <div className="flex items-baseline justify-between gap-3">
             <h2 className="text-[18px] font-bold text-ink">
-              选你在用的 Agent CLI，逐个点导入
+              选你在用的 CLI
             </h2>
             <span
-              className="text-[13px] text-ink-3 font-mono"
+              className="text-[13px] text-ink-3 font-mono whitespace-nowrap"
               aria-live="polite"
               aria-atomic="true"
             >
-              {doneCount}/{totalCount} 已导入
+              {disabled ? "粘 Key 后启用" : `${doneCount}/${totalCount}`}
             </span>
           </div>
-          <p className="text-[12px] text-ink-3 mt-1 leading-relaxed">
-            只点你实际用的 CLI 即可 — 不需要 5 张都点。每点 1 张 CC Switch 会弹 1 张确认卡片，accept 就完成那个 CLI 的配置。
-          </p>
         </div>
       </div>
-
-      {disabled && disabledReason && (
-        <div
-          role="status"
-          className="mb-3 border-2 border-ink/30 rounded-md p-3 bg-stone-50 text-[12.5px] text-ink-2 leading-relaxed"
-        >
-          {disabledReason}
-        </div>
-      )}
 
       <div
         className={[

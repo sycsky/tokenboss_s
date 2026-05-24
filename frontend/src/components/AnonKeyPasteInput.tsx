@@ -68,26 +68,25 @@ export function AnonKeyPasteInput() {
         />
         <p id={helpId} className="text-[12px] text-ink-3 font-mono leading-relaxed">
           {showError
-            ? "格式不对：Key 应该是 sk- 开头 + 48 位字母/数字（共 51 字符）。"
-            : "Key 不会发到我们的服务器；浏览器直接把 5 张 CC Switch 卡片交给桌面 App。"}
+            ? "格式：sk- + 48 位字母/数字"
+            : "Key 不离开浏览器"}
         </p>
         {/* Cold-start affordances for users without a key handy. Both open
-            in a new tab so the current paste flow context isn't lost. The
-            console route only shows masked key metadata — by policy we
-            don't re-reveal plaintext for previously-issued keys, so users
-            who lost their key must "快速生成" a new one. */}
-        <p className="text-[12px] text-ink-3 leading-relaxed">
-          还没有 Key？
+            in a new tab so the current paste flow context isn't lost.
+            Console route only shows masked key metadata — security
+            policy never re-reveals plaintext; "没 Key" path mints a new
+            one via /register. */}
+        <p className="text-[12px] text-ink-3">
+          没 Key?
           <a
             href="/register"
             target="_blank"
             rel="noreferrer"
             className="text-accent font-semibold hover:underline mx-1"
           >
-            注册免费拿（送 $10） ↗
+            注册送 $10 ↗
           </a>
           <span className="text-ink/30 mx-1.5">·</span>
-          已有账户？
           <a
             href="/login"
             target="_blank"
@@ -109,7 +108,6 @@ export function AnonKeyPasteInput() {
           key={isValid ? trimmed : "anon-pending"}
           getUrls={getUrls}
           disabled={!isValid}
-          disabledReason="先在上面粘贴你的 TokenBoss API Key，下面 5 张就能点了。"
         />
       </div>
     </div>

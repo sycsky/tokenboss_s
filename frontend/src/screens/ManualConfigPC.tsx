@@ -46,15 +46,14 @@ export default function ManualConfigPC() {
           <MobileNoticeBanner />
         </div>
 
-        {/* Hero — sets context (what page, what tool) above the steps. */}
+        {/* Hero — H1 alone. Subtitle was dropped on /design-review pass 2:
+            it duplicated H1 ("CC Switch 一键导入") and re-stated the step
+            numbers visible right below. Hierarchy is now H1 → Step 1
+            card → Step 2, no intermediary chatter. */}
         <header className="mt-2">
-          <h1 className="text-[32px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3">
+          <h1 className="text-[32px] md:text-[44px] font-bold tracking-tight leading-[1.05]">
             一键把 TokenBoss 接进你的 Agent CLI
           </h1>
-          <p className="text-[14px] text-text-secondary leading-relaxed max-w-[640px]">
-            通过 CC Switch 桌面应用一键导入，免去手动改配置文件。
-            两步走 — Step 1 装 CC Switch · Step 2 选你的 CLI。
-          </p>
         </header>
 
         {/* Step 1 — install CC Switch desktop app */}
