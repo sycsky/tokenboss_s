@@ -31,6 +31,7 @@ export default function OnboardWelcome() {
           tag="手动 · ADVANCED"
           title="我是人类"
           en="I'M A HUMAN"
+          footnote="含 CC Switch 一键导入 · 支持 5 个 CLI"
           onClick={() => nav('/install/manual')}
         />
       </div>

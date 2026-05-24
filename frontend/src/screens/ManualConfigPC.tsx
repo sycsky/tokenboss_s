@@ -21,6 +21,7 @@
 import { AppNav, Breadcrumb } from '../components/AppNav';
 import { CCSwitchDetector } from '../components/CCSwitchDetector';
 import { KeyInjectionFlow } from '../components/KeyInjectionFlow';
+import { MobileNoticeBanner } from '../components/MobileNoticeBanner';
 import { ProtocolFamilyLinks } from '../components/ProtocolFamilyLinks';
 import { AdvancedManualRecipes } from '../components/AdvancedManualRecipes';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
@@ -38,6 +39,12 @@ export default function ManualConfigPC() {
       <AppNav />
       <main className="max-w-4xl mx-auto px-5 sm:px-9 pt-6">
         <Breadcrumb items={[{ label: '控制台', to: '/console' }, { label: '配置教程' }]} />
+
+        {/* Mobile-only notice — CC Switch is desktop-only, so phone users get
+            a "copy this URL, open on PC" affordance up top. No-op on PC. */}
+        <div className="mt-3">
+          <MobileNoticeBanner />
+        </div>
 
         {/* Hero — sets context (what page, what tool) above the steps. */}
         <header className="mt-2">

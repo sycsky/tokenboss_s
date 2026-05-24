@@ -47,9 +47,12 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
         <Link to="/primitive" className={navLink(onPrimitive)}>Primitives</Link>
       </div>
 
-      {/* Right: 套餐 + 登录/控制台 — hidden on /primitive (independent page) */}
+      {/* Right: 接入 + 套餐 + 登录/控制台 — hidden on /primitive (independent page).
+          "接入" surfaces the CC Switch one-click flow at /install/manual so a
+          curious visitor can see how it works before committing to register. */}
       {!onPrimitive ? (
         <div className="flex items-center gap-5 sm:gap-7">
+          <Link to="/install/manual" className={navLink(false)}>接入</Link>
           <a href="/#pricing" className={navLink(false)}>套餐</a>
           {isLoggedIn ? (
             <Link to="/console" className={navLink(false)}>控制台</Link>
