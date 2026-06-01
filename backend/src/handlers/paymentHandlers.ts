@@ -157,13 +157,6 @@ function shapeOrder(rec: OrderRecord) {
 
 // ---------- POST /v1/billing/orders ----------
 
-const MAX_TOPUP_AMOUNT = 99999;
-/** USD-paying channels (epusdt) credit FX-converted USD额度 to the user.
- *  ¥1 = $1 baseline still holds for RMB; USD payments effectively pay
- *  the spot CNY/USD rate and get credited at the same baseline.
- *  Hardcoded for v1; bump on noticeable FX drift. */
-const USD_TO_CREDIT_RATE = 7;
-
 function isOrderType(v: unknown): v is 'plan' | 'topup' {
   return v === 'plan' || v === 'topup';
 }
@@ -186,6 +179,15 @@ export const createOrderHandler = async (
     return jsonError(400, "invalid_request_error", "type must be plan|topup.");
   const type = rawType;
 
+  if (type === "topup") {
+    return jsonError(
+      410,
+      "service_upgrading",
+      "充值购买服务升级中，暂不支持购买。",
+      "purchase_disabled",
+    );
+  }
+
   if (!isChannel(body.channel))
     return jsonError(400, "invalid_request_error", "channel must be epusdt|xunhupay.");
   const channel = body.channel;
@@ -202,58 +204,32 @@ export const createOrderHandler = async (
   let skuLabel: string;
   let planId: PlanId | undefined;
 
-  if (type === 'plan') {
-    if (!isPlanId(body.planId))
-      return jsonError(400, "invalid_request_error", "planId must be plus|super|ultra.");
-    planId = body.planId;
-    if (PLANS[planId].soldOut) {
-      // sold-out 期间无条件 410，不区分续费意图。
-      //
-      // 续费理论上应当放行，但 webhook 的 applyPlanToUser 在绑新订阅前会
-      // invalidate 全部活跃订阅（防 Trial+Plus 同时活跃），同档续费走自助
-      // 路径 = 用户损失剩余时长。所以前端 Payment.tsx lockout 也是无条件
-      // 拦截已订阅用户，把续费导到「联系客服」让 admin 手动处理。
-      //
-      // 等以后 applyPlanToUser 改成「同档不 invalidate / 时长累加」之后再
-      // 把续费豁免分支加回来——那时也需要回退一下 getActivePaidPlanId 的
-      // 引入。当前 commit 的 backend/src/lib/subscriptions.ts 保留供届时复用。
-      return jsonError(
-        410,
-        "plan_unavailable",
-        `${PLANS[planId].displayName} 当前售罄，暂时无法下单。`,
-        "plan_sold_out",
-      );
-    }
-    skuType = `plan_${planId}` as const;
-    amount = currency === "USD"
-      ? getPlanPriceUSD(planId)
-      : getPlanPriceCNY(planId);
-    skuLabel = planId;
-  } else {
-    // type === 'topup'
-    const rawAmount = body.amount;
-    if (
-      typeof rawAmount !== 'number' ||
-      !Number.isFinite(rawAmount) ||
-      !Number.isInteger(rawAmount) ||
-      rawAmount < 1 ||
-      rawAmount > MAX_TOPUP_AMOUNT
-    ) {
-      return jsonError(
-        400,
-        "invalid_request_error",
-        `amount must be an integer between 1 and ${MAX_TOPUP_AMOUNT}.`,
-        "invalid_amount",
-      );
-    }
-    skuType = 'topup';
-    amount = rawAmount;
-    // ¥1 = $1 baseline (spec credits-economy § 4) for RMB; USD pays spot
-    // FX so $1 USDT → $7 credited. Stored independently of amount/currency
-    // so settle is decoupled from FX drift between order and webhook.
-    topupAmountUsd = currency === 'USD' ? rawAmount * USD_TO_CREDIT_RATE : rawAmount;
-    skuLabel = 'topup';
+  if (!isPlanId(body.planId))
+    return jsonError(400, "invalid_request_error", "planId must be plus|super|ultra.");
+  planId = body.planId;
+  if (PLANS[planId].soldOut) {
+    // sold-out 期间无条件 410，不区分续费意图。
+    //
+    // 续费理论上应当放行，但 webhook 的 applyPlanToUser 在绑新订阅前会
+    // invalidate 全部活跃订阅（防 Trial+Plus 同时活跃），同档续费走自助
+    // 路径 = 用户损失剩余时长。所以前端 Payment.tsx lockout 也是无条件
+    // 拦截已订阅用户，把续费导到「联系客服」让 admin 手动处理。
+    //
+    // 等以后 applyPlanToUser 改成「同档不 invalidate / 时长累加」之后再
+    // 把续费豁免分支加回来——那时也需要回退一下 getActivePaidPlanId 的
+    // 引入。当前 commit 的 backend/src/lib/subscriptions.ts 保留供届时复用。
+    return jsonError(
+      410,
+      "plan_unavailable",
+      `${PLANS[planId].displayName} 当前售罄，暂时无法下单。`,
+      "plan_sold_out",
+    );
   }
+  skuType = `plan_${planId}` as const;
+  amount = currency === "USD"
+    ? getPlanPriceUSD(planId)
+    : getPlanPriceCNY(planId);
+  skuLabel = planId;
 
   const baseUrl = resolvePublicBaseUrl(event);
   if (!baseUrl) {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { sendCodeHandler, verifyCodeHandler } from '../authHandlers.js';
+import { registerHandler, sendCodeHandler, verifyCodeHandler } from '../authHandlers.js';
 import { init, getUser, getUserIdByEmail, putUser } from '../../lib/store.js';
 import * as emailService from '../../lib/emailService.js';
 
@@ -24,6 +24,7 @@ beforeEach(() => {
   process.env.JWT_SECRET = 'test-secret';
   init();
   vi.spyOn(emailService, 'sendVerificationEmail').mockResolvedValue();
+  vi.spyOn(emailService, 'sendVerifyLinkEmail').mockResolvedValue();
 });
 
 async function getCodeForEmail(email: string): Promise<string> {
@@ -215,6 +216,80 @@ describe('POST /v1/auth/verify-code', () => {
     expect(createSpy).not.toHaveBeenCalled();
 
     // Restore env.
+    process.env.NEWAPI_BASE_URL = origBase;
+    process.env.NEWAPI_ADMIN_TOKEN = origToken;
+  });
+
+  it('password registration provisions newapi user but does NOT bind trial subscription', async () => {
+    const origBase = process.env.NEWAPI_BASE_URL;
+    const origToken = process.env.NEWAPI_ADMIN_TOKEN;
+    process.env.NEWAPI_BASE_URL = 'http://newapi.test';
+    process.env.NEWAPI_ADMIN_TOKEN = 'admin-token';
+
+    const { newapi } = await import('../../lib/newapi.js');
+    const provisionSpy = newapi.provisionUser as unknown as ReturnType<typeof vi.fn>;
+    const bindSpy = newapi.bindSubscription as unknown as ReturnType<typeof vi.fn>;
+    provisionSpy.mockClear();
+    bindSpy.mockClear();
+
+    const res = await registerHandler({
+      body: JSON.stringify({
+        email: 'register-nocredit@example.com',
+        password: 'password123',
+        displayName: 'No Credit',
+      }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body!).isNew).toBe(true);
+    expect(provisionSpy).toHaveBeenCalledTimes(1);
+    expect(provisionSpy).toHaveBeenCalledWith(expect.objectContaining({
+      group: 'default',
+      quota: 0,
+    }));
+    expect(bindSpy).not.toHaveBeenCalled();
+
+    const userId = getUserIdByEmail('register-nocredit@example.com');
+    const u = await getUser(userId!);
+    expect(u?.newapiUserId).toBe(99);
+    expect(u?.newapiPassword).toBeTruthy();
+
+    process.env.NEWAPI_BASE_URL = origBase;
+    process.env.NEWAPI_ADMIN_TOKEN = origToken;
+  });
+
+  it('provisions newapi user but does NOT bind trial subscription for first-time OTP signup', async () => {
+    // Enable the newapi path so verify-code provisions the upstream user.
+    const origBase = process.env.NEWAPI_BASE_URL;
+    const origToken = process.env.NEWAPI_ADMIN_TOKEN;
+    process.env.NEWAPI_BASE_URL = 'http://newapi.test';
+    process.env.NEWAPI_ADMIN_TOKEN = 'admin-token';
+
+    const { newapi } = await import('../../lib/newapi.js');
+    const provisionSpy = newapi.provisionUser as unknown as ReturnType<typeof vi.fn>;
+    const bindSpy = newapi.bindSubscription as unknown as ReturnType<typeof vi.fn>;
+    provisionSpy.mockClear();
+    bindSpy.mockClear();
+
+    const code = await getCodeForEmail('otp-nocredit@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'otp-nocredit@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body!).isNew).toBe(true);
+    expect(provisionSpy).toHaveBeenCalledTimes(1);
+    expect(provisionSpy).toHaveBeenCalledWith(expect.objectContaining({
+      group: 'default',
+      quota: 0,
+    }));
+    expect(bindSpy).not.toHaveBeenCalled();
+
+    const userId = getUserIdByEmail('otp-nocredit@example.com');
+    const u = await getUser(userId!);
+    expect(u?.newapiUserId).toBe(99);
+    expect(u?.newapiPassword).toBeTruthy();
+
     process.env.NEWAPI_BASE_URL = origBase;
     process.env.NEWAPI_ADMIN_TOKEN = origToken;
   });
