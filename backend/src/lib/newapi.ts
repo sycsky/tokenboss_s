@@ -837,9 +837,8 @@ export const newapi = {
     /** Initial newapi quota to seed (raw newapi units; 500,000 ≈ $1).
      *  Optional. When omitted, no quota PUT is issued — the user starts
      *  at newapi's default quota (typically 0) and the caller must set
-     *  it via a separate mechanism (e.g. `bindSubscription`). V3 register
-     *  flow relies on bind to set quota; V2 callers still pass an explicit
-     *  number when needed for direct provisioning. */
+     *  it via a separate mechanism (e.g. `bindSubscription`) or pass an
+     *  explicit 0 to force a post-create quota reset. */
     quota?: number;
     /** newapi user-group; defaults to "default". */
     group?: string;
@@ -854,9 +853,9 @@ export const newapi = {
     });
     // newapi's POST /api/user/ silently ignores the `quota` field at
     // creation time — quota can only be set via PUT. Only do the PUT when
-    // the caller explicitly asks for a quota (V2 paths). V3 register
-    // skips this and lets bindSubscription set the quota atomically with
-    // the trial subscription record.
+    // the caller explicitly asks for a quota. Stop-loss signup passes 0 so
+    // a new user is forced to no wallet balance even if the upstream default
+    // quota is later changed.
     if (input.quota !== undefined) {
       await this.updateUser({
         id: user.id,

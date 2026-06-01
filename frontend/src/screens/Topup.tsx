@@ -15,6 +15,7 @@ const MAX_AMOUNT = 99999;
  *  USDT 渠道下付 $1 → 到账 $7 等价额度（按汇率把美金折算回人民币等价，
  *  再用 ¥1 = $1 baseline 转额度）。RMB 渠道 1:1 不动。 */
 const USD_TO_CREDIT_RATE = 7;
+const TOPUP_PURCHASE_DISABLED = true;
 
 type Preset = (typeof PRESETS)[number] | 'custom';
 
@@ -49,6 +50,7 @@ export default function Topup() {
   }, [channel, preset, customAmountStr]);
 
   async function submit() {
+    if (TOPUP_PURCHASE_DISABLED) return;
     if (amount == null) {
       setError(`金额必须是 ${MIN_AMOUNT}-${MAX_AMOUNT} 之间的整数`);
       return;
@@ -84,8 +86,17 @@ export default function Topup() {
           充值额度
         </h1>
         <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
-          永不过期 · 解锁全模型 · ¥1 = $1
+          服务升级中，暂不支持购买。已有兑换码仍可使用。
         </p>
+
+        <div className={`${card} p-4 mb-6 bg-yellow-stamp/70`}>
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-yellow-stamp-ink font-bold mb-1">
+            服务升级中
+          </div>
+          <div className="text-[13.5px] text-ink leading-relaxed">
+            自助充值暂不支持购买，支付通道恢复后会重新开放。
+          </div>
+        </div>
 
         {/* Channel picker */}
         <section className="mb-6">
@@ -99,6 +110,7 @@ export default function Topup() {
               title="支付宝"
               subtitle="PC 扫码 / 手机直跳"
               tag="即时到账"
+              disabled={TOPUP_PURCHASE_DISABLED}
             />
             <ChannelOption
               active={channel === 'epusdt'}
@@ -106,6 +118,7 @@ export default function Topup() {
               title="稳定币"
               subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
+              disabled={TOPUP_PURCHASE_DISABLED}
             />
           </div>
         </section>
@@ -122,12 +135,14 @@ export default function Topup() {
                 active={preset === p}
                 onClick={() => setPreset(p)}
                 label={`${symbol}${p}`}
+                disabled={TOPUP_PURCHASE_DISABLED}
               />
             ))}
             <PresetChip
               active={preset === 'custom'}
               onClick={() => setPreset('custom')}
               label="自定义"
+              disabled={TOPUP_PURCHASE_DISABLED}
             />
           </div>
 
@@ -148,6 +163,7 @@ export default function Topup() {
                 max={MAX_AMOUNT}
                 value={customAmountStr}
                 onChange={(e) => setCustomAmountStr(e.target.value)}
+                disabled={TOPUP_PURCHASE_DISABLED}
                 aria-invalid={customAmountStr.trim() !== '' && amount == null}
                 aria-describedby={customAmountStr.trim() !== '' && amount == null ? 'topup-amount-error' : undefined}
                 className="w-full font-mono text-[18px] font-bold p-2 border-2 border-ink rounded bg-white"
@@ -191,18 +207,20 @@ export default function Topup() {
           </Link>
           <button
             onClick={submit}
-            disabled={submitting || amount == null}
+            disabled={TOPUP_PURCHASE_DISABLED || submitting || amount == null}
             className={
               'px-6 py-3 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold ' +
               'shadow-[3px_3px_0_0_#1C1917] ' +
-              (submitting || amount == null
+              (TOPUP_PURCHASE_DISABLED || submitting || amount == null
                 ? 'opacity-60 cursor-not-allowed'
                 : 'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
                   'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
                   'transition-all')
             }
           >
-            {submitting
+            {TOPUP_PURCHASE_DISABLED
+              ? '暂不支持购买'
+              : submitting
               ? '生成订单中…'
               : preset === 'custom' && customAmountStr.trim() === ''
               ? '请输入金额'
@@ -213,8 +231,8 @@ export default function Topup() {
         </div>
 
         <div className="mt-10 font-mono text-[11.5px] text-ink-3 leading-relaxed">
-          · 充值后立即到账，永不过期，全模型可用<br />
-          · 充值不支持退款<br />
+          · 自助购买暂时关闭<br />
+          · 兑换码仍可继续使用<br />
           ·{' '}
           <button
             type="button"
@@ -235,10 +253,12 @@ function PresetChip({
   active,
   onClick,
   label,
+  disabled = false,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  disabled?: boolean;
 }) {
   const base =
     'block w-full text-center px-4 py-3 border-2 border-ink rounded-md font-mono text-[14px] font-bold transition-all';
@@ -246,7 +266,12 @@ function PresetChip({
     ? 'bg-ink text-bg shadow-[3px_3px_0_0_#1C1917]'
     : 'bg-white text-ink shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#1C1917]';
   return (
-    <button onClick={onClick} className={`${base} ${onState}`} type="button">
+    <button
+      onClick={onClick}
+      className={`${base} ${onState} ${disabled ? 'opacity-60 cursor-not-allowed hover:translate-x-0 hover:translate-y-0' : ''}`}
+      type="button"
+      disabled={disabled}
+    >
       {label}
     </button>
   );
