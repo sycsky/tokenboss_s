@@ -155,30 +155,28 @@ describe('createOrderHandler — type discriminator', () => {
 });
 
 describe('createOrderHandler — type=topup validation', () => {
-  it('410 service_upgrading before amount validation when amount missing', async () => {
+  it('400 invalid_amount when amount missing', async () => {
     const res = await run({ type: 'topup', channel: 'xunhupay' });
-    expect(res.statusCode).toBe(410);
+    expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body as string);
-    expect(body.error.type).toBe('service_upgrading');
-    expect(body.error.code).toBe('purchase_disabled');
-    expect(body.error.message).toContain('暂不支持购买');
+    expect(body.error.code).toBe('invalid_amount');
   });
 
-  it('410 service_upgrading before amount validation when amount is invalid', async () => {
+  it('400 invalid_amount when amount is not an integer', async () => {
     for (const amount of [1.5, 0, -10, 100000, NaN, '10']) {
       const res = await run({ type: 'topup', amount, channel: 'xunhupay' });
-      expect(res.statusCode).toBe(410);
+      expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body as string);
-      expect(body.error.code).toBe('purchase_disabled');
+      expect(body.error.code).toBe('invalid_amount');
     }
   });
 
-  it('410 service_upgrading for valid topup amount before gateway lookup', async () => {
+  it('accepts integer amount in valid range and proceeds past validation', async () => {
+    // No payment gateway configured in test env → expect 503 on the
+    // channel client step, NOT 400/410. This proves validation passed.
     const res = await run({ type: 'topup', amount: 100, channel: 'xunhupay' });
-    expect(res.statusCode).toBe(410);
-    const body = JSON.parse(res.body as string);
-    expect(body.error.type).toBe('service_upgrading');
-    expect(body.error.code).toBe('purchase_disabled');
+    expect(res.statusCode).not.toBe(400);
+    expect(res.statusCode).not.toBe(410);
   });
 
   it('ignores client-supplied currency (server derives from channel)', async () => {
@@ -188,7 +186,7 @@ describe('createOrderHandler — type=topup validation', () => {
       channel: 'xunhupay',
       currency: 'USD', // adversarial — should be silently ignored
     });
-    expect(res.statusCode).toBe(410);
+    expect(res.statusCode).not.toBe(400);
   });
 
   it('ignores planId on topup orders', async () => {
@@ -198,8 +196,6 @@ describe('createOrderHandler — type=topup validation', () => {
       channel: 'xunhupay',
       planId: 'ultra', // adversarial — should not trigger sold-out gate
     });
-    const body = JSON.parse(res.body as string);
-    expect(res.statusCode).toBe(410);
-    expect(body.error.code).toBe('purchase_disabled');
+    expect(res.statusCode).not.toBe(410);
   });
 });

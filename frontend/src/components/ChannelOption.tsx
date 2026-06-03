@@ -11,10 +11,9 @@ interface Props {
   title: string;
   subtitle: string;
   tag: string;
-  disabled?: boolean;
 }
 
-export function ChannelOption({ active, onClick, title, subtitle, tag, disabled = false }: Props) {
+export function ChannelOption({ active, onClick, title, subtitle, tag }: Props) {
   const base =
     'block w-full text-left p-5 border-2 border-ink rounded-md transition-all';
   const onState = active
@@ -22,12 +21,7 @@ export function ChannelOption({ active, onClick, title, subtitle, tag, disabled 
     : 'bg-white text-ink shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_0_#1C1917]';
 
   return (
-    <button
-      onClick={onClick}
-      className={`${base} ${onState} ${disabled ? 'opacity-60 cursor-not-allowed hover:translate-x-0 hover:translate-y-0' : ''}`}
-      type="button"
-      disabled={disabled}
-    >
+    <button onClick={onClick} className={`${base} ${onState}`} type="button">
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <span className="text-[16px] font-bold">{title}</span>
         <span
