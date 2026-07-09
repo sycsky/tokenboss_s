@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AppNav } from '../components/AppNav';
-import { ChannelOption } from '../components/ChannelOption';
 import { RedeemCodeModal } from '../components/RedeemCodeModal';
 import { dispatchCheckout } from '../lib/checkoutFlow';
 import { api, type BillingChannel } from '../lib/api';
@@ -13,23 +12,39 @@ const MIN_AMOUNT = 1;
 const MAX_AMOUNT = 99999;
 /** Must match backend USD_TO_CREDIT_RATE in paymentHandlers.ts.
  *  USDT 渠道下付 $1 → 到账 $7 等价额度（按汇率把美金折算回人民币等价，
- *  再用 ¥1 = $1 baseline 转额度）。RMB 渠道 1:1 不动。 */
+ *  再用 ¥1 = $1 baseline 转额度）。 */
 const USD_TO_CREDIT_RATE = 7;
+
+/** 复制给 Agent 的充值指令。Agent 侧由支付宝 AI 付 skill 走 402 协议，
+ *  这里只需要一句自然语言。 */
+const AGENT_TOPUP_PROMPT = '帮我给 TokenBoss 充值 50 元（支付宝 AI 付，按 skill.md 的 402 充值流程）';
 
 type Preset = (typeof PRESETS)[number] | 'custom';
 
 export default function Topup() {
   const navigate = useNavigate();
 
-  const [channel, setChannel] = useState<BillingChannel>('xunhupay');
+  // gh-6: xunhupay 已下线，网页表单只剩稳定币；支付宝路径整体迁到
+  // Agent 内充值（A2M 402 协议），见上方引导卡。
+  const channel: BillingChannel = 'epusdt';
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
   const [customAmountStr, setCustomAmountStr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Channel drives currency: xunhupay → ¥, epusdt → $.
-  const symbol = channel === 'epusdt' ? '$' : '¥';
+  const symbol = '$';
+
+  async function copyAgentPrompt() {
+    try {
+      await navigator.clipboard.writeText(AGENT_TOPUP_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard 不可用（非 https 等）— 用户仍可手动选中复制 */
+    }
+  }
 
   // Resolve the integer amount. Returns null when invalid.
   function resolveAmount(): number | null {
@@ -46,7 +61,7 @@ export default function Topup() {
   // Clear stale submit error as soon as the user edits any input.
   useEffect(() => {
     setError(null);
-  }, [channel, preset, customAmountStr]);
+  }, [preset, customAmountStr]);
 
   async function submit() {
     if (amount == null) {
@@ -87,34 +102,48 @@ export default function Topup() {
           永不过期 · 解锁全模型 · ¥1 = $1
         </p>
 
-        {/* Channel picker */}
-        <section className="mb-6">
+        {/* In-agent topup (Alipay A2M) — the recommended path */}
+        <section className="mb-8">
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
-            支付方式
+            在你的 Agent 里充值 · 推荐
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <ChannelOption
-              active={channel === 'xunhupay'}
-              onClick={() => setChannel('xunhupay')}
-              title="支付宝"
-              subtitle="PC 扫码 / 手机直跳"
-              tag="即时到账"
-            />
-            <ChannelOption
-              active={channel === 'epusdt'}
-              onClick={() => setChannel('epusdt')}
-              title="稳定币"
-              subtitle="USDT / USDC · 多链可选"
-              tag="海外友好"
-            />
+          <div className={`${card} p-5`}>
+            <p className="text-[13.5px] text-text-secondary leading-relaxed mb-4">
+              对你的 Agent 说一句话，它会走支付宝 AI 付完成充值——你只需要在
+              支付宝里确认付款，全程不离开对话。
+            </p>
+            <div className="flex items-stretch gap-2">
+              <code className="flex-1 font-mono text-[12.5px] leading-relaxed p-3 bg-bg border-2 border-ink rounded-md break-all select-all">
+                {AGENT_TOPUP_PROMPT}
+              </code>
+              <button
+                type="button"
+                onClick={copyAgentPrompt}
+                className={
+                  'px-4 border-2 border-ink rounded-md font-mono text-[12px] font-bold whitespace-nowrap ' +
+                  'shadow-[3px_3px_0_0_#1C1917] hover:translate-x-[1px] hover:translate-y-[1px] ' +
+                  'hover:shadow-[1px_1px_0_0_#1C1917] transition-all ' +
+                  (copied ? 'bg-ink text-bg' : 'bg-white text-ink')
+                }
+              >
+                {copied ? '已复制 ✓' : '复制'}
+              </button>
+            </div>
+            <div className="mt-3 font-mono text-[11px] text-ink-3 leading-relaxed">
+              · 面额 ¥10 / ¥50，单笔上限 ¥50，¥1 = $1 即时到账<br />
+              · 需要你的 Agent 已接入支付宝 AI 付（OpenClaw 等已支持）
+            </div>
           </div>
         </section>
 
-        {/* Amount picker */}
+        {/* Web fallback: stablecoin */}
         <section className="mb-6">
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
-            充值金额
+            网页充值 · 稳定币 USDT / USDC
           </div>
+          <p className="text-[12.5px] text-text-secondary leading-relaxed mb-3">
+            适合大额充值（无单笔上限）或 Agent 暂未接入支付宝 AI 付的情况。
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
             {PRESETS.map((p) => (
               <PresetChip
@@ -166,10 +195,8 @@ export default function Topup() {
 
           {amount != null && (
             <div className="font-mono text-[12px] text-text-secondary">
-              → 到账 ${channel === 'epusdt' ? amount * USD_TO_CREDIT_RATE : amount} 美金
-              {channel === 'epusdt' && (
-                <span className="text-ink-3"> · $1 USDT ≈ $7 额度（按汇率折算）</span>
-              )}
+              → 到账 ${amount * USD_TO_CREDIT_RATE} 美金
+              <span className="text-ink-3"> · $1 USDT ≈ $7 额度（按汇率折算）</span>
             </div>
           )}
         </section>

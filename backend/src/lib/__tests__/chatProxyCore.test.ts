@@ -171,9 +171,17 @@ describe('maybeInterceptUpstreamError', () => {
     expect(writer.ended).toBe(true);
     const parsed = JSON.parse(writer.body);
     expect(parsed.error.type).toBe('insufficient_balance');
-    expect(parsed.error.message).toBe(
-      '余额已用完，充值后继续 → https://tokenboss.co/console',
-    );
+    // gh-6: the message doubles as an agent instruction sheet — it must
+    // name the A2M endpoint, the auth to carry, and the web fallback.
+    expect(parsed.error.message).toContain('余额已用完');
+    expect(parsed.error.message).toContain('/v1/billing/a2m/topup');
+    expect(parsed.error.message).toContain('Payment-Proof');
+    expect(parsed.error.message).toContain('https://tokenboss.co/console');
+    // Machine-readable twin of the message.
+    expect(parsed.error.topup.a2m.protocol).toBe('http-402-alipay-a2m');
+    expect(parsed.error.topup.a2m.endpoint).toMatch(/\/v1\/billing\/a2m\/topup$/);
+    expect(parsed.error.topup.a2m.amounts_cny.length).toBeGreaterThan(0);
+    expect(parsed.error.topup.web).toBe('https://tokenboss.co/console');
   });
 
   it('rewrites English "insufficient balance" 402 to friendly message too', async () => {
