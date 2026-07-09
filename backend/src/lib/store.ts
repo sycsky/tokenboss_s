@@ -285,6 +285,11 @@ export function init(): void {
   try { db.exec(`ALTER TABLE orders ADD COLUMN skuType TEXT`); } catch {}
   try { db.exec(`ALTER TABLE orders ADD COLUMN topupAmountUsd REAL`); } catch {}
   try { db.exec(`ALTER TABLE orders ADD COLUMN settleStatus TEXT`); } catch {}
+  // alipay_a2m (按量付费 402 协议) columns — see lib/payment/alipayA2m.ts
+  try { db.exec(`ALTER TABLE orders ADD COLUMN resourceId TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payBefore TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN fulfillStatus TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN redemptionCode TEXT`); } catch {}
 
   // Rename legacy plan ids → new tier names FIRST, so the backfill below
   // only ever sees canonical planId values ('plus'|'super'|'ultra').
@@ -423,6 +428,11 @@ function rowToOrder(row: Record<string, unknown>): OrderRecord {
     receiveAddress: (row.receiveAddress as string) ?? undefined,
     createdAt: row.createdAt as string,
     paidAt: (row.paidAt as string) ?? undefined,
+    resourceId: (row.resourceId as string) ?? undefined,
+    payBefore: (row.payBefore as string) ?? undefined,
+    fulfillStatus:
+      (row.fulfillStatus as OrderRecord['fulfillStatus']) ?? undefined,
+    redemptionCode: (row.redemptionCode as string) ?? undefined,
   };
 }
 
@@ -752,12 +762,12 @@ export async function createOrder(rec: OrderRecord): Promise<void> {
       (orderId, userId, planId, skuType, topupAmountUsd, settleStatus,
        channel, amountCNY, currency, amountActual, status,
        upstreamTradeId, upstreamPaymentUrl, blockTxId, receiveAddress,
-       createdAt, paidAt)
+       createdAt, paidAt, resourceId, payBefore, fulfillStatus)
     VALUES
       (@orderId, @userId, @planId, @skuType, @topupAmountUsd, @settleStatus,
        @channel, @amount, @currency, @amountActual, @status,
        @upstreamTradeId, @upstreamPaymentUrl, @blockTxId, @receiveAddress,
-       @createdAt, @paidAt)
+       @createdAt, @paidAt, @resourceId, @payBefore, @fulfillStatus)
   `).run({
     orderId: rec.orderId,
     userId: rec.userId,
@@ -776,6 +786,9 @@ export async function createOrder(rec: OrderRecord): Promise<void> {
     receiveAddress: rec.receiveAddress ?? null,
     createdAt: rec.createdAt,
     paidAt: rec.paidAt ?? null,
+    resourceId: rec.resourceId ?? null,
+    payBefore: rec.payBefore ?? null,
+    fulfillStatus: rec.fulfillStatus ?? null,
   });
 }
 
@@ -862,6 +875,89 @@ export async function markOrderSettleStatus(args: {
     UPDATE orders SET settleStatus = @settleStatus WHERE orderId = @orderId
   `).run({ orderId: args.orderId, settleStatus: args.settleStatus });
   return result.changes > 0;
+}
+
+/**
+ * Atomically claim the settlement (credit) step for an order. The A2M
+ * handler awaits network calls between reading the order and crediting,
+ * so two concurrent Payment-Proof retries could both see an unsettled
+ * order and double-credit — this conditional UPDATE is the guard: only
+ * the request that flips settleStatus to 'crediting' runs the credit
+ * block. 'failed' rows are re-claimable (retry semantics); a row stuck
+ * in 'crediting' (process died mid-credit) is an ops case — recover via
+ * scripts/grant-topup.ts, don't auto-reclaim and risk the double-credit
+ * this guard exists to prevent.
+ */
+export async function claimOrderSettlement(orderId: string): Promise<boolean> {
+  const result = db.prepare(`
+    UPDATE orders SET settleStatus = 'crediting'
+     WHERE orderId = ? AND status = 'paid'
+       AND (settleStatus IS NULL OR settleStatus = 'failed')
+  `).run(orderId);
+  return result.changes > 0;
+}
+
+/** Topup orders: persist the minted redemption code BEFORE redeeming so
+ *  retries reuse it instead of minting a second credit. */
+export async function setOrderRedemptionCode(args: {
+  orderId: string;
+  redemptionCode: string;
+}): Promise<void> {
+  db.prepare(`
+    UPDATE orders SET redemptionCode = @redemptionCode WHERE orderId = @orderId
+  `).run(args);
+}
+
+/** alipay_a2m sandbox fallback: newest not-yet-fulfilled a2m order for a
+ *  user, used only when the sandbox verify response omits out_trade_no on
+ *  a first-time proof (production strict mode rejects that case instead). */
+export async function getLatestUnfulfilledA2mOrder(
+  userId: string,
+): Promise<OrderRecord | null> {
+  const row = db
+    .prepare(`
+      SELECT * FROM orders
+       WHERE userId = ? AND channel = 'alipay_a2m'
+         AND (fulfillStatus IS NULL OR fulfillStatus != 'FULFILLED')
+       ORDER BY createdAt DESC LIMIT 1
+    `)
+    .get(userId) as Record<string, unknown> | undefined;
+  return row ? rowToOrder(row) : null;
+}
+
+/** alipay_a2m: flip the fulfillment.confirm receipt state. Setting
+ *  PENDING_CONFIRM before the confirm call and FULFILLED only after
+ *  alipay acks keeps a failed confirm retryable with the same
+ *  Payment-Proof. Idempotent. */
+export async function markOrderFulfillStatus(args: {
+  orderId: string;
+  fulfillStatus: 'PENDING_CONFIRM' | 'FULFILLED';
+}): Promise<boolean> {
+  const result = db.prepare(`
+    UPDATE orders SET fulfillStatus = @fulfillStatus WHERE orderId = @orderId
+  `).run(args);
+  return result.changes > 0;
+}
+
+/** alipay_a2m: stamp the alipay trade_no once the first payment.verify
+ *  succeeds, so retries can still find the order when the sandbox verify
+ *  response omits out_trade_no (observed as empty string in联调). */
+export async function setOrderUpstreamTradeId(args: {
+  orderId: string;
+  upstreamTradeId: string;
+}): Promise<void> {
+  db.prepare(`
+    UPDATE orders SET upstreamTradeId = @upstreamTradeId WHERE orderId = @orderId
+  `).run(args);
+}
+
+export async function getOrderByUpstreamTradeId(
+  upstreamTradeId: string,
+): Promise<OrderRecord | null> {
+  const row = db
+    .prepare(`SELECT * FROM orders WHERE upstreamTradeId = ? LIMIT 1`)
+    .get(upstreamTradeId) as Record<string, unknown> | undefined;
+  return row ? rowToOrder(row) : null;
 }
 
 // ---------- Public API — Usage Attribution ----------

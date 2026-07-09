@@ -26,6 +26,7 @@ import {
   markOrderPaidIfPending,
   markOrderStatus,
   markOrderSettleStatus,
+  setOrderRedemptionCode,
 } from "../lib/store.js";
 import { getNewapiPlanId, skuTypeToPlanId } from "../lib/plans.js";
 import { newapi, NewapiError } from "../lib/newapi.js";
@@ -319,10 +320,10 @@ async function applyPlanToUser(
  * grep by orderId. v1 is manual-recovery; v1.1 may add an auto-retry
  * cron.
  */
-async function applyTopupToUser(
+export async function applyTopupToUser(
   order: OrderRecord,
   channel: string,
-): Promise<void> {
+): Promise<boolean> {
   const tag = `[webhook/${channel}]`;
 
   const usd = order.topupAmountUsd;
@@ -335,7 +336,7 @@ async function applyTopupToUser(
       extra: { topupAmountUsd: usd },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
-    return;
+    return false;
   }
 
   const user = await getUser(order.userId);
@@ -348,26 +349,36 @@ async function applyTopupToUser(
       extra: { hasNewapiUserId: user?.newapiUserId != null, hasNewapiPassword: !!user?.newapiPassword },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
-    return;
+    return false;
   }
 
-  let code: string;
-  try {
-    code = await newapi.createRedemption({
-      name: order.orderId,
-      quotaUsd: usd,
-    });
-  } catch (err) {
-    reportSettleFailure({
-      stage: 'topup_mint',
-      channel,
-      orderId: order.orderId,
-      userId: order.userId,
-      err,
-      extra: { topupAmountUsd: usd },
-    });
-    await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
-    return;
+  // Reuse the order's persisted code on retries — minting a fresh code
+  // per attempt double-credits when a prior redeem succeeded remotely but
+  // we died before marking 'settled'. The code is persisted BEFORE the
+  // redeem so no success can ever be untracked. If a reused code comes
+  // back "already redeemed", that prior attempt DID credit — the loud
+  // failure below is then a false negative to resolve manually, which is
+  // the safe direction (never double-credit).
+  let code = order.redemptionCode;
+  if (!code) {
+    try {
+      code = await newapi.createRedemption({
+        name: order.orderId,
+        quotaUsd: usd,
+      });
+      await setOrderRedemptionCode({ orderId: order.orderId, redemptionCode: code });
+    } catch (err) {
+      reportSettleFailure({
+        stage: 'topup_mint',
+        channel,
+        orderId: order.orderId,
+        userId: order.userId,
+        err,
+        extra: { topupAmountUsd: usd },
+      });
+      await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+      return false;
+    }
   }
 
   try {
@@ -382,6 +393,7 @@ async function applyTopupToUser(
       userId: order.userId,
       topupAmountUsd: usd,
     });
+    return true;
   } catch (err) {
     reportSettleFailure({
       stage: 'topup_redeem',
@@ -397,6 +409,7 @@ async function applyTopupToUser(
       },
     });
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+    return false;
   }
 }
 

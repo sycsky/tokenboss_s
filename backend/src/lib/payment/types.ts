@@ -10,7 +10,7 @@
  * one-shot redemption code on newapi admin and apply it to the user's quota.
  */
 
-export type PaymentChannel = "epusdt" | "xunhupay";
+export type PaymentChannel = "epusdt" | "xunhupay" | "alipay_a2m";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 
@@ -27,8 +27,17 @@ export type OrderSkuType =
 /** "我方落账到 newapi 的结果"。Plan orders use bindSubscription which is
  *  near-atomic on newapi side, so settleStatus is left undefined for them.
  *  Topup orders go through the mint+redeem flow — we mark `settled` on
- *  success so `failed` rows can be filtered for ops follow-up. */
-export type OrderSettleStatus = "settled" | "failed";
+ *  success so `failed` rows can be filtered for ops follow-up.
+ *  `crediting` is the A2M in-flight claim (see store.claimOrderSettlement):
+ *  concurrent Payment-Proof retries race on an atomic conditional UPDATE,
+ *  so only one request runs the mint+redeem block at a time. */
+export type OrderSettleStatus = "crediting" | "settled" | "failed";
+
+/** alipay_a2m orders only — fulfillment.confirm receipt state. Credit is
+ *  applied first, then PENDING_CONFIRM is set; only after alipay acks the
+ *  fulfillment.confirm call does the order flip to FULFILLED. A stuck
+ *  PENDING_CONFIRM row is retryable with the same Payment-Proof. */
+export type OrderFulfillStatus = "PENDING_CONFIRM" | "FULFILLED";
 
 // PlanId is still the source of truth in lib/plans.ts for the plan-only
 // surface (pricing, bindSubscription mapping). OrderRecord no longer
@@ -68,6 +77,18 @@ export interface OrderRecord {
   receiveAddress?: string;
   createdAt: string;
   paidAt?: string;
+  /** alipay_a2m only: resource id embedded in the 402 Payment-Needed
+   *  header — checked against payment.verify's resource_id (防串). */
+  resourceId?: string;
+  /** alipay_a2m only: pay_before deadline (ISO 8601 with tz offset). */
+  payBefore?: string;
+  /** alipay_a2m only: fulfillment.confirm receipt state. */
+  fulfillStatus?: OrderFulfillStatus;
+  /** Topup orders: the newapi redemption code minted for this order.
+   *  Persisted BEFORE redeeming so a retry after a mid-flight failure
+   *  reuses the same one-shot code instead of minting (and potentially
+   *  double-crediting) a second one. */
+  redemptionCode?: string;
 }
 
 export interface CreateOrderInput {
