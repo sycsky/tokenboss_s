@@ -190,6 +190,19 @@ export const createOrderHandler = async (
     return jsonError(400, "invalid_request_error", "channel must be epusdt|xunhupay.");
   const channel = body.channel;
 
+  // xunhupay 已下线（gh-6）：限流不可用，由 Agent 内支付宝 A2M 充值
+  // （/v1/billing/a2m/topup, 402 协议）替代。isChannel 仍接受该值，
+  // 这样能给出明确的 410 而不是笼统的 400；webhook 路由保留，用于
+  // 承接下线前 pending 订单的回调。
+  if (channel === "xunhupay") {
+    return jsonError(
+      410,
+      "channel_unavailable",
+      "支付宝网页渠道已下线。请在你的 Agent 里通过支付宝 AI 付充值（GET /v1/billing/a2m/topup，见 /skill.md），或使用稳定币（epusdt）网页充值。",
+      "xunhupay_retired",
+    );
+  }
+
   // Channel determines pricing currency:
   //   epusdt   → USD (USDT-TRC20)
   //   xunhupay → CNY (Alipay/WeChat fiat gateway, CNY only)

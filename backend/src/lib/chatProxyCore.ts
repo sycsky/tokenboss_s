@@ -19,6 +19,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Agent } from "undici";
 
 import { isMockMode } from "./upstream.js";
+import { alipayA2mFromEnv } from "./payment/alipayA2m.js";
 import { detectVirtualProfile, resolveVirtualModel } from "../router/resolve.js";
 import {
   getUserIdByKeyHash,
@@ -859,8 +860,51 @@ function writeJsonError(
 const ACCOUNT_BALANCE_EMPTY_PATTERN =
   /用户额度不足|额度不足|余额(不足|已用完|耗尽)|配额(不足|已?用完)|欠费|insufficient.*(balance|quota|funds|credit)|credit.*balance.*(low|empty)/i;
 
-const FRIENDLY_BALANCE_EMPTY_MESSAGE =
-  "余额已用完，充值后继续 → https://tokenboss.co/console";
+/**
+ * Build the insufficient-balance 402 payload. The message doubles as an
+ * agent instruction sheet: an agent that reads it knows the A2M topup
+ * endpoint, the auth to carry, and the fixed denominations, so it can
+ * drive the Alipay 402 payment flow without a human opening the console.
+ * The structured `topup` block carries the same facts machine-readably;
+ * OpenAI-style clients ignore unknown keys inside `error`.
+ */
+function buildBalanceEmptyBody(): string {
+  const apiBase = (process.env.PUBLIC_BASE_URL ?? "https://api.tokenboss.co").replace(/\/+$/, "");
+  // Payable denominations mirror the registered A2M services (服务市场
+  // one-fixed-price-per-service). Sub-¥1 tiers are ops/verification only.
+  let amounts: string[] = ["10", "50"];
+  try {
+    const tiers = alipayA2mFromEnv()?.allowedTiers();
+    if (tiers && tiers.length > 0) {
+      const payable = tiers.filter((t) => Number(t) >= 1);
+      if (payable.length > 0) amounts = payable;
+    }
+  } catch {
+    /* keep defaults — a misconfigured tier map must not break the error path */
+  }
+  const endpoint = `${apiBase}/v1/billing/a2m/topup`;
+  return JSON.stringify({
+    error: {
+      type: "insufficient_balance",
+      message:
+        `余额已用完。Agent 内充值（支付宝 AI 付 / HTTP 402）：GET ${endpoint}?amount=${amounts[0]}` +
+        `，带上本次请求同一个 API key（Authorization: Bearer sk-...），按返回的 Payment-Needed 完成支付宝支付后` +
+        `携 Payment-Proof 头重试即到账；可选面额 ¥${amounts.join(" / ¥")}（单笔上限 ¥50），详见 ${apiBase}/skill.md。` +
+        `或网页充值（USDT）→ https://tokenboss.co/console`,
+      topup: {
+        a2m: {
+          protocol: "http-402-alipay-a2m",
+          method: "GET",
+          endpoint,
+          auth: "Authorization: Bearer <your TokenBoss API key>",
+          amounts_cny: amounts,
+          docs: `${apiBase}/skill.md`,
+        },
+        web: "https://tokenboss.co/console",
+      },
+    },
+  });
+}
 
 /**
  * Inspect a 4xx upstream response and either rewrite it to a friendly
@@ -890,14 +934,7 @@ export async function maybeInterceptUpstreamError(
   }
   if (ACCOUNT_BALANCE_EMPTY_PATTERN.test(bodyText)) {
     writer.writeHead(402, { "content-type": "application/json" });
-    writer.write(
-      JSON.stringify({
-        error: {
-          type: "insufficient_balance",
-          message: FRIENDLY_BALANCE_EMPTY_MESSAGE,
-        },
-      }),
-    );
+    writer.write(buildBalanceEmptyBody());
     writer.end();
     return true;
   }

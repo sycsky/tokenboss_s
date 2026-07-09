@@ -43,9 +43,25 @@ async function run(body: Record<string, unknown>) {
   return (await createOrderHandler(makePostEvent(body))) as APIGatewayProxyStructuredResultV2;
 }
 
+describe('createOrderHandler — xunhupay 渠道下线 (gh-6)', () => {
+  it('rejects new xunhupay topup orders with 410 xunhupay_retired', async () => {
+    const res = await run({ type: 'topup', amount: 100, channel: 'xunhupay' });
+    expect(res.statusCode).toBe(410);
+    const body = JSON.parse(res.body as string);
+    expect(body.error.code).toBe('xunhupay_retired');
+    expect(body.error.message).toContain('/v1/billing/a2m/topup');
+  });
+
+  it('channel gate fires before plan logic — sold-out plans still get xunhupay_retired', async () => {
+    const res = await run({ planId: 'ultra', channel: 'xunhupay' });
+    expect(res.statusCode).toBe(410);
+    expect(JSON.parse(res.body as string).error.code).toBe('xunhupay_retired');
+  });
+});
+
 describe('createOrderHandler — sold-out gate', () => {
   it('returns 410 plan_unavailable when the requested plan is sold out (Ultra)', async () => {
-    const res = await run({ planId: 'ultra', channel: 'xunhupay' });
+    const res = await run({ planId: 'ultra', channel: 'epusdt' });
     expect(res.statusCode).toBe(410);
     const body = JSON.parse(res.body as string);
     expect(body.error.type).toBe('plan_unavailable');
@@ -53,17 +69,16 @@ describe('createOrderHandler — sold-out gate', () => {
     expect(body.error.message).toContain('Ultra');
   });
 
-  it('410 sold-out fires regardless of channel selection', async () => {
+  it('410 sold-out fires on the remaining web channel (epusdt)', async () => {
     const epusdt = await run({ planId: 'ultra', channel: 'epusdt' });
     expect(epusdt.statusCode).toBe(410);
-    const xunhupay = await run({ planId: 'ultra', channel: 'xunhupay' });
-    expect(xunhupay.statusCode).toBe(410);
+    expect(JSON.parse(epusdt.body as string).error.code).toBe('plan_sold_out');
   });
 
   it('410 sold-out fires for Plus and Super too (membership-paused)', async () => {
     // 自 pause-membership-tiers 改造起，三档都 soldOut=true。任何无该档
     // 活跃订阅的用户下单都被 410 拦下，文案带对应 plan 的 displayName。
-    const plus = await run({ planId: 'plus', channel: 'xunhupay' });
+    const plus = await run({ planId: 'plus', channel: 'epusdt' });
     expect(plus.statusCode).toBe(410);
     expect(JSON.parse(plus.body as string).error.code).toBe('plan_sold_out');
 
@@ -73,7 +88,7 @@ describe('createOrderHandler — sold-out gate', () => {
   });
 
   it('still validates planId / channel before checking sold-out', async () => {
-    const badPlan = await run({ planId: 'fake', channel: 'xunhupay' });
+    const badPlan = await run({ planId: 'fake', channel: 'epusdt' });
     expect(badPlan.statusCode).toBe(400);
     const badChannel = await run({ planId: 'ultra', channel: 'paypal' });
     expect(badChannel.statusCode).toBe(400);
@@ -110,7 +125,7 @@ describe('createOrderHandler — sold-out 全员拦截（含同档持有者）',
   it('已持有 Ultra 的用户提交 Ultra 下单仍 410（无续费豁免）', async () => {
     const res = await runAs({ token: sameUserToken }, {
       planId: 'ultra',
-      channel: 'xunhupay',
+      channel: 'epusdt',
     });
     expect(res.statusCode).toBe(410);
     expect(JSON.parse(res.body as string).error.code).toBe('plan_sold_out');
@@ -127,13 +142,13 @@ describe('createOrderHandler — sold-out 全员拦截（含同档持有者）',
     const plusToken = signSession(plusUserId);
     const res = await runAs({ token: plusToken }, {
       planId: 'ultra',
-      channel: 'xunhupay',
+      channel: 'epusdt',
     });
     expect(res.statusCode).toBe(410);
   });
 
   it('无订阅用户买任意 sold-out 档都 410', async () => {
-    const res = await run({ planId: 'ultra', channel: 'xunhupay' });
+    const res = await run({ planId: 'ultra', channel: 'epusdt' });
     expect(res.statusCode).toBe(410);
     const body = JSON.parse(res.body as string);
     expect(body.error.code).toBe('plan_sold_out');
@@ -144,19 +159,19 @@ describe('createOrderHandler — type discriminator', () => {
   it('defaults to type="plan" when omitted (back-compat)', async () => {
     // Plus is not sold out → 410 ruled out. Without payment gateway env it
     // falls through to 503 on the channel client. The point: not 400.
-    const res = await run({ planId: 'plus', channel: 'xunhupay' });
+    const res = await run({ planId: 'plus', channel: 'epusdt' });
     expect(res.statusCode).not.toBe(400);
   });
 
   it('rejects unknown type value', async () => {
-    const res = await run({ type: 'subscription', planId: 'plus', channel: 'xunhupay' });
+    const res = await run({ type: 'subscription', planId: 'plus', channel: 'epusdt' });
     expect(res.statusCode).toBe(400);
   });
 });
 
 describe('createOrderHandler — type=topup validation', () => {
   it('400 invalid_amount when amount missing', async () => {
-    const res = await run({ type: 'topup', channel: 'xunhupay' });
+    const res = await run({ type: 'topup', channel: 'epusdt' });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body as string);
     expect(body.error.code).toBe('invalid_amount');
@@ -164,7 +179,7 @@ describe('createOrderHandler — type=topup validation', () => {
 
   it('400 invalid_amount when amount is not an integer', async () => {
     for (const amount of [1.5, 0, -10, 100000, NaN, '10']) {
-      const res = await run({ type: 'topup', amount, channel: 'xunhupay' });
+      const res = await run({ type: 'topup', amount, channel: 'epusdt' });
       expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body as string);
       expect(body.error.code).toBe('invalid_amount');
@@ -174,7 +189,7 @@ describe('createOrderHandler — type=topup validation', () => {
   it('accepts integer amount in valid range and proceeds past validation', async () => {
     // No payment gateway configured in test env → expect 503 on the
     // channel client step, NOT 400/410. This proves validation passed.
-    const res = await run({ type: 'topup', amount: 100, channel: 'xunhupay' });
+    const res = await run({ type: 'topup', amount: 100, channel: 'epusdt' });
     expect(res.statusCode).not.toBe(400);
     expect(res.statusCode).not.toBe(410);
   });
@@ -183,7 +198,7 @@ describe('createOrderHandler — type=topup validation', () => {
     const res = await run({
       type: 'topup',
       amount: 100,
-      channel: 'xunhupay',
+      channel: 'epusdt',
       currency: 'USD', // adversarial — should be silently ignored
     });
     expect(res.statusCode).not.toBe(400);
@@ -193,7 +208,7 @@ describe('createOrderHandler — type=topup validation', () => {
     const res = await run({
       type: 'topup',
       amount: 100,
-      channel: 'xunhupay',
+      channel: 'epusdt',
       planId: 'ultra', // adversarial — should not trigger sold-out gate
     });
     expect(res.statusCode).not.toBe(410);

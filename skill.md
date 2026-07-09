@@ -443,6 +443,58 @@ OK
 
 ---
 
+# Topping up balance (充值)
+
+When any chat request returns `402` with `"type": "insufficient_balance"`, the
+account is out of credits. Two ways to top up; the in-agent path is preferred —
+the user never has to leave the conversation.
+
+## In-agent topup via Alipay (HTTP 402 protocol, preferred)
+
+TokenBoss speaks the Alipay A2M agentic-payment protocol (支付宝 AI 付). The
+paying side is handled by Alipay's agent payment skill — if your agent has it
+installed, the whole flow is: request → 402 → user pays in Alipay → retry.
+
+**Step 1 — request a topup** (same API key you use for chat):
+
+```bash
+curl -s -D - https://api.tokenboss.co/v1/billing/a2m/topup?amount=50 \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY"
+```
+
+Allowed amounts are fixed denominations in CNY: `10` or `50` (max ¥50 per
+payment — for larger topups, repeat the flow). ¥1 = $1 credit.
+
+The response is `HTTP 402 Payment Required` with a `Payment-Needed` header
+(base64url JSON bill, RSA2-signed by TokenBoss).
+
+**Step 2 — pay.** Hand the `Payment-Needed` value to the Alipay agent payment
+skill. It produces an Alipay cashier push/link; the human confirms the payment
+in their Alipay app (fingerprint/PIN, ~10 seconds).
+
+**Step 3 — retry with proof.** The Alipay skill returns a `Payment-Proof`
+value. Retry the SAME URL with it:
+
+```bash
+curl -s https://api.tokenboss.co/v1/billing/a2m/topup?amount=50 \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  -H "Payment-Proof: <value from the Alipay skill>"
+```
+
+`200` with `"fulfillment_confirmed": true` means the balance is credited
+immediately. The same `Payment-Proof` is safe to retry on `409`/`5xx` — the
+order settles exactly once, never double-charges.
+
+Check the new balance with `GET /v1/buckets`.
+
+## Web topup (USDT, fallback)
+
+If the agent has no Alipay payment skill, or the user wants a single large
+topup (> ¥50), send them to https://tokenboss.co/billing/topup — stablecoin
+(USDT/USDC) checkout, credited on confirmation.
+
+---
+
 # Troubleshooting
 
 ## `401 Unauthorized` / `无效的令牌`

@@ -30,8 +30,9 @@ export default function Payment() {
   const planId = asPlanId(params.get('plan'));
   const navigate = useNavigate();
 
-  // Channel default: 支付宝 (xunhupay). Most users in CN, fewer steps.
-  const [channel, setChannel] = useState<BillingChannel>('xunhupay');
+  // gh-6: xunhupay 已下线（后端对新订单返回 410），套餐购买网页渠道
+  // 只剩稳定币。setChannel 保留 — 未来渠道恢复多选时不用改调用点。
+  const [channel, setChannel] = useState<BillingChannel>('epusdt');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -239,18 +240,11 @@ export default function Payment() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <ChannelOption
-              active={channel === 'xunhupay'}
-              onClick={() => setChannel('xunhupay')}
-              title="支付宝"
-              subtitle="PC 扫码 / 手机直跳"
-              tag="即时到账"
-            />
-            <ChannelOption
               active={channel === 'epusdt'}
               onClick={() => setChannel('epusdt')}
               title="稳定币"
               subtitle="USDT / USDC · 多链可选"
-              tag="海外友好"
+              tag="即时到账"
             />
           </div>
         </section>
