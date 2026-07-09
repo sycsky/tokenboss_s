@@ -85,6 +85,7 @@ import {
   listOrdersHandler,
 } from "./handlers/paymentHandlers.js";
 import { epusdtWebhookHandler, xunhupayWebhookHandler } from "./handlers/paymentWebhook.js";
+import { a2mTopupHandler } from "./handlers/a2mHandlers.js";
 import { redeemHandler } from "./handlers/redeemHandler.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { catalogJsonHandler } from "./handlers/catalogJson.js";
@@ -169,6 +170,9 @@ const routes: Route[] = [
   { method: "POST", path: "/v1/billing/redeem", handler: redeemHandler },
   { method: "POST", path: "/v1/billing/webhook/epusdt", handler: epusdtWebhookHandler },
   { method: "POST", path: "/v1/billing/webhook/xunhupay", handler: xunhupayWebhookHandler },
+  // Alipay A2M 按量付费 — 402 protocol, agent-facing (API-key auth)
+  { method: "GET", path: "/v1/billing/a2m/topup", handler: a2mTopupHandler },
+  { method: "POST", path: "/v1/billing/a2m/topup", handler: a2mTopupHandler },
   { method: "POST", path: "/v1/admin/login", handler: adminLoginHandler },
   { method: "GET", path: "/v1/admin/users", handler: adminListUsersHandler },
   { method: "GET", path: "/v1/admin/users/{userId}", handler: adminGetUserHandler },
