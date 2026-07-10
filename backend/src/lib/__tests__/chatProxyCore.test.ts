@@ -194,7 +194,7 @@ describe('maybeInterceptUpstreamError', () => {
       await maybeInterceptUpstreamError(upstream, writer);
       const parsed = JSON.parse(writer.body);
       expect(parsed.error.message).toContain('nemotron-3-super-120b-a12b');
-      expect(parsed.error.message).toContain('切回原模型');
+      expect(parsed.error.message).toContain('/model ');
       expect(parsed.error.topup.free_model).toBe('nemotron-3-super-120b-a12b');
     } finally {
       delete process.env.FREE_FALLBACK_MODEL;

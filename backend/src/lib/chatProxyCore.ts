@@ -934,7 +934,7 @@ async function buildBalanceEmptyBody(): Promise<string> {
   // 细节在下方机器可读的 topup 块和 skill.md 里，Agent 从那里取。
   const freeModel = await getFreeModelId();
   const freeStep = freeModel
-    ? `① 免费应急：把 model 切为 \`${freeModel}\` 继续对话；`
+    ? `① 免费应急：输入 /model ${freeModel} 切到免费模型继续对话；`
     : "";
   return JSON.stringify({
     error: {
@@ -943,7 +943,7 @@ async function buildBalanceEmptyBody(): Promise<string> {
         `余额已用完。${freeStep}` +
         `${freeModel ? "②" : "①"} 充值：让 Agent 按 ${apiBase}/skill.md 走支付宝充值（¥${amounts.join("/¥")}），` +
         `或网页 USDT → https://tokenboss.co/console` +
-        `${freeModel ? "；③ 到账后切回原模型。" : "。"}`,
+        `${freeModel ? "；③ 到账后再用 /model 切回你原来的模型。" : "。"}`,
       topup: {
         a2m: {
           protocol: "http-402-alipay-a2m",
