@@ -7,6 +7,7 @@ import {
   setUserPlan,
 } from '../store.js';
 import {
+  applyFreeModelFallback,
   inferTierFromModelId,
   extractKeyHint,
   maybeInterceptUpstreamError,
@@ -260,5 +261,51 @@ describe('maybeInterceptUpstreamError', () => {
     const handled = await maybeInterceptUpstreamError(upstream, writer);
     expect(handled).toBe(false);
     expect(writer.ended).toBe(false);
+  });
+});
+
+// --- applyFreeModelFallback: 零余额应急模型。切到 house key 供电的免费
+// 模型，让"余额没了 → 大脑没了 → 没法充值"的死锁有逃生口。 ---
+
+describe('applyFreeModelFallback', () => {
+  const HOUSE = 'sk-house-key';
+  beforeEach(() => {
+    delete process.env.FREE_MODEL_ID;
+    delete process.env.FREE_FALLBACK_KEY;
+    delete process.env.FREE_FALLBACK_MODEL;
+  });
+
+  it('swaps model + auth when the free id is requested and env configured', () => {
+    process.env.FREE_FALLBACK_KEY = HOUSE;
+    process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
+    const body: Record<string, unknown> = { model: 'free' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('gpt-5-mini');
+    expect(auth).toBe(`Bearer ${HOUSE}`);
+  });
+
+  it('no-op for non-free models (user auth passes through)', () => {
+    process.env.FREE_FALLBACK_KEY = HOUSE;
+    process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
+    const body: Record<string, unknown> = { model: 'gpt-4o' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('gpt-4o');
+    expect(auth).toBe('Bearer sk-user');
+  });
+
+  it('no-op when env unconfigured — free id falls through to upstream as-is', () => {
+    const body: Record<string, unknown> = { model: 'free' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('free');
+    expect(auth).toBe('Bearer sk-user');
+  });
+
+  it('honors FREE_MODEL_ID override', () => {
+    process.env.FREE_MODEL_ID = 'tokenboss-free';
+    process.env.FREE_FALLBACK_KEY = HOUSE;
+    process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
+    const body: Record<string, unknown> = { model: 'tokenboss-free' };
+    expect(applyFreeModelFallback(body, undefined)).toBe(`Bearer ${HOUSE}`);
+    expect(body.model).toBe('gpt-5-mini');
   });
 });
