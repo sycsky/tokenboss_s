@@ -6,6 +6,7 @@ import {
   putApiKeyIndex,
   setUserPlan,
 } from '../store.js';
+import { pickFreeModelId } from '../freeModels.js';
 import {
   applyFreeModelFallback,
   inferTierFromModelId,
@@ -290,45 +291,61 @@ describe('applyFreeModelFallback', () => {
     delete process.env.FREE_FALLBACK_MODEL;
   });
 
-  it('swaps model + auth when the free id is requested and env configured', () => {
+  it('swaps model + auth when the free id is requested and env configured', async () => {
     process.env.FREE_FALLBACK_KEY = HOUSE;
     process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
     const body: Record<string, unknown> = { model: 'free' };
-    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    const auth = await applyFreeModelFallback(body, 'Bearer sk-user');
     expect(body.model).toBe('gpt-5-mini');
     expect(auth).toBe(`Bearer ${HOUSE}`);
   });
 
-  it('no-op for non-free models (user auth passes through)', () => {
+  it('no-op for non-free models (user auth passes through)', async () => {
     process.env.FREE_FALLBACK_KEY = HOUSE;
     process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
     const body: Record<string, unknown> = { model: 'gpt-4o' };
-    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    const auth = await applyFreeModelFallback(body, 'Bearer sk-user');
     expect(body.model).toBe('gpt-4o');
     expect(auth).toBe('Bearer sk-user');
   });
 
-  it('key-less mode: rewrites model but keeps the USER key (free OpenRouter models cost 0)', () => {
+  it('key-less mode: rewrites model but keeps the USER key (free OpenRouter models cost 0)', async () => {
     process.env.FREE_FALLBACK_MODEL = 'deepseek/deepseek-chat-v3:free';
     const body: Record<string, unknown> = { model: 'free' };
-    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    const auth = await applyFreeModelFallback(body, 'Bearer sk-user');
     expect(body.model).toBe('deepseek/deepseek-chat-v3:free');
     expect(auth).toBe('Bearer sk-user');
   });
 
-  it('no-op when env unconfigured — free id falls through to upstream as-is', () => {
+  it('no-op when env unconfigured — free id falls through to upstream as-is', async () => {
     const body: Record<string, unknown> = { model: 'free' };
-    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    const auth = await applyFreeModelFallback(body, 'Bearer sk-user');
     expect(body.model).toBe('free');
     expect(auth).toBe('Bearer sk-user');
   });
 
-  it('honors FREE_MODEL_ID override', () => {
+  it('honors FREE_MODEL_ID override', async () => {
     process.env.FREE_MODEL_ID = 'tokenboss-free';
     process.env.FREE_FALLBACK_KEY = HOUSE;
     process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
     const body: Record<string, unknown> = { model: 'tokenboss-free' };
-    expect(applyFreeModelFallback(body, undefined)).toBe(`Bearer ${HOUSE}`);
+    expect(await applyFreeModelFallback(body, undefined)).toBe(`Bearer ${HOUSE}`);
     expect(body.model).toBe('gpt-5-mini');
+  });
+});
+
+describe('pickFreeModelId (newapi pricing discovery)', () => {
+  it('picks the 0-ratio / 0-price model, deterministic by name', () => {
+    const rows = [
+      { model_name: 'gpt-5.5', quota_type: 0, model_ratio: 6 },
+      { model_name: 'nemotron-3-super-120b-a12b', quota_type: 0, model_ratio: 0 },
+      { model_name: 'zz-free-too', quota_type: 1, model_price: 0 },
+      { model_name: 'claude-opus-4-8', quota_type: 1, model_price: 12 },
+    ];
+    expect(pickFreeModelId(rows)).toBe('nemotron-3-super-120b-a12b');
+  });
+  it('returns null when nothing is free / rows empty', () => {
+    expect(pickFreeModelId([])).toBeNull();
+    expect(pickFreeModelId([{ model_name: 'x', quota_type: 0, model_ratio: 2 }])).toBeNull();
   });
 });

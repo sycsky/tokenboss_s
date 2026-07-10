@@ -471,6 +471,18 @@ async function buildAdminAuthHeaders(): Promise<{
 // ---------- Public API ----------
 
 export const newapi = {
+  /**
+   * Raw /api/pricing rows. Admin-authed on purpose: this deployment
+   * returns an EMPTY list to anonymous callers, so free-model discovery
+   * must ride the admin credentials. Used by lib/freeModels.ts.
+   */
+  async getPricing(): Promise<Record<string, unknown>[]> {
+    const body = await req<{ data?: unknown }>("GET", "/api/pricing");
+    return Array.isArray(body.data)
+      ? (body.data as Record<string, unknown>[])
+      : [];
+  },
+
   // --- User management (admin) ---
 
   /**
