@@ -172,11 +172,9 @@ describe('maybeInterceptUpstreamError', () => {
     expect(writer.ended).toBe(true);
     const parsed = JSON.parse(writer.body);
     expect(parsed.error.type).toBe('insufficient_balance');
-    // gh-6: the message doubles as an agent instruction sheet — it must
-    // name the A2M endpoint, the auth to carry, and the web fallback.
+    // gh-6: message 只给人读的三步（详情在 topup 结构块 + skill.md）。
     expect(parsed.error.message).toContain('余额已用完');
-    expect(parsed.error.message).toContain('/v1/billing/a2m/topup');
-    expect(parsed.error.message).toContain('Payment-Proof');
+    expect(parsed.error.message).toContain('/skill.md');
     expect(parsed.error.message).toContain('https://tokenboss.co/console');
     // Machine-readable twin of the message.
     expect(parsed.error.topup.a2m.protocol).toBe('http-402-alipay-a2m');
@@ -195,7 +193,7 @@ describe('maybeInterceptUpstreamError', () => {
       await maybeInterceptUpstreamError(upstream, writer);
       const parsed = JSON.parse(writer.body);
       expect(parsed.error.message).toContain('nemotron-3-super-120b-a12b');
-      expect(parsed.error.message).toContain('完成后切回');
+      expect(parsed.error.message).toContain('切回原模型');
       expect(parsed.error.topup.free_model).toBe('nemotron-3-super-120b-a12b');
     } finally {
       delete process.env.FREE_FALLBACK_MODEL;

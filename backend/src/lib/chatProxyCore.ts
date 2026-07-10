@@ -928,23 +928,20 @@ function buildBalanceEmptyBody(): string {
     /* keep defaults — a misconfigured tier map must not break the error path */
   }
   const endpoint = `${apiBase}/v1/billing/a2m/topup`;
-  // 免费应急模型已配置时才提示 — 否则切过去也只会失败。文案直接点名
-  // 具体模型（读 env，换模型只改环境变量），`free` 别名同样可用。
+  // 给人读的 message 只保留三步（less is more）；端点/鉴权/协议等
+  // 细节在下方机器可读的 topup 块和 skill.md 里，Agent 从那里取。
   const freeModel = process.env.FREE_FALLBACK_MODEL;
-  const freeHint = freeModel
-    ? `应急：把 model 切换为 \`${freeModel}\`（免费模型）继续对话并完成充值，完成后切回你原来的模型。`
+  const freeStep = freeModel
+    ? `① 免费应急：把 model 切为 \`${freeModel}\` 继续对话；`
     : "";
   return JSON.stringify({
     error: {
       type: "insufficient_balance",
       message:
-        `余额已用完。${freeHint}` +
-        `Agent 内充值（支付宝 AI 付 / HTTP 402）：GET ${endpoint}?amount=${amounts[0]}` +
-        `，带上本次请求同一个 API key（Authorization: Bearer sk-...），按返回的 Payment-Needed 完成支付宝支付后` +
-        `携 Payment-Proof 头重试即到账；可选面额 ¥${amounts.join(" / ¥")}（单笔上限 ¥50），详见 ${apiBase}/skill.md。` +
-        `或网页充值（USDT）→ https://tokenboss.co/console。` +
-        `如果你的 Agent 因余额不足已无法响应：换一个可用的 Agent 会话执行上述充值流程` +
-        `${freeModel ? `、把 model 切为 \`${freeModel}\`` : ""}，或到网页用 USDT 充值。`,
+        `余额已用完。${freeStep}` +
+        `${freeModel ? "②" : "①"} 充值：让 Agent 按 ${apiBase}/skill.md 走支付宝充值（¥${amounts.join("/¥")}），` +
+        `或网页 USDT → https://tokenboss.co/console` +
+        `${freeModel ? "；③ 到账后切回原模型。" : "。"}`,
       topup: {
         a2m: {
           protocol: "http-402-alipay-a2m",
