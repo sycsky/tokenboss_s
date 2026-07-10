@@ -185,6 +185,23 @@ describe('maybeInterceptUpstreamError', () => {
     expect(parsed.error.topup.web).toBe('https://tokenboss.co/console');
   });
 
+  it('names the concrete free model in the hint when FREE_FALLBACK_MODEL is set', async () => {
+    process.env.FREE_FALLBACK_MODEL = 'nemotron-3-super-120b-a12b';
+    try {
+      const upstream = new Response(JSON.stringify({ error: '用户额度不足' }), {
+        status: 403, headers: { 'content-type': 'application/json' },
+      });
+      const writer = makeFakeWriter();
+      await maybeInterceptUpstreamError(upstream, writer);
+      const parsed = JSON.parse(writer.body);
+      expect(parsed.error.message).toContain('nemotron-3-super-120b-a12b');
+      expect(parsed.error.message).toContain('完成后切回');
+      expect(parsed.error.topup.free_model).toBe('nemotron-3-super-120b-a12b');
+    } finally {
+      delete process.env.FREE_FALLBACK_MODEL;
+    }
+  });
+
   it('rewrites English "insufficient balance" 402 to friendly message too', async () => {
     const upstream = new Response(
       JSON.stringify({ error: { message: 'insufficient balance for request' } }),

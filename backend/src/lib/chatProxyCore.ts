@@ -928,11 +928,11 @@ function buildBalanceEmptyBody(): string {
     /* keep defaults — a misconfigured tier map must not break the error path */
   }
   const endpoint = `${apiBase}/v1/billing/a2m/topup`;
-  // 免费应急模型已配置时才提示 — 否则切过去也只会失败。
-  const freeConfigured = !!process.env.FREE_FALLBACK_MODEL;
-  const freeId = process.env.FREE_MODEL_ID ?? "free";
-  const freeHint = freeConfigured
-    ? `应急：把 model 切换为 \`${freeId}\`（限速免费模型）可继续对话并完成充值。`
+  // 免费应急模型已配置时才提示 — 否则切过去也只会失败。文案直接点名
+  // 具体模型（读 env，换模型只改环境变量），`free` 别名同样可用。
+  const freeModel = process.env.FREE_FALLBACK_MODEL;
+  const freeHint = freeModel
+    ? `应急：把 model 切换为 \`${freeModel}\`（免费模型）继续对话并完成充值，完成后切回你原来的模型。`
     : "";
   return JSON.stringify({
     error: {
@@ -944,7 +944,7 @@ function buildBalanceEmptyBody(): string {
         `携 Payment-Proof 头重试即到账；可选面额 ¥${amounts.join(" / ¥")}（单笔上限 ¥50），详见 ${apiBase}/skill.md。` +
         `或网页充值（USDT）→ https://tokenboss.co/console。` +
         `如果你的 Agent 因余额不足已无法响应：换一个可用的 Agent 会话执行上述充值流程` +
-        `${freeConfigured ? `、把 model 切为 \`${freeId}\`` : ""}，或到网页用 USDT 充值。`,
+        `${freeModel ? `、把 model 切为 \`${freeModel}\`` : ""}，或到网页用 USDT 充值。`,
       topup: {
         a2m: {
           protocol: "http-402-alipay-a2m",
@@ -955,7 +955,7 @@ function buildBalanceEmptyBody(): string {
           docs: `${apiBase}/skill.md`,
         },
         web: "https://tokenboss.co/console",
-        free_model: freeConfigured ? freeId : null,
+        free_model: freeModel ?? null,
       },
     },
   });
