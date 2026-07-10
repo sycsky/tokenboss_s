@@ -3,12 +3,12 @@ import { createContext, useContext, useEffect, useState, type ReactNode, createE
 /**
  * Display currency for pricing surfaces (套餐 cards, 按量充值 row).
  *
- *  - 'rmb' : ¥288 / 4 周 · ¥1 = $1 调用额度 · ¥50 起
- *  - 'usd' : $49 USD / 4 周 · $1 USD = $6.5 调用额度 · $10 USD 起
+ *  - 'rmb' : ¥288 / 4 周 · ¥1 = $1 调用额度 · 充值面额 ¥10/¥50
+ *  - 'usd' : $49 USD / 4 周 · $1 USD = $7 调用额度 · $1 起
  *
- * Display-only — actual checkout method (支付宝 / 稳定币) is picked in
- * /billing/pay, and the user picks USDT vs USDC + chain on the gateway's
- * own page. We label the price as plain "USD" because the user pays USD
+ * Display-only — actual checkout: RMB topup goes through in-agent Alipay
+ * A2M (402, /billing/topup shows the copyable prompt); USD goes through
+ * the USDT/USDC web gateway where the user picks the chain. We label the price as plain "USD" because the user pays USD
  * value, regardless of which stablecoin they ultimately settle in.
  *
  * Storage is plain localStorage; first visit defaults via browser locale
