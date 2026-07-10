@@ -455,6 +455,16 @@ TokenBoss speaks the Alipay A2M agentic-payment protocol (支付宝 AI 付). The
 paying side is handled by Alipay's agent payment skill — if your agent has it
 installed, the whole flow is: request → 402 → user pays in Alipay → retry.
 
+If the Alipay payment skill is NOT installed yet, install it first (official
+one-liner, runs inside the user's agent environment):
+
+```bash
+npx -y @alipay/agent-payment@latest install
+```
+
+Then say 开启支付宝支付功能 to complete the one-time wallet authorization.
+Docs: https://a2a.alipay.com/wallet-guide
+
 **Step 1 — request a topup** (same API key you use for chat):
 
 ```bash
