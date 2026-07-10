@@ -131,7 +131,7 @@ export default function Topup() {
             </div>
             <div className="mt-3 font-mono text-[11px] text-ink-3 leading-relaxed">
               · 面额 ¥10 / ¥50，单笔上限 ¥50，¥1 = $1 即时到账<br />
-              · 需要你的 Agent 已接入支付宝 AI 付（OpenClaw 等已支持）
+              · 需要你的 Agent 已接入支付宝 AI 付（OpenClaw 等已支持）；未安装时对 Agent 说：运行 npx -y @alipay/agent-payment@latest install
             </div>
           </div>
         </section>
