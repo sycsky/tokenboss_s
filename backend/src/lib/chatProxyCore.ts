@@ -20,6 +20,7 @@ import { Agent } from "undici";
 
 import { isMockMode } from "./upstream.js";
 import { alipayA2mFromEnv } from "./payment/alipayA2m.js";
+import { getFreeModelId } from "./freeModels.js";
 import { detectVirtualProfile, resolveVirtualModel } from "../router/resolve.js";
 import {
   getUserIdByKeyHash,
@@ -82,14 +83,15 @@ export interface StreamWriter {
  * Caller keeps using the ORIGINAL header for attribution so usage still
  * links to the real user.
  */
-export function applyFreeModelFallback(
+export async function applyFreeModelFallback(
   body: Record<string, unknown>,
   authHeader: string | undefined,
-): string | undefined {
+): Promise<string | undefined> {
   const freeId = process.env.FREE_MODEL_ID ?? "free";
+  if (body.model !== freeId) return authHeader; // hot path: no lookup
   const houseKey = process.env.FREE_FALLBACK_KEY;
-  const concreteModel = process.env.FREE_FALLBACK_MODEL;
-  if (body.model !== freeId || !concreteModel) return authHeader;
+  const concreteModel = await getFreeModelId();
+  if (!concreteModel) return authHeader;
   console.log(
     `[free-model] serving ${freeId} → ${concreteModel}${houseKey ? " on house key" : " on user key"}`,
   );
@@ -171,7 +173,7 @@ export async function streamChatCore(
 
   // Free emergency model: swap to the house key BEFORE attribution /
   // routing so everything downstream sees the concrete model id.
-  const upstreamAuthHeader = applyFreeModelFallback(body, authHeader);
+  const upstreamAuthHeader = await applyFreeModelFallback(body, authHeader);
 
   // ---------- Source attribution (best-effort, non-blocking) ----------
   // Generate our own request_id EARLY — forwarded to upstream as X-Request-ID
@@ -696,7 +698,7 @@ export async function streamResponsesCore(
     return;
   }
 
-  const upstreamAuthHeader = applyFreeModelFallback(body, authHeader);
+  const upstreamAuthHeader = await applyFreeModelFallback(body, authHeader);
 
   let fallbackModels: string[] = [];
   if (typeof body.model === "string") {
@@ -913,7 +915,7 @@ const ACCOUNT_BALANCE_EMPTY_PATTERN =
  * The structured `topup` block carries the same facts machine-readably;
  * OpenAI-style clients ignore unknown keys inside `error`.
  */
-function buildBalanceEmptyBody(): string {
+async function buildBalanceEmptyBody(): Promise<string> {
   const apiBase = (process.env.PUBLIC_BASE_URL ?? "https://api.tokenboss.co").replace(/\/+$/, "");
   // Payable denominations mirror the registered A2M services (服务市场
   // one-fixed-price-per-service). Sub-¥1 tiers are ops/verification only.
@@ -930,7 +932,7 @@ function buildBalanceEmptyBody(): string {
   const endpoint = `${apiBase}/v1/billing/a2m/topup`;
   // 给人读的 message 只保留三步（less is more）；端点/鉴权/协议等
   // 细节在下方机器可读的 topup 块和 skill.md 里，Agent 从那里取。
-  const freeModel = process.env.FREE_FALLBACK_MODEL;
+  const freeModel = await getFreeModelId();
   const freeStep = freeModel
     ? `① 免费应急：把 model 切为 \`${freeModel}\` 继续对话；`
     : "";
@@ -986,7 +988,7 @@ export async function maybeInterceptUpstreamError(
   }
   if (ACCOUNT_BALANCE_EMPTY_PATTERN.test(bodyText)) {
     writer.writeHead(402, { "content-type": "application/json" });
-    writer.write(buildBalanceEmptyBody());
+    writer.write(await buildBalanceEmptyBody());
     writer.end();
     return true;
   }
