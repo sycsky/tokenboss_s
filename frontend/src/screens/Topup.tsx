@@ -176,10 +176,22 @@ export default function Topup() {
                   {copied ? '已复制 ✓' : '复制'}
                 </button>
               </div>
+              <div className="mt-4 flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold">
+                  支持的 Agent
+                </span>
+                {['OpenClaw', 'Claude Code', 'Hermes'].map((a) => (
+                  <span
+                    key={a}
+                    className="font-mono text-[11px] font-bold px-2 py-0.5 border-2 border-ink rounded bg-bg"
+                  >
+                    {a}
+                  </span>
+                ))}
+              </div>
               <div className="mt-3 font-mono text-[11px] text-ink-3 leading-relaxed">
                 · 到账 ${denom} 美金额度（¥1 = $1），单笔上限 ¥50<br />
-                · 需要你的 Agent 已接入支付宝 AI 付（OpenClaw · Claude Code · Hermes 已支持）<br />
-                · 未安装时对 Agent 说：运行 npx -y @alipay/agent-payment@latest install
+                · 未安装支付宝 AI 付时，对 Agent 说：运行 npx -y @alipay/agent-payment@latest install
               </div>
             </div>
           </section>
