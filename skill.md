@@ -503,6 +503,50 @@ If the agent has no Alipay payment skill, or the user wants a single large
 topup (> ¥50), send them to https://tokenboss.co/billing/topup — stablecoin
 (USDT/USDC) checkout, credited on confirmation.
 
+## Emergency free model (zero-balance escape hatch)
+
+When the balance is empty, an agent whose ONLY model source is TokenBoss
+loses its brain — it can't even run the topup flow. To escape the deadlock,
+switch the request `model` to `free`: TokenBoss maps it to one of the free
+OpenRouter models on the gateway, which cost 0 and therefore work at zero
+balance. Use it to keep the conversation alive, complete the topup
+above, then switch back to your normal model. Do not use it for real work —
+it is slow, rate-limited, and may be a small model.
+
+## Codex and other agents without the Alipay skill package
+
+The Alipay installer only packages the skill for OpenClaw / Claude Code /
+Hermes, but the underlying `alipay-bot` CLI is framework-agnostic — any
+agent that can run shell commands (Codex included) can drive the same flow
+directly:
+
+```bash
+# one-time: install the CLI (also works when no framework is detected)
+npx -y @alipay/agent-payment@latest install
+
+# one-time: authorize the wallet (prints a QR + link; the human scans it
+# in Alipay, then re-run check-wallet to confirm)
+alipay-bot check-wallet
+alipay-bot apply-wallet --agent-name "Codex"
+
+# per topup: capture the Payment-Needed header into a file
+curl -s -D - -o /dev/null "https://api.tokenboss.co/v1/billing/a2m/topup?amount=10" \
+  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  | grep -i '^payment-needed:' | sed 's/^[Pp]ayment-[Nn]eeded: //' | tr -d '\r\n' > 402_needed.txt
+
+# pay: pushes the cashier to the human's Alipay app; retries with
+# Payment-Proof automatically once paid
+alipay-bot 402-buyer-pay --session-id "<any-stable-id>" \
+  -f 402_needed.txt \
+  -r "https://api.tokenboss.co/v1/billing/a2m/topup?amount=10" \
+  -m GET -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
+  --intent-summary "原始请求：给 TokenBoss 充值 10 元"
+```
+
+If `402-buyer-pay` returns 支付待确认, ask the human to confirm in Alipay,
+then query with the `tradeNo` from the output:
+`alipay-bot 402-query-payment-status -t '<tradeNo>' -r '<same-url>' -m GET -H '<same-auth>'`.
+
 ---
 
 # Troubleshooting

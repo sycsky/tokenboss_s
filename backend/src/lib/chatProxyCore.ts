@@ -58,6 +58,45 @@ export interface StreamWriter {
   end(): void;
 }
 
+// ---------- Free emergency model (零余额应急) ----------
+
+/**
+ * Serve the designated free emergency model from a house-funded newapi
+ * token. Why: when a user's balance hits zero, their agent's "brain" dies
+ * with it — it can no longer run the in-agent topup flow (the deadlock:
+ * paying requires the model, the model requires paying). Switching to the
+ * free model keeps the agent alive long enough to complete the topup.
+ *
+ * Containment lives on the house token's newapi-side config (rate limit +
+ * quota + model restriction), NOT here — keep this hot path dumb.
+ *
+ * Env: FREE_MODEL_ID (default "free"), FREE_FALLBACK_MODEL (concrete model
+ * to serve — point it at one of the free OpenRouter models already listed
+ * on newapi; 0-price models pre-consume 0 quota, so a zero-balance user's
+ * OWN key works). FREE_FALLBACK_KEY is optional: set it only if the
+ * deployment wants house-token isolation (rate/quota fencing on newapi).
+ * FREE_FALLBACK_MODEL unset → no-op, requests for the free id fail
+ * upstream like any unknown model.
+ *
+ * Mutates body.model; returns the authorization header to send upstream.
+ * Caller keeps using the ORIGINAL header for attribution so usage still
+ * links to the real user.
+ */
+export function applyFreeModelFallback(
+  body: Record<string, unknown>,
+  authHeader: string | undefined,
+): string | undefined {
+  const freeId = process.env.FREE_MODEL_ID ?? "free";
+  const houseKey = process.env.FREE_FALLBACK_KEY;
+  const concreteModel = process.env.FREE_FALLBACK_MODEL;
+  if (body.model !== freeId || !concreteModel) return authHeader;
+  console.log(
+    `[free-model] serving ${freeId} → ${concreteModel}${houseKey ? " on house key" : " on user key"}`,
+  );
+  body.model = concreteModel;
+  return houseKey ? `Bearer ${houseKey}` : authHeader;
+}
+
 // ---------- Free-user model rewrite helpers ----------
 
 /** Tier classification for the free-user "is this allowed" decision. */
@@ -129,6 +168,10 @@ export async function streamChatCore(
     );
     return;
   }
+
+  // Free emergency model: swap to the house key BEFORE attribution /
+  // routing so everything downstream sees the concrete model id.
+  const upstreamAuthHeader = applyFreeModelFallback(body, authHeader);
 
   // ---------- Source attribution (best-effort, non-blocking) ----------
   // Generate our own request_id EARLY — forwarded to upstream as X-Request-ID
@@ -298,7 +341,7 @@ export async function streamChatCore(
           method: "POST",
           headers: {
             "content-type": "application/json",
-            authorization: authHeader,
+            authorization: upstreamAuthHeader ?? authHeader,
             "x-request-id": requestId,
           },
           body: JSON.stringify(body),
@@ -653,6 +696,8 @@ export async function streamResponsesCore(
     return;
   }
 
+  const upstreamAuthHeader = applyFreeModelFallback(body, authHeader);
+
   let fallbackModels: string[] = [];
   if (typeof body.model === "string") {
     const profile = detectVirtualProfile(body.model);
@@ -745,7 +790,7 @@ export async function streamResponsesCore(
           method: "POST",
           headers: {
             "content-type": "application/json",
-            authorization: authHeader,
+            authorization: upstreamAuthHeader ?? authHeader,
           },
           body: JSON.stringify(body),
           // @ts-expect-error undici-specific extension on fetch init
@@ -883,14 +928,20 @@ function buildBalanceEmptyBody(): string {
     /* keep defaults — a misconfigured tier map must not break the error path */
   }
   const endpoint = `${apiBase}/v1/billing/a2m/topup`;
+  // 给人读的 message 只保留三步（less is more）；端点/鉴权/协议等
+  // 细节在下方机器可读的 topup 块和 skill.md 里，Agent 从那里取。
+  const freeModel = process.env.FREE_FALLBACK_MODEL;
+  const freeStep = freeModel
+    ? `① 免费应急：把 model 切为 \`${freeModel}\` 继续对话；`
+    : "";
   return JSON.stringify({
     error: {
       type: "insufficient_balance",
       message:
-        `余额已用完。Agent 内充值（支付宝 AI 付 / HTTP 402）：GET ${endpoint}?amount=${amounts[0]}` +
-        `，带上本次请求同一个 API key（Authorization: Bearer sk-...），按返回的 Payment-Needed 完成支付宝支付后` +
-        `携 Payment-Proof 头重试即到账；可选面额 ¥${amounts.join(" / ¥")}（单笔上限 ¥50），详见 ${apiBase}/skill.md。` +
-        `或网页充值（USDT）→ https://tokenboss.co/console`,
+        `余额已用完。${freeStep}` +
+        `${freeModel ? "②" : "①"} 充值：让 Agent 按 ${apiBase}/skill.md 走支付宝充值（¥${amounts.join("/¥")}），` +
+        `或网页 USDT → https://tokenboss.co/console` +
+        `${freeModel ? "；③ 到账后切回原模型。" : "。"}`,
       topup: {
         a2m: {
           protocol: "http-402-alipay-a2m",
@@ -901,6 +952,7 @@ function buildBalanceEmptyBody(): string {
           docs: `${apiBase}/skill.md`,
         },
         web: "https://tokenboss.co/console",
+        free_model: freeModel ?? null,
       },
     },
   });

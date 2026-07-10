@@ -7,6 +7,7 @@ import {
   setUserPlan,
 } from '../store.js';
 import {
+  applyFreeModelFallback,
   inferTierFromModelId,
   extractKeyHint,
   maybeInterceptUpstreamError,
@@ -171,17 +172,32 @@ describe('maybeInterceptUpstreamError', () => {
     expect(writer.ended).toBe(true);
     const parsed = JSON.parse(writer.body);
     expect(parsed.error.type).toBe('insufficient_balance');
-    // gh-6: the message doubles as an agent instruction sheet — it must
-    // name the A2M endpoint, the auth to carry, and the web fallback.
+    // gh-6: message 只给人读的三步（详情在 topup 结构块 + skill.md）。
     expect(parsed.error.message).toContain('余额已用完');
-    expect(parsed.error.message).toContain('/v1/billing/a2m/topup');
-    expect(parsed.error.message).toContain('Payment-Proof');
+    expect(parsed.error.message).toContain('/skill.md');
     expect(parsed.error.message).toContain('https://tokenboss.co/console');
     // Machine-readable twin of the message.
     expect(parsed.error.topup.a2m.protocol).toBe('http-402-alipay-a2m');
     expect(parsed.error.topup.a2m.endpoint).toMatch(/\/v1\/billing\/a2m\/topup$/);
     expect(parsed.error.topup.a2m.amounts_cny.length).toBeGreaterThan(0);
     expect(parsed.error.topup.web).toBe('https://tokenboss.co/console');
+  });
+
+  it('names the concrete free model in the hint when FREE_FALLBACK_MODEL is set', async () => {
+    process.env.FREE_FALLBACK_MODEL = 'nemotron-3-super-120b-a12b';
+    try {
+      const upstream = new Response(JSON.stringify({ error: '用户额度不足' }), {
+        status: 403, headers: { 'content-type': 'application/json' },
+      });
+      const writer = makeFakeWriter();
+      await maybeInterceptUpstreamError(upstream, writer);
+      const parsed = JSON.parse(writer.body);
+      expect(parsed.error.message).toContain('nemotron-3-super-120b-a12b');
+      expect(parsed.error.message).toContain('切回原模型');
+      expect(parsed.error.topup.free_model).toBe('nemotron-3-super-120b-a12b');
+    } finally {
+      delete process.env.FREE_FALLBACK_MODEL;
+    }
   });
 
   it('rewrites English "insufficient balance" 402 to friendly message too', async () => {
@@ -260,5 +276,59 @@ describe('maybeInterceptUpstreamError', () => {
     const handled = await maybeInterceptUpstreamError(upstream, writer);
     expect(handled).toBe(false);
     expect(writer.ended).toBe(false);
+  });
+});
+
+// --- applyFreeModelFallback: 零余额应急模型。切到 house key 供电的免费
+// 模型，让"余额没了 → 大脑没了 → 没法充值"的死锁有逃生口。 ---
+
+describe('applyFreeModelFallback', () => {
+  const HOUSE = 'sk-house-key';
+  beforeEach(() => {
+    delete process.env.FREE_MODEL_ID;
+    delete process.env.FREE_FALLBACK_KEY;
+    delete process.env.FREE_FALLBACK_MODEL;
+  });
+
+  it('swaps model + auth when the free id is requested and env configured', () => {
+    process.env.FREE_FALLBACK_KEY = HOUSE;
+    process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
+    const body: Record<string, unknown> = { model: 'free' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('gpt-5-mini');
+    expect(auth).toBe(`Bearer ${HOUSE}`);
+  });
+
+  it('no-op for non-free models (user auth passes through)', () => {
+    process.env.FREE_FALLBACK_KEY = HOUSE;
+    process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
+    const body: Record<string, unknown> = { model: 'gpt-4o' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('gpt-4o');
+    expect(auth).toBe('Bearer sk-user');
+  });
+
+  it('key-less mode: rewrites model but keeps the USER key (free OpenRouter models cost 0)', () => {
+    process.env.FREE_FALLBACK_MODEL = 'deepseek/deepseek-chat-v3:free';
+    const body: Record<string, unknown> = { model: 'free' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('deepseek/deepseek-chat-v3:free');
+    expect(auth).toBe('Bearer sk-user');
+  });
+
+  it('no-op when env unconfigured — free id falls through to upstream as-is', () => {
+    const body: Record<string, unknown> = { model: 'free' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('free');
+    expect(auth).toBe('Bearer sk-user');
+  });
+
+  it('honors FREE_MODEL_ID override', () => {
+    process.env.FREE_MODEL_ID = 'tokenboss-free';
+    process.env.FREE_FALLBACK_KEY = HOUSE;
+    process.env.FREE_FALLBACK_MODEL = 'gpt-5-mini';
+    const body: Record<string, unknown> = { model: 'tokenboss-free' };
+    expect(applyFreeModelFallback(body, undefined)).toBe(`Bearer ${HOUSE}`);
+    expect(body.model).toBe('gpt-5-mini');
   });
 });
