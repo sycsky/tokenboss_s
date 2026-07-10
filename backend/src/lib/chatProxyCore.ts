@@ -71,8 +71,12 @@ export interface StreamWriter {
  * quota + model restriction), NOT here — keep this hot path dumb.
  *
  * Env: FREE_MODEL_ID (default "free"), FREE_FALLBACK_MODEL (concrete model
- * to serve), FREE_FALLBACK_KEY (house newapi sk- token). Unconfigured →
- * no-op, requests for the free id fail upstream like any unknown model.
+ * to serve — point it at one of the free OpenRouter models already listed
+ * on newapi; 0-price models pre-consume 0 quota, so a zero-balance user's
+ * OWN key works). FREE_FALLBACK_KEY is optional: set it only if the
+ * deployment wants house-token isolation (rate/quota fencing on newapi).
+ * FREE_FALLBACK_MODEL unset → no-op, requests for the free id fail
+ * upstream like any unknown model.
  *
  * Mutates body.model; returns the authorization header to send upstream.
  * Caller keeps using the ORIGINAL header for attribution so usage still
@@ -85,10 +89,12 @@ export function applyFreeModelFallback(
   const freeId = process.env.FREE_MODEL_ID ?? "free";
   const houseKey = process.env.FREE_FALLBACK_KEY;
   const concreteModel = process.env.FREE_FALLBACK_MODEL;
-  if (body.model !== freeId || !houseKey || !concreteModel) return authHeader;
-  console.log(`[free-model] serving ${freeId} → ${concreteModel} on house key`);
+  if (body.model !== freeId || !concreteModel) return authHeader;
+  console.log(
+    `[free-model] serving ${freeId} → ${concreteModel}${houseKey ? " on house key" : " on user key"}`,
+  );
   body.model = concreteModel;
-  return `Bearer ${houseKey}`;
+  return houseKey ? `Bearer ${houseKey}` : authHeader;
 }
 
 // ---------- Free-user model rewrite helpers ----------
@@ -923,8 +929,7 @@ function buildBalanceEmptyBody(): string {
   }
   const endpoint = `${apiBase}/v1/billing/a2m/topup`;
   // 免费应急模型已配置时才提示 — 否则切过去也只会失败。
-  const freeConfigured =
-    !!process.env.FREE_FALLBACK_KEY && !!process.env.FREE_FALLBACK_MODEL;
+  const freeConfigured = !!process.env.FREE_FALLBACK_MODEL;
   const freeId = process.env.FREE_MODEL_ID ?? "free";
   const freeHint = freeConfigured
     ? `应急：把 model 切换为 \`${freeId}\`（限速免费模型）可继续对话并完成充值。`

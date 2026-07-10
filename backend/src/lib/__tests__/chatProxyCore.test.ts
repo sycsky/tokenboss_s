@@ -293,6 +293,14 @@ describe('applyFreeModelFallback', () => {
     expect(auth).toBe('Bearer sk-user');
   });
 
+  it('key-less mode: rewrites model but keeps the USER key (free OpenRouter models cost 0)', () => {
+    process.env.FREE_FALLBACK_MODEL = 'deepseek/deepseek-chat-v3:free';
+    const body: Record<string, unknown> = { model: 'free' };
+    const auth = applyFreeModelFallback(body, 'Bearer sk-user');
+    expect(body.model).toBe('deepseek/deepseek-chat-v3:free');
+    expect(auth).toBe('Bearer sk-user');
+  });
+
   it('no-op when env unconfigured — free id falls through to upstream as-is', () => {
     const body: Record<string, unknown> = { model: 'free' };
     const auth = applyFreeModelFallback(body, 'Bearer sk-user');

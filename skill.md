@@ -507,8 +507,9 @@ topup (> ¥50), send them to https://tokenboss.co/billing/topup — stablecoin
 
 When the balance is empty, an agent whose ONLY model source is TokenBoss
 loses its brain — it can't even run the topup flow. To escape the deadlock,
-switch the request `model` to `free`: a rate-limited free model served at
-zero balance. Use it to keep the conversation alive, complete the topup
+switch the request `model` to `free`: TokenBoss maps it to one of the free
+OpenRouter models on the gateway, which cost 0 and therefore work at zero
+balance. Use it to keep the conversation alive, complete the topup
 above, then switch back to your normal model. Do not use it for real work —
 it is slow, rate-limited, and may be a small model.
 
