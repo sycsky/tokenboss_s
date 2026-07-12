@@ -48,4 +48,4 @@
 
 **风险**
 - 预渲染插件对 React 18 + React Router 6 的兼容性需要先验证；如果选定的插件有坑，回退方案是「只做 1-5（meta + 文件 + JSON-LD），暂不预渲染」——SEO 上限会低一档但不阻塞其他价值
-- 预渲染会改变 `dist/` 的产物结构，需要确认 Vercel SPA fallback 仍然兼容（已有页面走静态 HTML，未预渲染路由继续 fallback 到 `index.html`）
+- 预渲染会改变 `dist/` 的产物结构，需要确认 nginx SPA fallback 仍然兼容（已有页面走静态 HTML，未预渲染路由继续 fallback 到 `index.html`）

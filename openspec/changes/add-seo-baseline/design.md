@@ -1,6 +1,6 @@
 ## Context
 
-前端栈：Vite 5 + React 18 + React Router 6，纯 CSR。`vercel.json` 把所有路由 fallback 到 `index.html`。`frontend/index.html:16` 写死 `<title>TokenBoss</title>`，公开路由 8 条但只有 4 条真正有 SEO 价值（landing / pricing / primitive / install/manual）；剩下的 `/login`、`/register`、`/verify-email`、`/login/magic` 是次要登入门户。
+前端栈：Vite 5 + React 18 + React Router 6，纯 CSR。部署在 Zeabur（nginx），`frontend/nginx.conf` 的 `try_files $uri $uri/ /index.html` 把所有未命中路由 fallback 到 `index.html`。`frontend/index.html:16` 写死 `<title>TokenBoss</title>`，公开路由 8 条但只有 4 条真正有 SEO 价值（landing / pricing / primitive / install/manual）；剩下的 `/login`、`/register`、`/verify-email`、`/login/magic` 是次要登入门户。
 
 之前在 `/opsx:explore` 阶段评估过四条路（A 维持 SPA 贴 meta、B 选页预渲染、C 整体迁 Next.js、D 写自定义 SSR），用户选定 **B**：投入小、上限够高、不动现有架构。
 
@@ -117,8 +117,8 @@ export function useDocumentMeta(opts: {
 **[R1] vite-plugin-prerender 跟 React Router 6 不兼容**
 → 缓解：开工第一步先做 spike，验证不通过就切 SSG / 手写脚本。即便预渲染整套都跑不起来，meta + sitemap + robots + JSON-LD（D2-D5）已经独立可交付，SEO 上限会低一档但不阻塞。
 
-**[R2] 预渲染产物把 Vercel SPA fallback 行为改坏**
-→ 缓解：`vercel.json` 的 `rewrites` 是「文件不存在时 fallback」，预渲染只新增静态文件不删任何东西，行为应当兼容。验证步骤：`pnpm build` 后用 `vercel dev` 本地起一遍，curl 测 `/console` 仍走 SPA fallback。
+**[R2] 预渲染产物把 nginx SPA fallback 行为改坏**
+→ 缓解：`frontend/nginx.conf` 的 `try_files` 是「文件存在就直接返回、否则 fallback 到 index.html」，预渲染只新增静态文件不删任何东西，行为应当兼容。验证步骤：`npm run build` 后用 nginx（或 Zeabur preview）起一遍，curl 测 `/console` 仍走 SPA fallback、`/pricing` 命中预渲染的静态 HTML。
 
 **[R3] hydration 错配**
 预渲染的 HTML 和 React 接管时的 DOM 不一致 → React 18 在 dev 会 warn、prod 会强制重渲染（不崩但白闪一下）。

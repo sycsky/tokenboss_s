@@ -10,7 +10,7 @@ describe("OnboardWelcome footnote (gh-3 P1 fix)", () => {
     expect(screen.getByText("我是人类")).toBeInTheDocument();
     expect(screen.getByText("含 CC Switch 一键导入 · 支持 5 个 CLI")).toBeInTheDocument();
     expect(
-      screen.getByText("已支持 OpenClaw · Hermes Agent · 余额不足时对话内直接支付宝充值"),
+      screen.getByText("已支持 OpenClaw · Hermes Agent"),
     ).toBeInTheDocument();
   });
 });

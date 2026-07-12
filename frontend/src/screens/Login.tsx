@@ -1,3 +1,4 @@
+import { ApiError } from '../lib/api';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
@@ -64,8 +65,14 @@ export default function Login() {
     try {
       const result = await loginWithCode(email.trim().toLowerCase(), code);
       nav(result.isNew ? '/onboard/welcome' : '/console');
-    } catch {
-      setError('验证码错误或已过期，请重新获取');
+    } catch (err) {
+      // 5xx = 我们这边开通账号失败（如 newapi 不可用），不是用户输错码。
+      const serverSide = err instanceof ApiError && err.status >= 500;
+      setError(
+        serverSide
+          ? '开通账号暂时失败，请稍后重试（验证码没有问题）'
+          : '验证码错误或已过期，请重新获取',
+      );
     } finally {
       setLoading(false);
     }

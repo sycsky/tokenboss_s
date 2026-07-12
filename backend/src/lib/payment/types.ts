@@ -10,7 +10,7 @@
  * one-shot redemption code on newapi admin and apply it to the user's quota.
  */
 
-export type PaymentChannel = "epusdt" | "xunhupay" | "alipay_a2m";
+export type PaymentChannel = "epusdt" | "xunhupay" | "alipay_a2m" | "dodo";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 
@@ -135,4 +135,8 @@ export interface WebhookEvent {
   status: OrderStatus;
   blockTxId?: string;
   receiveAddress?: string;
+  /** Currency (ISO, upper-case) of amountActual, when the channel reports
+   *  it. Lets settlement compare the paid amount to the order only when the
+   *  currencies match. Absent for channels that don't surface it. */
+  currency?: string;
 }

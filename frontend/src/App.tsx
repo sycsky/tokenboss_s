@@ -19,6 +19,7 @@ import ProtocolOpenAICompat from './screens/docs/ProtocolOpenAICompat';
 import ProtocolAnthropicShim from './screens/docs/ProtocolAnthropicShim';
 import ProtocolGeminiProxy from './screens/docs/ProtocolGeminiProxy';
 import Topup from './screens/Topup';
+import Legal from './screens/Legal';
 import AdminLogin from './screens/AdminLogin';
 import AdminUsers from './screens/AdminUsers';
 import AdminUserDetail from './screens/AdminUserDetail';
@@ -46,6 +47,11 @@ export default function App() {
 
       <Route path="/pricing" element={<Plans />} />
       <Route path="/primitive" element={<Primitive />} />
+
+      {/* Public policy pages — required by MoR / payment-channel review. */}
+      <Route path="/terms" element={<Legal doc="terms" />} />
+      <Route path="/privacy" element={<Legal doc="privacy" />} />
+      <Route path="/refund" element={<Legal doc="refund" />} />
       <Route path="/billing/pay" element={<RequireAuth><Payment /></RequireAuth>} />
       <Route path="/billing/topup" element={<RequireAuth><Topup /></RequireAuth>} />
       <Route path="/billing/orders/:id" element={<RequireAuth><OrderStatus /></RequireAuth>} />

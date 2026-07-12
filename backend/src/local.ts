@@ -11,7 +11,9 @@
  *   # or with mock upstream so no real aggregator is needed:
  *   MOCK_UPSTREAM=1 npm run dev
  *
- * Routes registered here must mirror those in `template.yaml`.
+ * This route table IS the production router: Zeabur runs `node dist/local.js`
+ * (see Dockerfile + zbpack.json), so every user-facing route must be
+ * registered here — there is no separate gateway config to keep in sync.
  */
 
 // Load .env.local before any other imports so env vars are visible to
@@ -84,8 +86,9 @@ import {
   getOrderHandler,
   listOrdersHandler,
 } from "./handlers/paymentHandlers.js";
-import { epusdtWebhookHandler, xunhupayWebhookHandler } from "./handlers/paymentWebhook.js";
+import { epusdtWebhookHandler, xunhupayWebhookHandler, dodoWebhookHandler } from "./handlers/paymentWebhook.js";
 import { a2mTopupHandler } from "./handlers/a2mHandlers.js";
+import { billingConfigHandler } from "./handlers/billingConfig.js";
 import { redeemHandler } from "./handlers/redeemHandler.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { catalogJsonHandler } from "./handlers/catalogJson.js";
@@ -164,12 +167,14 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/buckets", handler: listBucketsHandler as LambdaHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
   { method: "GET", path: "/v1/router/tiers", handler: routerTiersHandler },
+  { method: "GET", path: "/v1/billing/config", handler: billingConfigHandler },
   { method: "POST", path: "/v1/billing/orders", handler: createOrderHandler },
   { method: "GET", path: "/v1/billing/orders", handler: listOrdersHandler },
   { method: "GET", path: "/v1/billing/orders/{orderId}", handler: getOrderHandler },
   { method: "POST", path: "/v1/billing/redeem", handler: redeemHandler },
   { method: "POST", path: "/v1/billing/webhook/epusdt", handler: epusdtWebhookHandler },
   { method: "POST", path: "/v1/billing/webhook/xunhupay", handler: xunhupayWebhookHandler },
+  { method: "POST", path: "/v1/billing/webhook/dodo", handler: dodoWebhookHandler },
   // Alipay A2M 按量付费 — 402 protocol, agent-facing (API-key auth)
   { method: "GET", path: "/v1/billing/a2m/topup", handler: a2mTopupHandler },
   { method: "POST", path: "/v1/billing/a2m/topup", handler: a2mTopupHandler },

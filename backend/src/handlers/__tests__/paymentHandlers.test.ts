@@ -186,6 +186,20 @@ describe('createOrderHandler — type=topup validation', () => {
     }
   });
 
+  it('400 invalid_amount below the $10 topup floor', async () => {
+    for (const amount of [1, 5, 9]) {
+      const res = await run({ type: 'topup', amount, channel: 'epusdt' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body as string);
+      expect(body.error.code).toBe('invalid_amount');
+    }
+  });
+
+  it('accepts exactly the $10 floor (proceeds past validation)', async () => {
+    const res = await run({ type: 'topup', amount: 10, channel: 'epusdt' });
+    expect(res.statusCode).not.toBe(400);
+  });
+
   it('accepts integer amount in valid range and proceeds past validation', async () => {
     // No payment gateway configured in test env → expect 503 on the
     // channel client step, NOT 400/410. This proves validation passed.

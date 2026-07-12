@@ -19,7 +19,12 @@ import type {
 
 import { epusdtFromEnv } from "../lib/payment/epusdt.js";
 import { xunhupayFromEnv } from "../lib/payment/xunhupay.js";
-import type { OrderRecord, PaymentChannelClient } from "../lib/payment/types.js";
+import { dodoFromEnv } from "../lib/payment/dodo.js";
+import type {
+  OrderRecord,
+  PaymentChannelClient,
+  WebhookEvent,
+} from "../lib/payment/types.js";
 import {
   getOrder,
   getUser,
@@ -40,7 +45,7 @@ import * as Sentry from "@sentry/node";
  *  tag (not in the message) so Sentry groups by failure mode, not
  *  by per-order noise. */
 function reportSettleFailure(opts: {
-  stage: 'plan_bind' | 'topup_mint' | 'topup_redeem' | 'topup_user_link' | 'topup_amount_missing' | 'unknown_skuType';
+  stage: 'plan_bind' | 'topup_mint' | 'topup_redeem' | 'topup_user_link' | 'topup_amount_missing' | 'amount_mismatch' | 'unknown_skuType';
   channel: string;
   orderId: string;
   userId: string;
@@ -148,17 +153,43 @@ async function processWebhook(
     return textResponse(403, "bad_signature");
   }
 
+  await settleWebhookEvent(verified, channel);
+  return textResponse(200, ack);
+}
+
+/**
+ * Channel-agnostic settlement: look up the order and apply the verified
+ * event to it. Shared by the body-signature channels (via processWebhook)
+ * and header-signature channels (dodo) that verify on their own.
+ */
+async function settleWebhookEvent(
+  verified: WebhookEvent,
+  channel: string,
+): Promise<void> {
+  const tag = `[webhook/${channel}]`;
+
   const order = await getOrder(verified.orderId);
   if (!order) {
+    // Acked upstream regardless; the order genuinely doesn't exist on our
+    // side — nothing to do.
     console.warn(`${tag} unknown order`, { orderId: verified.orderId });
-    // Returning the ack tells the gateway to stop retrying; the order
-    // genuinely doesn't exist on our side — nothing to do.
-    return textResponse(200, ack);
+    return;
+  }
+
+  // Cross-channel guard: an event from channel X must not settle an order
+  // created on channel Y, even with a valid signature (codex review P1).
+  if (order.channel !== channel) {
+    console.warn(`${tag} channel mismatch — refusing to settle`, {
+      orderId: order.orderId,
+      orderChannel: order.channel,
+      eventChannel: channel,
+    });
+    return;
   }
 
   if (verified.status === "expired") {
     await markOrderStatus({ orderId: order.orderId, status: "expired" });
-    return textResponse(200, ack);
+    return;
   }
 
   if (verified.status === "paid") {
@@ -176,6 +207,51 @@ async function processWebhook(
         skuType: order.skuType,
         amountActual: verified.amountActual,
       });
+      // Amount-integrity guard (Dodo only — epusdt/xunhupay carry no
+      // `currency` and their amount units differ, so they'd all false-hold).
+      // Fail CLOSED: never grant on an unverifiable amount. A hold is
+      // recoverable (money arrived, ops reviews + credits manually), whereas
+      // an auto-grant on a bad amount is not. Hold when:
+      //   • currency missing or paid amount ≤ 0 (can't verify at all), or
+      //   • same-currency shortfall (e.g. an unexpected discount).
+      // Different-currency-with-positive-amount is Dodo adaptive currency
+      // (presentment ≠ our USD base); we can't FX-compare, but the order
+      // amount is server-set and discount-code input is disabled on our
+      // checkout, so we credit and log for visibility rather than block
+      // every foreign-currency payment.
+      if (channel === 'dodo') {
+        const paid = verified.amountActual;
+        const cur = verified.currency ?? '';
+        const unverifiable = !cur || paid <= 0;
+        const sameCurrencyShort =
+          cur === order.currency && paid < order.amount - 0.01;
+        if (unverifiable || sameCurrencyShort) {
+          await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+          reportSettleFailure({
+            stage: 'amount_mismatch',
+            channel,
+            orderId: order.orderId,
+            userId: order.userId,
+            extra: {
+              expectedAmount: order.amount,
+              orderCurrency: order.currency,
+              paidAmount: paid,
+              paidCurrency: cur || null,
+              reason: unverifiable ? 'unverifiable' : 'shortfall',
+            },
+          });
+          return;
+        }
+        if (cur !== order.currency) {
+          console.warn(`${tag} crediting foreign-currency payment (adaptive)`, {
+            orderId: order.orderId,
+            paidAmount: paid,
+            paidCurrency: cur,
+            orderAmount: order.amount,
+            orderCurrency: order.currency,
+          });
+        }
+      }
       if (order.skuType === 'topup') {
         await applyTopupToUser(order, channel);
       } else {
@@ -194,8 +270,6 @@ async function processWebhook(
       }
     }
   }
-
-  return textResponse(200, ack);
 }
 
 // ---------- POST /v1/billing/webhook/epusdt ----------
@@ -212,6 +286,88 @@ export const xunhupayWebhookHandler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> => {
   return processWebhook(event, xunhupayFromEnv(), "xunhupay", "success");
+};
+
+// ---------- POST /v1/billing/webhook/dodo ----------
+
+/**
+ * Dodo signs headers + RAW body (Standard Webhooks), so it can't go
+ * through processWebhook's parse-then-verify flow — order matters: the
+ * HMAC must be computed over the exact bytes received.
+ */
+export const dodoWebhookHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const tag = "[webhook/dodo]";
+  const client = dodoFromEnv();
+  if (!client) {
+    console.error(`${tag} not configured — refusing`);
+    return textResponse(503, "dodo_not_configured");
+  }
+
+  const rawBody = event.isBase64Encoded
+    ? Buffer.from(event.body ?? "", "base64").toString("utf8")
+    : (event.body ?? "");
+
+  // Header names are case-insensitive; normalize once.
+  const headers: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(event.headers ?? {})) {
+    headers[k.toLowerCase()] = v;
+  }
+
+  const evt = client.verifyWebhook(headers, rawBody);
+  if (!evt) {
+    console.warn(`${tag} signature verification failed`);
+    return textResponse(403, "bad_signature");
+  }
+
+  if (evt.type === "payment.succeeded") {
+    await settleWebhookEvent(
+      {
+        orderId: evt.orderId,
+        upstreamTradeId: evt.upstreamTradeId,
+        amountActual: evt.amountActual,
+        currency: evt.currency,
+        status: "paid",
+      },
+      "dodo",
+    );
+  } else if (/^(refund|dispute)\./.test(evt.type)) {
+    // Money is moving back while the credits stay spendable. No automated
+    // claw-back yet (needs a newapi debit flow) — page ops loudly through
+    // Sentry so每一笔都有人工跟进 (codex review P1). Ack 200 so Dodo stops
+    // retrying: the alert, not the redelivery, is the durable record.
+    console.error(`${tag} refund/dispute received — manual claw-back needed`, {
+      type: evt.type,
+      orderId: evt.orderId,
+      upstreamTradeId: evt.upstreamTradeId,
+      amountActual: evt.amountActual,
+    });
+    Sentry.captureMessage(`dodo ${evt.type} needs manual claw-back`, {
+      level: "error",
+      tags: { kind: "refund_dispute", channel: "dodo", eventType: evt.type },
+      extra: {
+        orderId: evt.orderId,
+        upstreamTradeId: evt.upstreamTradeId,
+        amountActual: evt.amountActual,
+      },
+    });
+  } else {
+    // payment.failed and other non-terminal events — log only, do NOT mark
+    // the order failed. A Dodo checkout session lets the buyer retry after a
+    // declined attempt, so payment.failed is per-ATTEMPT, not per-order: a
+    // later payment.succeeded can still arrive for the same orderId. Since
+    // markOrderPaidIfPending only transitions pending orders, terminating
+    // here would silently drop a retried, genuinely-paid payment (codex
+    // review P1). The order stays pending; the checkout's own TTL plus the
+    // status page's 30-min poll cap bound the wait on a truly-abandoned one.
+    console.info(`${tag} non-terminal event, order stays pending`, {
+      type: evt.type,
+      orderId: evt.orderId,
+    });
+  }
+
+  return textResponse(200, "ok");
 };
 
 /**

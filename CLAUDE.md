@@ -8,7 +8,7 @@ TokenBoss 是一个面向 **AI Agent 使用者**的 token 经济产品 — OpenC
 
 **In scope（本仓）：**
 - Frontend (`frontend/`) — React 18 + Vite + Tailwind 3.4
-- Backend (`backend/`) — Node 20+ + TypeScript，部署 **Zeabur**（`backend/Dockerfile` + `backend/zbpack.json`）；`backend/template.yaml` 是历史 AWS SAM 配置，当前不用
+- Backend (`backend/`) — Node 20+ + TypeScript，部署 **Zeabur**（`backend/Dockerfile` + `backend/zbpack.json`，跑 `node dist/local.js`）
 - ClawRouter (`ClawRouter/`) — 独立 npm package `@blockrun/clawrouter`（wallet auth + x402 micropayments + 55+ LLM 路由）
 - Spec & plan docs (`openspec/`) — per-REQ changes + 长期 capability specs
 - 方法论 (`WORKFLOW.md`)
@@ -81,9 +81,9 @@ gh auth switch --user stablehunter-dev
 | Backend | **Zeabur**（`backend/zbpack.json` + `backend/Dockerfile`） | — |
 | ClawRouter | **npm publish**（独立 package） | — |
 
-> `backend/template.yaml` + `npm run deploy` (sam build) 是历史 AWS SAM 配置，**当前未启用**。要么后续清理掉，要么留作未来 AWS 部署的备份。
+> Backend 唯一部署路径是 Zeabur 跑 `node dist/local.js`，路由全在 `backend/src/local.ts`。历史的 AWS SAM 配置（`template.yaml` + `sam` 系列脚本）已于 2026-07 清理删除。
 
-> `frontend/vercel.json` 是历史遗留，不是当前部署路径。
+> 前端 SPA fallback 由 `frontend/nginx.conf`（`try_files … /index.html`）处理，走 Zeabur nginx。历史的 `frontend/vercel.json` 已于 2026-07 清理删除。
 
 ## 工作风格约定
 

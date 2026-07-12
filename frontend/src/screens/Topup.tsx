@@ -5,6 +5,8 @@ import { ChannelOption } from '../components/ChannelOption';
 import { RedeemCodeModal } from '../components/RedeemCodeModal';
 import { dispatchCheckout } from '../lib/checkoutFlow';
 import { api, type BillingChannel } from '../lib/api';
+import { SHOW_ALIPAY_A2M, SHOW_DODO } from '../lib/paymentVisibility';
+import { DEFAULT_CREDIT_RATE, MIN_TOPUP_USD, MAX_TOPUP_USD, creditFor } from '../lib/creditDefaults';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -13,40 +15,77 @@ const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C191
  *  单笔上限 ¥50）。0.01 验证档是运维用的，不对用户展示。 */
 const A2M_DENOMS = [10, 50] as const;
 
-/** 美元走 USDT 网页充值（epusdt），金额自由。 */
-const USD_PRESETS = [50, 100, 500] as const;
-const MIN_AMOUNT = 1;
-const MAX_AMOUNT = 99999;
-/** Must match backend USD_TO_CREDIT_RATE in paymentHandlers.ts.
- *  USDT 渠道下付 $1 → 到账 $7 等价额度（按汇率把美金折算回人民币等价，
- *  再用 ¥1 = $1 baseline 转额度）。 */
-const USD_TO_CREDIT_RATE = 7;
+/** 美元渠道（USDT / 卡·微信）充值档位，$10 起充、整数。 */
+const USD_PRESETS = [10, 20, 50, 100] as const;
+
+/** 兜底默认与 creditFor 来自 ../lib/creditDefaults（后端 creditConfig 的前端
+ *  镜像，pricing 文案也读它）；权威值仍是 /v1/billing/config，加载后覆盖。 */
+const FALLBACK_RATE = DEFAULT_CREDIT_RATE;
+const FALLBACK_MIN = MIN_TOPUP_USD;
+const FALLBACK_MAX = MAX_TOPUP_USD;
 
 function agentPrompt(denom: number): string {
   return `帮我给 TokenBoss 充值 ${denom} 元（支付宝 AI 付，按 skill.md 的 402 充值流程）`;
 }
 
-type Currency = 'cny' | 'usd';
+/** 支付方式决定路径（gh-6）：
+ *    a2m  → 人民币 · Agent 内支付宝（网页不收单）
+ *    usdt → 美元 · USDT 网页支付（epusdt）
+ *    dodo → 美元 · 银行卡/微信托管收银台（Dodo MoR）
+ *  xunhupay 已下线。 */
+type PayMethod = 'a2m' | 'usdt' | 'dodo';
+
+/** SHOW_ALIPAY_A2M / SHOW_DODO 现在来自 ../lib/paymentVisibility（单一来源，
+ *  Plans 徽章也读它），避免各屏各写一份导致宣传与 checkout 不一致。 */
+
+/** 币种自由充值渠道里，永远可用的那个（USDT）——A2M/Dodo 都隐藏时
+ *  兜底选它，保证充值页始终有一条能走通的路。 */
+const DEFAULT_METHOD: PayMethod = SHOW_ALIPAY_A2M
+  ? 'a2m'
+  : 'usdt';
 type UsdPreset = (typeof USD_PRESETS)[number] | 'custom';
 
 export default function Topup() {
   const navigate = useNavigate();
 
-  // 币种决定支付路径（gh-6）：人民币 → Agent 内支付宝 A2M（网页不收单）；
-  // 美元 → USDT 网页支付（epusdt）。xunhupay 已下线。
-  const [currency, setCurrency] = useState<Currency>('cny');
+  const [method, setMethod] = useState<PayMethod>(DEFAULT_METHOD);
 
   // —— 人民币 · Agent 充值 ——
   const [denom, setDenom] = useState<(typeof A2M_DENOMS)[number]>(A2M_DENOMS[1]);
   const [copied, setCopied] = useState(false);
 
-  // —— 美元 · USDT 网页充值 ——
-  const channel: BillingChannel = 'epusdt';
+  // —— 美元 · 网页充值（USDT / 卡·微信 共用金额区） ——
+  const channel: BillingChannel = method === 'dodo' ? 'dodo' : 'epusdt';
   const [preset, setPreset] = useState<UsdPreset>(USD_PRESETS[0]);
   const [customAmountStr, setCustomAmountStr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
+
+  // 充值配置（倍率/起充/上限）从后端拉，权威源单一。拉到前用兜底默认，
+  // 到账额度实际以后端结算为准，短暂显示兜底值不影响正确性。
+  const [cfg, setCfg] = useState<{
+    rates: { epusdt: number; dodo: number };
+    min: number;
+    max: number;
+  }>({ rates: { epusdt: FALLBACK_RATE, dodo: FALLBACK_RATE }, min: FALLBACK_MIN, max: FALLBACK_MAX });
+  useEffect(() => {
+    let alive = true;
+    api
+      .billingConfig()
+      .then((c) => {
+        if (alive) setCfg({ rates: c.creditRates, min: c.minTopup, max: c.maxTopup });
+      })
+      .catch(() => {
+        /* 拉取失败保持兜底默认；结算仍以后端为准 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const rate = method === 'dodo' ? cfg.rates.dodo : cfg.rates.epusdt;
+  const MIN_AMOUNT = cfg.min;
+  const MAX_AMOUNT = cfg.max;
 
   async function copyAgentPrompt() {
     try {
@@ -73,7 +112,7 @@ export default function Topup() {
   // Clear stale submit error as soon as the user edits any input.
   useEffect(() => {
     setError(null);
-  }, [currency, preset, customAmountStr]);
+  }, [method, preset, customAmountStr]);
 
   async function submit() {
     if (amount == null) {
@@ -119,25 +158,42 @@ export default function Topup() {
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
             支付方式
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div
+            className={`grid grid-cols-1 gap-3 ${
+              { 1: '', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3' }[
+                [SHOW_ALIPAY_A2M, true, SHOW_DODO].filter(Boolean).length
+              ] ?? 'sm:grid-cols-2'
+            }`}
+          >
+            {SHOW_ALIPAY_A2M && (
+              <ChannelOption
+                active={method === 'a2m'}
+                onClick={() => setMethod('a2m')}
+                title="支付宝"
+                subtitle="人民币 · 在你的 Agent 里完成充值"
+                tag="推荐"
+              />
+            )}
             <ChannelOption
-              active={currency === 'cny'}
-              onClick={() => setCurrency('cny')}
-              title="人民币 · 支付宝"
-              subtitle="在你的 Agent 里完成充值"
-              tag="推荐"
-            />
-            <ChannelOption
-              active={currency === 'usd'}
-              onClick={() => setCurrency('usd')}
-              title="美元 · 稳定币"
+              active={method === 'usdt'}
+              onClick={() => setMethod('usdt')}
+              title="稳定币"
               subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
+            {SHOW_DODO && (
+              <ChannelOption
+                active={method === 'dodo'}
+                onClick={() => setMethod('dodo')}
+                title="卡 · 微信"
+                subtitle="Visa / 银联 / 微信扫码 · 美元计价"
+                tag="USD"
+              />
+            )}
           </div>
         </section>
 
-        {currency === 'cny' ? (
+        {method === 'a2m' ? (
           /* —— 人民币：Agent 内支付宝充值（A2M 402） —— */
           <section className="mb-6">
             <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
@@ -252,15 +308,19 @@ export default function Topup() {
 
             {amount != null && (
               <div className="font-mono text-[12px] text-text-secondary">
-                → 到账 ${amount * USD_TO_CREDIT_RATE} 美金
-                <span className="text-ink-3"> · $1 USDT ≈ $7 额度（按汇率折算）</span>
+                → 到账 <span className="font-bold text-ink">${creditFor(amount, rate)}</span> 额度
+                <span className="text-ink-3">
+                  {method === 'dodo'
+                    ? ` · 付 $${amount}（微信/卡按人民币结算约 ¥${Math.round(amount * rate)}）`
+                    : ` · 付 $${amount} USDT`}
+                </span>
               </div>
             )}
           </section>
         )}
 
         {/* Error（仅美元网页下单会产生） */}
-        {currency === 'usd' && error && (
+        {method !== 'a2m' && error && (
           <div className="mb-5 p-3 border-2 border-red-600 rounded-md bg-red-50 font-mono text-[12px] text-red-700">
             {error}
           </div>
@@ -274,7 +334,7 @@ export default function Topup() {
           >
             ← 返回控制台
           </Link>
-          {currency === 'usd' && (
+          {method !== 'a2m' && (
             <button
               onClick={submit}
               disabled={submitting || amount == null}
@@ -301,7 +361,14 @@ export default function Topup() {
 
         <div className="mt-10 font-mono text-[11.5px] text-ink-3 leading-relaxed">
           · 充值后立即到账，永不过期，全模型可用<br />
-          · 充值不支持退款<br />
+          ·{' '}
+          <Link
+            to="/refund"
+            className="text-ink-3 hover:text-ink underline underline-offset-4 decoration-1"
+          >
+            充值不支持退款
+          </Link>
+          <br />
           ·{' '}
           <button
             type="button"

@@ -24,7 +24,13 @@ import {
 } from "../lib/auth.js";
 import { epusdtFromEnv, EpusdtError } from "../lib/payment/epusdt.js";
 import { xunhupayFromEnv, XunhupayError } from "../lib/payment/xunhupay.js";
+import { dodoFromEnv, DodoError } from "../lib/payment/dodo.js";
 import type { PaymentChannel } from "../lib/payment/types.js";
+import {
+  MIN_TOPUP_AMOUNT,
+  MAX_TOPUP_AMOUNT,
+  creditRateFor,
+} from "../lib/creditConfig.js";
 import {
   createOrder,
   getOrder,
@@ -83,7 +89,7 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
 }
 
 function isChannel(v: unknown): v is PaymentChannel {
-  return v === "epusdt" || v === "xunhupay";
+  return v === "epusdt" || v === "xunhupay" || v === "dodo";
 }
 
 /**
@@ -157,12 +163,6 @@ function shapeOrder(rec: OrderRecord) {
 
 // ---------- POST /v1/billing/orders ----------
 
-const MAX_TOPUP_AMOUNT = 99999;
-/** USD-paying channels (epusdt) credit FX-converted USD额度 to the user.
- *  ¥1 = $1 baseline still holds for RMB; USD payments effectively pay
- *  the spot CNY/USD rate and get credited at the same baseline.
- *  Hardcoded for v1; bump on noticeable FX drift. */
-const USD_TO_CREDIT_RATE = 7;
 
 function isOrderType(v: unknown): v is 'plan' | 'topup' {
   return v === 'plan' || v === 'topup';
@@ -187,7 +187,7 @@ export const createOrderHandler = async (
   const type = rawType;
 
   if (!isChannel(body.channel))
-    return jsonError(400, "invalid_request_error", "channel must be epusdt|xunhupay.");
+    return jsonError(400, "invalid_request_error", "channel must be epusdt|dodo.");
   const channel = body.channel;
 
   // xunhupay 已下线（gh-6）：限流不可用，由 Agent 内支付宝 A2M 充值
@@ -205,9 +205,11 @@ export const createOrderHandler = async (
 
   // Channel determines pricing currency:
   //   epusdt   → USD (USDT-TRC20)
+  //   dodo     → USD (MoR hosted checkout: cards / Apple Pay / WeChat Pay)
   //   xunhupay → CNY (Alipay/WeChat fiat gateway, CNY only)
   // Server-derived; client-supplied currency is ignored.
-  const currency: "CNY" | "USD" = channel === "epusdt" ? "USD" : "CNY";
+  const currency: "CNY" | "USD" =
+    channel === "epusdt" || channel === "dodo" ? "USD" : "CNY";
 
   let skuType: OrderSkuType;
   let amount: number;
@@ -249,22 +251,26 @@ export const createOrderHandler = async (
       typeof rawAmount !== 'number' ||
       !Number.isFinite(rawAmount) ||
       !Number.isInteger(rawAmount) ||
-      rawAmount < 1 ||
+      rawAmount < MIN_TOPUP_AMOUNT ||
       rawAmount > MAX_TOPUP_AMOUNT
     ) {
       return jsonError(
         400,
         "invalid_request_error",
-        `amount must be an integer between 1 and ${MAX_TOPUP_AMOUNT}.`,
+        `amount must be an integer between ${MIN_TOPUP_AMOUNT} and ${MAX_TOPUP_AMOUNT}.`,
         "invalid_amount",
       );
     }
     skuType = 'topup';
     amount = rawAmount;
-    // ¥1 = $1 baseline (spec credits-economy § 4) for RMB; USD pays spot
-    // FX so $1 USDT → $7 credited. Stored independently of amount/currency
-    // so settle is decoupled from FX drift between order and webhook.
-    topupAmountUsd = currency === 'USD' ? rawAmount * USD_TO_CREDIT_RATE : rawAmount;
+    // 上游按人民币结算、额度即人民币用量。USD 渠道付的美元按 creditRateFor
+    // 倍率（≈汇率扣手续费缓冲）折成额度；RMB 渠道 1:1。round 到分，避免
+    // 6.8×整数的浮点尾巴（如 11×6.8=74.8000…1）落进 DB。存独立字段，让结算
+    // 与下单/回调之间的汇率漂移解耦。
+    topupAmountUsd =
+      currency === 'USD'
+        ? Math.round(rawAmount * creditRateFor(channel) * 100) / 100
+        : rawAmount;
     skuLabel = 'topup';
   }
 
@@ -286,6 +292,16 @@ export const createOrderHandler = async (
         "service_unavailable",
         "epusdt is not configured (set EPUSDT_BASE_URL / EPUSDT_PID / EPUSDT_SECRET).",
         "epusdt_not_configured",
+      );
+    }
+  } else if (channel === "dodo") {
+    client = dodoFromEnv();
+    if (!client) {
+      return jsonError(
+        503,
+        "service_unavailable",
+        "dodo is not configured (set DODO_API_KEY / DODO_PRODUCT_ID).",
+        "dodo_not_configured",
       );
     }
   } else {
@@ -322,7 +338,11 @@ export const createOrderHandler = async (
     });
   } catch (err) {
     const status =
-      err instanceof EpusdtError || err instanceof XunhupayError ? 502 : 500;
+      err instanceof EpusdtError ||
+      err instanceof XunhupayError ||
+      err instanceof DodoError
+        ? 502
+        : 500;
     return jsonError(
       status,
       "upstream_error",

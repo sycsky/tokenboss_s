@@ -101,7 +101,7 @@ flowchart TD
 |---|---|---|
 | **结构** | 三 stream 边界：`frontend/`（React + Vite · Zeabur）· `backend/`（Node + TypeScript · Zeabur）· `ClawRouter/`（独立 npm package，wallet auth + x402） | `ls`, `git ls-files \| head -50` |
 | **分支** | 默认 `main` · 当前 HEAD · 相关 `feature/*` 未 merge | `git branch -a`, `git log origin/main --oneline \| head -20` |
-| **数据层** | backend 当前用的存储（grep 实际 import：`@aws-sdk/client-dynamodb` / `better-sqlite3` / 其他）· 表/集合 schema · 是否需要新表 | `grep -rn "from '@aws-sdk\\|better-sqlite3'" backend/src` |
+| **数据层** | backend 用 better-sqlite3（`src/lib/store.ts`）· 表 schema · 是否需要新表 | `grep -rn "better-sqlite3\\|CREATE TABLE" backend/src` |
 | **Test infra** | backend/frontend: vitest · ClawRouter: vitest + resilience suites · E2E: playwright (`.playwright-mcp/`) · `npm test` 各端能跑吗 | 实际跑一遍 |
 | **Lint / type baseline** | `npm run typecheck` 现在过吗？每个 stream 单独跑 · baseline warning 多少？ | 三个 stream 各跑一次 |
 | **OpenSpec 状态** | `openspec/changes/` 已有未 archive 的 REQ？跟本次冲突吗？ | `ls openspec/changes/` |
@@ -112,7 +112,7 @@ flowchart TD
 
 agent 写完 `repo-reality.md` 后，人工 1-2 min 过一遍：
 
-1. **PM 描述对得上吗？** 你以为 backend 跑 SQLite，其实是 DynamoDB / 你以为 X 在 main 上但还在 feature/* 等
+1. **PM 描述对得上吗？** 你以为某模块在 A 其实在 B / 你以为 X 在 main 上但还在 feature/* 等
 2. **跨分支依赖怎么处理？** 等 X 合 main / fork off X / cherry-pick X / 基于 main 起
 3. **Lint baseline 怎么处理？** baseline 有 N 个预存 warning 时，Stage 3 dispatch 写"不引入 NEW warning"而不是"全 clean"
 4. **三 stream 边界判断对吗？** REQ 真的只动 frontend 吗？是否涉及 backend API 改动 / ClawRouter 路由更新？
@@ -135,7 +135,7 @@ agent 写完 `repo-reality.md` 后，人工 1-2 min 过一遍：
 - 相关未 merge feature: （列出）
 
 ## 数据层
-- backend 当前用 <DynamoDB / better-sqlite3 / 其他>（grep 验证）
+- backend 用 better-sqlite3（`src/lib/store.ts`；grep 验证）
 - 表/集合 schema: <列出>
 - 本期需要新建表？是 / 否
 
@@ -149,8 +149,7 @@ agent 写完 `repo-reality.md` 后，人工 1-2 min 过一遍：
 - ClawRouter: clean / N warnings
 
 ## 部署
-- frontend + backend 都部署 Zeabur（`zbpack.json` + Dockerfile）
-- `backend/template.yaml` 是历史 AWS SAM 配置，**当前不用**
+- frontend + backend 都部署 Zeabur（`zbpack.json` + Dockerfile）；backend 跑 `node dist/local.js`，路由全在 `backend/src/local.ts`（历史 AWS SAM 配置已清理）
 - 本期改动是否影响 Zeabur 部署管道？env 变量有新增？
 
 ## 跨分支依赖
@@ -220,7 +219,7 @@ proposal.md 和 specs/ 生成后审查 4 件事：
 
 agent 读 specs/ 后自动生成 design.md + tasks.md：
 
-- 技术选型 + 架构图 + 认证策略 + 数据模型（DynamoDB 表设计 / API 契约）
+- 技术选型 + 架构图 + 认证策略 + 数据模型（SQLite 表设计 / API 契约）
 - tasks.md 颗粒到文件级 / 代码级步骤
 - **禁止 TBD / 占位符** — 任何未决项 inline 解决
 
@@ -234,7 +233,7 @@ writing-plans 写完后**不要**直接进 Stage 2.5。5 min 把 plan 里所有 
 | 每个 `Modify: <path>:<line>` 文件存在？line 附近真有 plan 描述的代码？ | `sed -n '<line-3>,<line+10>p' <path>` | implementer 找不到改点 |
 | Plan 里每个 fn / class / type ref 当前真存在？签名是 plan 假设的样子吗？ | `grep -nE "function <name>\|class <name>\|type <name>" frontend/src backend/src ClawRouter/src` | implementer 写出不能编译的代码 |
 | Plan 里粘的代码片段编译片段层面 reasonable？ | 读一遍找 obvious mismatches | implementer 复制粘贴出编译错误 |
-| Plan 里每个 route / API path / DynamoDB key / config key 跟现有约定一致？ | `grep -rn "<key>"` | implementer 凭假设写出找不到的 key |
+| Plan 里每个 route / API path / DB 表字段 / config key 跟现有约定一致？ | `grep -rn "<key>"` | implementer 凭假设写出找不到的 key |
 
 发现问题 → **改 plan**（不是 implementer 阶段才改）。
 
@@ -322,7 +321,7 @@ Stage 2.5 通过后进**全自主执行模式（持续 1-4h）**：
 | 只动 ClawRouter | 1 |
 | frontend + backend 不重叠 | 2 |
 | 三端都动且不重叠 | 3 |
-| 跨端 contract 改动（API schema / DynamoDB schema） | 1 个 worktree 顺序做（避免 schema race） |
+| 跨端 contract 改动（API schema / DB schema） | 1 个 worktree 顺序做（避免 schema race） |
 
 | Stream | 范围 | 加载约定 |
 |---|---|---|
@@ -409,7 +408,7 @@ Stage 3 完整版按原计划跑（其余 stream subagent + TDD + Lint Hook 并�
 
 | 1 单元测试 | 2 集成测试 | 3 E2E 测试 | 4 安全测试 | 5 UI 测试 |
 |---|---|---|---|---|
-| 各 stream vitest | vitest（DynamoDB local / API） | playwright | `npm audit` + secrets scan | playwright screenshot diff |
+| 各 stream vitest | vitest（SQLite in-memory / API） | playwright | `npm audit` + secrets scan | playwright screenshot diff |
 
 ### 🟢 自动 — Superpowers verification-before-completion
 
@@ -591,7 +590,7 @@ PR 合并到 main 后**自动触发**：
 | ClawRouter | npm publish（独立 package `@blockrun/clawrouter`） |
 | Stage 4.5 Live Demo gate | **本期未启用**；后期 Zeabur preview 开通后再补 |
 
-> `backend/template.yaml` + `npm run deploy` (sam build) 是历史 AWS SAM 配置，**当前未启用**。grep 现实代码用什么数据层（DynamoDB SDK vs better-sqlite3）以 backend/src/ 实际 import 为准。
+> 历史 AWS 遗留（`template.yaml` + `sam` 脚本、`src/lib/ddb.ts` + DynamoDB SDK）已于 2026-07 清理删除。数据层是 better-sqlite3（`backend/src/lib/store.ts`），部署跑 `node dist/local.js`。
 
 ---
 

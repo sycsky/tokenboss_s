@@ -85,7 +85,7 @@
 - `/primitive` → `dist/primitive/index.html`
 - `/install/manual` → `dist/install/manual/index.html`
 
-未预渲染的路由 SHALL 继续走 Vercel SPA fallback 到 `dist/index.html`，行为与改动前一致。
+未预渲染的路由 SHALL 继续走 nginx SPA fallback（`try_files … /index.html`）到 `dist/index.html`，行为与改动前一致。
 
 #### Scenario: 用 curl 抓取预渲染过的路由
 - **WHEN** 用 `curl -A "LinkedInBot"` 请求 `https://<domain>/pricing`
@@ -94,7 +94,7 @@
 
 #### Scenario: 登录后路由继续走 SPA
 - **WHEN** 浏览器请求 `/console`
-- **THEN** Vercel 返回的 HTML 仍然是 SPA 兜底 `index.html`
+- **THEN** nginx 返回的 HTML 仍然是 SPA 兜底 `index.html`
 - **AND** 客户端 JS 接管渲染，行为与本次改动前一致
 
 #### Scenario: 预渲染时遭遇运行时错误
