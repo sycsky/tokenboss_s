@@ -1,4 +1,6 @@
 import type { Currency } from './currency';
+import { DEFAULT_CREDIT_RATE, MIN_TOPUP_USD, creditFor } from './creditDefaults';
+import { SHOW_DODO } from './paymentVisibility';
 
 /**
  * v1 pricing structure. RMB is the source of truth (production billing
@@ -87,17 +89,23 @@ export interface StandardRate {
   trialPill: string;
 }
 
+// Copy derived from the canonical credit config (creditDefaults, mirroring
+// backend /v1/billing/config) and the payment-visibility flags, so the
+// pricing page never advertises a stale rate/minimum or a hidden channel.
+// rmb methods list only what checkout actually offers; USDT is always there.
+const RMB_METHODS = SHOW_DODO ? '微信 / 银行卡 / USDT' : 'USDT';
+
 export const STANDARD_RATE: Record<Currency, StandardRate> = {
   rmb: {
     unit: '¥1',
     quota: '$1',
-    minTopup: '微信 / 银行卡 / USDT · 永不过期 · 全模型解锁',
+    minTopup: `${RMB_METHODS} · 永不过期 · 全模型解锁`,
     trialPill: '试用 / 24h',
   },
   usd: {
     unit: '$1 USD',
-    quota: '$7',
-    minTopup: '$1 起充 = $7 调用额度 · 永不过期 · 全模型解锁',
+    quota: `$${DEFAULT_CREDIT_RATE}`,
+    minTopup: `$${MIN_TOPUP_USD} 起充 = $${creditFor(MIN_TOPUP_USD)} 调用额度 · 永不过期 · 全模型解锁`,
     trialPill: '试用 / 24h',
   },
 };
