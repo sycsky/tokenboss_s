@@ -149,8 +149,7 @@ agent 写完 `repo-reality.md` 后，人工 1-2 min 过一遍：
 - ClawRouter: clean / N warnings
 
 ## 部署
-- frontend + backend 都部署 Zeabur（`zbpack.json` + Dockerfile）
-- `backend/template.yaml` 是历史 AWS SAM 配置，**当前不用**
+- frontend + backend 都部署 Zeabur（`zbpack.json` + Dockerfile）；backend 跑 `node dist/local.js`，路由全在 `backend/src/local.ts`（历史 AWS SAM 配置已清理）
 - 本期改动是否影响 Zeabur 部署管道？env 变量有新增？
 
 ## 跨分支依赖
@@ -591,7 +590,7 @@ PR 合并到 main 后**自动触发**：
 | ClawRouter | npm publish（独立 package `@blockrun/clawrouter`） |
 | Stage 4.5 Live Demo gate | **本期未启用**；后期 Zeabur preview 开通后再补 |
 
-> `backend/template.yaml` + `npm run deploy` (sam build) 是历史 AWS SAM 配置，**当前未启用**。grep 现实代码用什么数据层（DynamoDB SDK vs better-sqlite3）以 backend/src/ 实际 import 为准。
+> 历史 AWS SAM 配置（`template.yaml` + `sam` 脚本）已于 2026-07 清理删除。实际数据层以 `backend/src/` 的真实 import 为准（better-sqlite3；`src/lib/ddb.ts` 的 DynamoDB SDK 是尚未清理的历史死代码）。
 
 ---
 

@@ -11,7 +11,9 @@
  *   # or with mock upstream so no real aggregator is needed:
  *   MOCK_UPSTREAM=1 npm run dev
  *
- * Routes registered here must mirror those in `template.yaml`.
+ * This route table IS the production router: Zeabur runs `node dist/local.js`
+ * (see Dockerfile + zbpack.json), so every user-facing route must be
+ * registered here — there is no separate gateway config to keep in sync.
  */
 
 // Load .env.local before any other imports so env vars are visible to
