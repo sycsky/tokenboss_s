@@ -914,6 +914,14 @@ function a2mTopupVisible(): boolean {
   return process.env.SHOW_A2M_TOPUP === "1";
 }
 
+/** Dodo（微信 / 银行卡）渠道对用户可见吗？前端 Topup 的 SHOW_DODO 常量
+ *  控制充值页是否给这个入口；这里的 env 是它在后端侧的镜像，让 402 提示
+ *  只宣传充值页真的能选的支付方式。Dodo 上线时前端 SHOW_DODO=true 的同时
+ *  在后端设 SHOW_DODO_TOPUP=1。未设时只宣传永远可用的 USDT。 */
+function dodoTopupVisible(): boolean {
+  return process.env.SHOW_DODO_TOPUP === "1";
+}
+
 /**
  * Build the insufficient-balance 402 payload. The message doubles as an
  * agent instruction sheet: an agent that reads it knows the A2M topup
@@ -946,7 +954,9 @@ async function buildBalanceEmptyBody(): Promise<string> {
   const topupStep = a2mTopupVisible()
     ? `充值：让 Agent 按 ${apiBase}/skill.md 走支付宝充值（¥${amounts.join("/¥")}），` +
       `或网页 USDT → https://tokenboss.co/console`
-    : `充值：打开 https://tokenboss.co/billing/topup（微信 / 银行卡 / USDT）`;
+    : `充值：打开 https://tokenboss.co/billing/topup（${
+        dodoTopupVisible() ? "微信 / 银行卡 / USDT" : "USDT"
+      }）`;
   return JSON.stringify({
     error: {
       type: "insufficient_balance",

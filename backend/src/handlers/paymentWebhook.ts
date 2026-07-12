@@ -192,6 +192,13 @@ async function settleWebhookEvent(
     return;
   }
 
+  if (verified.status === "failed") {
+    // markOrderStatus only touches pending orders, so a late failure event
+    // can never revert an order that already settled as paid.
+    await markOrderStatus({ orderId: order.orderId, status: "failed" });
+    return;
+  }
+
   if (verified.status === "paid") {
     const settled = await markOrderPaidIfPending({
       orderId: order.orderId,
@@ -306,9 +313,22 @@ export const dodoWebhookHandler = async (
         amountActual: evt.amountActual,
       },
     });
+  } else if (evt.type === "payment.failed") {
+    // Definitive failure — flip the still-pending order to 'failed' so the
+    // status page shows the retry flow immediately instead of spinning
+    // "正在处理" until the 30-minute poll timeout.
+    await settleWebhookEvent(
+      {
+        orderId: evt.orderId,
+        upstreamTradeId: evt.upstreamTradeId,
+        amountActual: evt.amountActual,
+        status: "failed",
+      },
+      "dodo",
+    );
   } else {
-    // payment.failed etc. — log for ops, no state change. A failed
-    // payment leaves the order pending; the user just retries.
+    // Other informational events (payment.processing etc.) — log only, the
+    // order stays pending until a terminal succeeded/failed arrives.
     console.info(`${tag} ignoring event`, { type: evt.type, orderId: evt.orderId });
   }
 
