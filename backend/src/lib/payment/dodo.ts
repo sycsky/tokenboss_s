@@ -41,8 +41,10 @@ interface DodoConfig {
   /** The pay-what-you-want "Credit Top-up" product id. */
   productId: string;
   /** Standard Webhooks secret from Dashboard → Developer → Webhooks.
-   *  Optional at construction so order creation works before the webhook
-   *  endpoint is configured; verifyWebhook fails closed without it. */
+   *  Required by dodoFromEnv: a channel that can take money but never
+   *  hears the webhook strands every paid order in pending. Optional at
+   *  the type level only for unit tests; verifyWebhook fails closed
+   *  without it. */
   webhookSecret?: string;
 }
 
@@ -160,6 +162,14 @@ export class DodoClient {
     if (typeof body.type !== "string" || typeof orderId !== "string") {
       return null;
     }
+    // A succeeded event without a payment id is not a shape Dodo emits —
+    // reject rather than settle on an empty identity (codex review P1).
+    if (
+      body.type === "payment.succeeded" &&
+      typeof body.data?.payment_id !== "string"
+    ) {
+      return null;
+    }
 
     return {
       type: body.type,
@@ -174,11 +184,15 @@ export class DodoClient {
 }
 
 /** Build the client from DODO_* env vars; null when not configured
- *  (handler replies 503, same convention as epusdtFromEnv). */
+ *  (handler replies 503, same convention as epusdtFromEnv). The webhook
+ *  secret is deliberately part of "configured": without it checkouts
+ *  would still collect money while every webhook 403s, stranding paid
+ *  orders in pending (codex review P1). */
 export function dodoFromEnv(): DodoClient | null {
   const apiKey = process.env.DODO_API_KEY;
   const productId = process.env.DODO_PRODUCT_ID;
-  if (!apiKey || !productId) return null;
+  const webhookSecret = process.env.DODO_WEBHOOK_SECRET;
+  if (!apiKey || !productId || !webhookSecret) return null;
   return new DodoClient({
     apiKey,
     productId,
@@ -186,6 +200,6 @@ export function dodoFromEnv(): DodoClient | null {
       /\/+$/,
       "",
     ),
-    webhookSecret: process.env.DODO_WEBHOOK_SECRET,
+    webhookSecret,
   });
 }

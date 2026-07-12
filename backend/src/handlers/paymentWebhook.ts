@@ -176,6 +176,17 @@ async function settleWebhookEvent(
     return;
   }
 
+  // Cross-channel guard: an event from channel X must not settle an order
+  // created on channel Y, even with a valid signature (codex review P1).
+  if (order.channel !== channel) {
+    console.warn(`${tag} channel mismatch — refusing to settle`, {
+      orderId: order.orderId,
+      orderChannel: order.channel,
+      eventChannel: channel,
+    });
+    return;
+  }
+
   if (verified.status === "expired") {
     await markOrderStatus({ orderId: order.orderId, status: "expired" });
     return;
@@ -275,9 +286,29 @@ export const dodoWebhookHandler = async (
       },
       "dodo",
     );
+  } else if (/^(refund|dispute)\./.test(evt.type)) {
+    // Money is moving back while the credits stay spendable. No automated
+    // claw-back yet (needs a newapi debit flow) — page ops loudly through
+    // Sentry so每一笔都有人工跟进 (codex review P1). Ack 200 so Dodo stops
+    // retrying: the alert, not the redelivery, is the durable record.
+    console.error(`${tag} refund/dispute received — manual claw-back needed`, {
+      type: evt.type,
+      orderId: evt.orderId,
+      upstreamTradeId: evt.upstreamTradeId,
+      amountActual: evt.amountActual,
+    });
+    Sentry.captureMessage(`dodo ${evt.type} needs manual claw-back`, {
+      level: "error",
+      tags: { kind: "refund_dispute", channel: "dodo", eventType: evt.type },
+      extra: {
+        orderId: evt.orderId,
+        upstreamTradeId: evt.upstreamTradeId,
+        amountActual: evt.amountActual,
+      },
+    });
   } else {
-    // payment.failed / refund.* / dispute.* — log for ops, no state change.
-    // A failed payment leaves the order pending; the user just retries.
+    // payment.failed etc. — log for ops, no state change. A failed
+    // payment leaves the order pending; the user just retries.
     console.info(`${tag} ignoring event`, { type: evt.type, orderId: evt.orderId });
   }
 

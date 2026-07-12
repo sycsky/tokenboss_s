@@ -94,6 +94,26 @@ describe("DodoClient.verifyWebhook", () => {
     expect(evt).not.toBeNull();
   });
 
+  it("rejects payment.succeeded without a payment_id", () => {
+    const client = makeClient();
+    const body = JSON.stringify({
+      type: "payment.succeeded",
+      data: { total_amount: 100, metadata: { orderId: "tb_ord_x" } },
+    });
+    expect(client.verifyWebhook(sign(body), body)).toBeNull();
+  });
+
+  it("still accepts refund events without a payment_id", () => {
+    const client = makeClient();
+    const body = JSON.stringify({
+      type: "refund.succeeded",
+      data: { total_amount: 100, metadata: { orderId: "tb_ord_x" } },
+    });
+    const evt = client.verifyWebhook(sign(body), body);
+    expect(evt).not.toBeNull();
+    expect(evt!.type).toBe("refund.succeeded");
+  });
+
   it("returns null for events without an orderId in metadata", () => {
     const client = makeClient();
     const body = JSON.stringify({
