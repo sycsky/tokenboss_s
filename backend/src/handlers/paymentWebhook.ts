@@ -45,7 +45,7 @@ import * as Sentry from "@sentry/node";
  *  tag (not in the message) so Sentry groups by failure mode, not
  *  by per-order noise. */
 function reportSettleFailure(opts: {
-  stage: 'plan_bind' | 'topup_mint' | 'topup_redeem' | 'topup_user_link' | 'topup_amount_missing' | 'unknown_skuType';
+  stage: 'plan_bind' | 'topup_mint' | 'topup_redeem' | 'topup_user_link' | 'topup_amount_missing' | 'amount_mismatch' | 'unknown_skuType';
   channel: string;
   orderId: string;
   userId: string;
@@ -214,6 +214,35 @@ async function settleWebhookEvent(
         skuType: order.skuType,
         amountActual: verified.amountActual,
       });
+      // Amount-integrity guard: only grant credit when the amount the
+      // gateway actually collected matches the order. We can only compare
+      // safely when the event's settlement currency equals the order's own
+      // currency — adaptive currency (Dodo) can report a presentment
+      // currency we can't FX-compare here, so those skip the numeric check
+      // (the order amount is one we set server-side and gateways don't let
+      // buyers lower it without a discount code, which we don't enable).
+      // A same-currency shortfall (e.g. an unexpected discount) must NOT
+      // receive full credits: hold as settleStatus='failed' + alert ops.
+      if (
+        verified.currency &&
+        verified.currency === order.currency &&
+        verified.amountActual > 0 &&
+        verified.amountActual < order.amount - 0.01
+      ) {
+        await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+        reportSettleFailure({
+          stage: 'amount_mismatch',
+          channel,
+          orderId: order.orderId,
+          userId: order.userId,
+          extra: {
+            expectedAmount: order.amount,
+            paidAmount: verified.amountActual,
+            currency: verified.currency,
+          },
+        });
+        return;
+      }
       if (order.skuType === 'topup') {
         await applyTopupToUser(order, channel);
       } else {
@@ -289,6 +318,7 @@ export const dodoWebhookHandler = async (
         orderId: evt.orderId,
         upstreamTradeId: evt.upstreamTradeId,
         amountActual: evt.amountActual,
+        currency: evt.currency,
         status: "paid",
       },
       "dodo",

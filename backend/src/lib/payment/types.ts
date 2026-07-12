@@ -135,4 +135,8 @@ export interface WebhookEvent {
   status: OrderStatus;
   blockTxId?: string;
   receiveAddress?: string;
+  /** Currency (ISO, upper-case) of amountActual, when the channel reports
+   *  it. Lets settlement compare the paid amount to the order only when the
+   *  currencies match. Absent for channels that don't surface it. */
+  currency?: string;
 }

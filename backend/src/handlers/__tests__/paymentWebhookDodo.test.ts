@@ -15,6 +15,7 @@ import {
 } from '../../lib/store.js';
 import * as dodoMod from '../../lib/payment/dodo.js';
 import type { DodoWebhookEvent } from '../../lib/payment/dodo.js';
+import { newapi } from '../../lib/newapi.js';
 import { dodoWebhookHandler } from '../paymentWebhook.js';
 
 const userId = 'u_test_dodo_webhook';
@@ -69,6 +70,7 @@ describe('dodoWebhookHandler — payment.failed', () => {
       orderId,
       upstreamTradeId: 'pay_failed_1',
       amountActual: 0,
+      currency: 'USD',
     });
 
     const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
@@ -102,6 +104,7 @@ describe('dodoWebhookHandler — payment.failed', () => {
       orderId,
       upstreamTradeId: 'pay_failed_late',
       amountActual: 0,
+      currency: 'USD',
     });
 
     const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
@@ -109,5 +112,110 @@ describe('dodoWebhookHandler — payment.failed', () => {
 
     const back = await getOrder(orderId);
     expect(back?.status).toBe('paid');
+  });
+});
+
+describe('dodoWebhookHandler — amount integrity', () => {
+  it('holds settlement (no credit) when a same-currency payment underpays', async () => {
+    const orderId = 'tb_ord_dodo_underpaid';
+    await createOrder({
+      orderId,
+      userId,
+      skuType: 'topup',
+      channel: 'dodo',
+      amount: 50,
+      currency: 'USD',
+      topupAmountUsd: 340,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    const mintSpy = vi.spyOn(newapi, 'createRedemption');
+    stubDodo({
+      type: 'payment.succeeded',
+      orderId,
+      upstreamTradeId: 'pay_underpaid',
+      amountActual: 30, // paid $30 for a $50 order — discount/tamper
+      currency: 'USD',
+    });
+
+    const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+
+    const back = await getOrder(orderId);
+    expect(back?.status).toBe('paid'); // money did arrive
+    expect(back?.settleStatus).toBe('failed'); // but credit is held for review
+    expect(mintSpy).not.toHaveBeenCalled(); // never granted
+  });
+
+  it('grants credit when the paid amount matches the order', async () => {
+    const orderId = 'tb_ord_dodo_exact';
+    await createOrder({
+      orderId,
+      userId,
+      skuType: 'topup',
+      channel: 'dodo',
+      amount: 50,
+      currency: 'USD',
+      topupAmountUsd: 340,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    const mintSpy = vi.spyOn(newapi, 'createRedemption').mockResolvedValue('CODE-OK');
+    vi.spyOn(newapi, 'loginUser').mockResolvedValue({ cookie: 'c', userId: 77 });
+    vi.spyOn(newapi, 'redeemCode').mockResolvedValue({ quotaAdded: 340 * 500_000 });
+
+    stubDodo({
+      type: 'payment.succeeded',
+      orderId,
+      upstreamTradeId: 'pay_exact',
+      amountActual: 50,
+      currency: 'USD',
+    });
+
+    const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+
+    const back = await getOrder(orderId);
+    expect(back?.status).toBe('paid');
+    expect(back?.settleStatus).toBe('settled');
+    expect(mintSpy).toHaveBeenCalledWith({ name: orderId, quotaUsd: 340 });
+  });
+
+  it('skips the numeric check when settlement currency differs (adaptive currency)', async () => {
+    const orderId = 'tb_ord_dodo_adaptive';
+    await createOrder({
+      orderId,
+      userId,
+      skuType: 'topup',
+      channel: 'dodo',
+      amount: 50,
+      currency: 'USD',
+      topupAmountUsd: 340,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    const mintSpy = vi.spyOn(newapi, 'createRedemption').mockResolvedValue('CODE-ADP');
+    vi.spyOn(newapi, 'loginUser').mockResolvedValue({ cookie: 'c', userId: 77 });
+    vi.spyOn(newapi, 'redeemCode').mockResolvedValue({ quotaAdded: 340 * 500_000 });
+
+    // Presentment currency (XAF) with a numerically smaller-than-USD-amount
+    // main unit must NOT be misread as an underpayment.
+    stubDodo({
+      type: 'payment.succeeded',
+      orderId,
+      upstreamTradeId: 'pay_adaptive',
+      amountActual: 29885,
+      currency: 'XAF',
+    });
+
+    const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+
+    const back = await getOrder(orderId);
+    expect(back?.settleStatus).toBe('settled');
+    expect(mintSpy).toHaveBeenCalled();
   });
 });

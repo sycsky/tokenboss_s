@@ -55,6 +55,12 @@ export interface DodoWebhookEvent {
   /** Settlement total in the payment currency's main unit (may include
    *  tax and differ from the ordered amount — informational only). */
   amountActual: number;
+  /** Currency of `amountActual` (ISO code, upper-cased), e.g. "USD".
+   *  Empty when Dodo omits it. Used to decide whether amountActual is
+   *  comparable to the order amount (only when it matches the order's own
+   *  currency — adaptive currency can report a presentment currency we
+   *  can't FX-compare). */
+  currency: string;
 }
 
 /** Checkout sessions expire server-side; we surface a nominal 60 min. */
@@ -149,6 +155,7 @@ export class DodoClient {
       data?: {
         payment_id?: string;
         total_amount?: number;
+        currency?: string;
         metadata?: Record<string, unknown>;
       };
     };
@@ -179,6 +186,10 @@ export class DodoClient {
         typeof body.data?.total_amount === "number"
           ? body.data.total_amount / 100
           : 0,
+      currency:
+        typeof body.data?.currency === "string"
+          ? body.data.currency.toUpperCase()
+          : "",
     };
   }
 }
