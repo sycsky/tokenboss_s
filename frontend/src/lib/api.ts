@@ -342,7 +342,10 @@ export interface BillingConfig {
 export type BillingStatus = "pending" | "paid" | "expired" | "failed";
 export type BillingCurrency = "CNY" | "USD";
 export type BillingSkuType = "plan_plus" | "plan_super" | "plan_ultra" | "topup";
-export type BillingSettleStatus = "settled" | "failed";
+// 'crediting' is a transient state the backend can emit while a paid topup's
+// credit is being applied (redeem runs after the order is marked paid).
+// Only 'settled' means the balance actually landed.
+export type BillingSettleStatus = "settled" | "failed" | "crediting";
 
 export interface BillingOrder {
   orderId: string;

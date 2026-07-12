@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { AppNav, Breadcrumb } from '../components/AppNav';
 import { MonoLogLoader } from '../components/MonoLogLoader';
 import { api, type BillingOrder, type BillingStatus } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -11,6 +12,10 @@ const POLL_INTERVAL_MS = 3000;
 // and continued polling just burns the user's API quota for nothing.
 const POLL_MAX_DURATION_MS = 30 * 60 * 1000;
 const AUTO_REDIRECT_AFTER_PAID_MS = 3000;
+// Safety net: a paid topup credits only after settleStatus resolves. If it
+// never does (credit stuck upstream), stop waiting after this and redirect
+// anyway rather than hang the user on the success screen forever.
+const SETTLE_WAIT_MAX_MS = 15000;
 
 const PLAN_LABEL: Record<string, string> = {
   plus: 'Plus',
@@ -28,6 +33,21 @@ function isTopup(order: BillingOrder): boolean {
   return order.skuType === 'topup';
 }
 
+type SettlePhase = 'settled' | 'failed' | 'pending';
+
+// A paid order's *credit* is a separate step from being paid. For a topup
+// the newapi redeem runs AFTER the order is marked paid (see
+// applyTopupToUser), moving settleStatus null → 'crediting' → 'settled' |
+// 'failed'. Only 'settled' means the balance actually landed; 'failed' means
+// paid-but-not-credited (recover, don't celebrate). Plans credit inline in
+// the webhook and carry no settleStatus, so they count as settled on paid.
+function settlePhase(order: BillingOrder): SettlePhase {
+  if (!isTopup(order)) return 'settled';
+  if (order.settleStatus === 'settled') return 'settled';
+  if (order.settleStatus === 'failed') return 'failed';
+  return 'pending';
+}
+
 // Channel labels are intentionally generic — the epusdt hosted page lets
 // the user pick token (USDT / USDC) and chain themselves, so locking the
 // label to "USDT-TRC20" misrepresents the actual options.
@@ -38,6 +58,7 @@ const CHANNEL_LABEL: Record<string, string> = {
 };
 
 export default function OrderStatus() {
+  const { refresh } = useAuth();
   const { id: idFromPath } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   // The route /billing/success?orderId=... is hit when the gateway redirects
@@ -68,7 +89,15 @@ export default function OrderStatus() {
       setOrder(res.order);
       setError(null);
       setLoading(false);
-      if (isTerminal(res.order.status)) stoppedRef.current = true;
+      // A paid topup is not fully done until its credit settles: newapi
+      // redeem runs AFTER the order is marked paid (see applyTopupToUser),
+      // so status can read 'paid' while settleStatus is still unresolved.
+      // Keep polling through that window so the post-paid refresh reads a
+      // credited balance instead of the stale one. Bounded by the poll cap.
+      const o = res.order;
+      const settlementPending =
+        o.status === 'paid' && settlePhase(o) === 'pending';
+      if (isTerminal(o.status) && !settlementPending) stoppedRef.current = true;
     } catch (err) {
       // 404 right after gateway redirect can happen if Cloudflare cached
       // a stale /billing/success route — keep polling, it'll resolve.
@@ -98,13 +127,38 @@ export default function OrderStatus() {
     return () => clearInterval(t);
   }, [orderId, fetchOrder]);
 
-  // Auto-redirect to /console once paid — gives the user 3s to read the
-  // success copy. Manual escape hatch is the link below.
+  // While a topup sits paid-but-crediting, flip this after a grace period so
+  // the "正在入账" copy can admit it's taking longer than usual. Purely
+  // cosmetic — it never forces a success state (a stuck credit must not be
+  // reported as credited), and the manual "返回控制台" link is always there.
+  const [settleSlow, setSettleSlow] = useState(false);
   useEffect(() => {
-    if (order?.status !== 'paid') return;
+    if (order?.status !== 'paid' || settlePhase(order) !== 'pending') return;
+    const t = setTimeout(() => setSettleSlow(true), SETTLE_WAIT_MAX_MS);
+    return () => clearTimeout(t);
+  }, [order?.status, order?.settleStatus, order?.skuType]);
+
+  // Auto-redirect to /console once the credit has actually landed — gives
+  // the user 3s to read the success copy. Manual escape hatch is the link
+  // below.
+  //
+  // Before redirecting, re-fetch /v1/me so the console shows the credited
+  // balance instead of the stale login-time value (auth context caches
+  // user.balance and nothing else refreshes it after topup settles).
+  //
+  // Gate strictly on settlePhase === 'settled': for a topup the credit lands
+  // only after settleStatus flips to 'settled' (redeem runs after 'paid'),
+  // so refreshing on 'paid' alone races the credit and shows a stale
+  // balance, and a 'failed' settlement must NOT be refreshed/redirected as
+  // if it succeeded (codex review P1).
+  useEffect(() => {
+    if (order?.status !== 'paid' || settlePhase(order) !== 'settled') return;
+    refresh().catch(() => {
+      /* a stale balance is cosmetic — never block the redirect on it */
+    });
     const t = setTimeout(() => navigate('/console'), AUTO_REDIRECT_AFTER_PAID_MS);
     return () => clearTimeout(t);
-  }, [order?.status, navigate]);
+  }, [order?.status, order?.settleStatus, order?.skuType, navigate, refresh]);
 
   if (!orderId) {
     return (
@@ -160,7 +214,12 @@ export default function OrderStatus() {
         BILLING · 订单状态
       </div>
 
-      <StatusHero status={order.status} hasQr={!!navState.qrCodeUrl} order={order} />
+      <StatusHero
+        status={order.status}
+        hasQr={!!navState.qrCodeUrl}
+        order={order}
+        settleSlow={settleSlow}
+      />
 
       {/* Order summary */}
       <section className={`${card} p-6 mb-6`}>
@@ -232,7 +291,8 @@ export default function OrderStatus() {
           channel={order.channel}
         />
       )}
-      {order.status === 'paid' && <PaidActions />}
+      {order.status === 'paid' && settlePhase(order) === 'settled' && <PaidActions />}
+      {order.status === 'paid' && settlePhase(order) === 'failed' && <SettleFailedActions />}
       {(order.status === 'expired' || order.status === 'failed') && (
         <FailedActions isTopup={isTopup(order)} />
       )}
@@ -283,10 +343,12 @@ function StatusHero({
   status,
   hasQr,
   order,
+  settleSlow,
 }: {
   status: BillingStatus;
   hasQr: boolean;
   order: BillingOrder;
+  settleSlow: boolean;
 }) {
   if (status === 'pending') {
     return (
@@ -304,6 +366,44 @@ function StatusHero({
     );
   }
   if (status === 'paid') {
+    const phase = settlePhase(order);
+
+    // Paid but the credit hasn't landed yet — don't claim a balance that
+    // isn't there. Keep it honest: payment succeeded, crediting in progress.
+    if (phase === 'pending') {
+      return (
+        <>
+          <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3 flex items-center gap-3">
+            <Spinner />
+            支付成功 · 正在入账
+          </h1>
+          <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
+            {settleSlow
+              ? '入账比平时久了一点，钱已经收到，额度马上到。可以先留在此页，或稍后到控制台查看余额；长时间未到账请联系客服。'
+              : '付款已确认，正在把额度加到你的余额，马上完成…'}
+          </p>
+        </>
+      );
+    }
+
+    // Paid but crediting failed — the money arrived, the credit didn't.
+    // Surface it as a recoverable problem, never as success.
+    if (phase === 'failed') {
+      return (
+        <>
+          <h1 className="text-[36px] md:text-[44px] font-bold tracking-tight leading-[1.05] mb-3 flex items-center gap-3">
+            <span className="text-red-700 bg-red-100 border-2 border-ink rounded px-2 py-0.5 text-[20px]">
+              !
+            </span>
+            支付成功 · 入账未完成
+          </h1>
+          <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
+            款项已收到，但额度还没成功加到你的余额。别担心，钱不会丢——我们已收到告警会尽快补上，也可以联系客服加急处理（附上订单号即可）。
+          </p>
+        </>
+      );
+    }
+
     const copy =
       order.skuType === 'topup'
         ? `$${order.topupAmountUsd?.toFixed(2) ?? '?'} 已加到余额，${Math.round(AUTO_REDIRECT_AFTER_PAID_MS / 1000)} 秒后自动跳回控制台。`
@@ -428,6 +528,27 @@ function PaidActions() {
         }
       >
         立即前往控制台 →
+      </Link>
+    </div>
+  );
+}
+
+// Paid but the credit failed: don't offer "再充一笔" (they already paid) —
+// send them to the console to check balance / contact support instead.
+function SettleFailedActions() {
+  return (
+    <div className="flex items-center gap-3 mb-2">
+      <Link
+        to="/console"
+        className={
+          'inline-block px-5 py-2.5 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold ' +
+          'shadow-[3px_3px_0_0_#1C1917] ' +
+          'hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_0_#1C1917] ' +
+          'active:translate-x-[2px] active:translate-y-[2px] active:shadow-[0_0_0_0_#1C1917] ' +
+          'transition-all'
+        }
+      >
+        去控制台查看 →
       </Link>
     </div>
   );
