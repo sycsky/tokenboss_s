@@ -19,7 +19,12 @@ import type {
 
 import { epusdtFromEnv } from "../lib/payment/epusdt.js";
 import { xunhupayFromEnv } from "../lib/payment/xunhupay.js";
-import type { OrderRecord, PaymentChannelClient } from "../lib/payment/types.js";
+import { dodoFromEnv } from "../lib/payment/dodo.js";
+import type {
+  OrderRecord,
+  PaymentChannelClient,
+  WebhookEvent,
+} from "../lib/payment/types.js";
 import {
   getOrder,
   getUser,
@@ -148,17 +153,32 @@ async function processWebhook(
     return textResponse(403, "bad_signature");
   }
 
+  await settleWebhookEvent(verified, channel);
+  return textResponse(200, ack);
+}
+
+/**
+ * Channel-agnostic settlement: look up the order and apply the verified
+ * event to it. Shared by the body-signature channels (via processWebhook)
+ * and header-signature channels (dodo) that verify on their own.
+ */
+async function settleWebhookEvent(
+  verified: WebhookEvent,
+  channel: string,
+): Promise<void> {
+  const tag = `[webhook/${channel}]`;
+
   const order = await getOrder(verified.orderId);
   if (!order) {
+    // Acked upstream regardless; the order genuinely doesn't exist on our
+    // side — nothing to do.
     console.warn(`${tag} unknown order`, { orderId: verified.orderId });
-    // Returning the ack tells the gateway to stop retrying; the order
-    // genuinely doesn't exist on our side — nothing to do.
-    return textResponse(200, ack);
+    return;
   }
 
   if (verified.status === "expired") {
     await markOrderStatus({ orderId: order.orderId, status: "expired" });
-    return textResponse(200, ack);
+    return;
   }
 
   if (verified.status === "paid") {
@@ -194,8 +214,6 @@ async function processWebhook(
       }
     }
   }
-
-  return textResponse(200, ack);
 }
 
 // ---------- POST /v1/billing/webhook/epusdt ----------
@@ -212,6 +230,58 @@ export const xunhupayWebhookHandler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> => {
   return processWebhook(event, xunhupayFromEnv(), "xunhupay", "success");
+};
+
+// ---------- POST /v1/billing/webhook/dodo ----------
+
+/**
+ * Dodo signs headers + RAW body (Standard Webhooks), so it can't go
+ * through processWebhook's parse-then-verify flow — order matters: the
+ * HMAC must be computed over the exact bytes received.
+ */
+export const dodoWebhookHandler = async (
+  event: APIGatewayProxyEventV2,
+): Promise<APIGatewayProxyResultV2> => {
+  const tag = "[webhook/dodo]";
+  const client = dodoFromEnv();
+  if (!client) {
+    console.error(`${tag} not configured — refusing`);
+    return textResponse(503, "dodo_not_configured");
+  }
+
+  const rawBody = event.isBase64Encoded
+    ? Buffer.from(event.body ?? "", "base64").toString("utf8")
+    : (event.body ?? "");
+
+  // Header names are case-insensitive; normalize once.
+  const headers: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(event.headers ?? {})) {
+    headers[k.toLowerCase()] = v;
+  }
+
+  const evt = client.verifyWebhook(headers, rawBody);
+  if (!evt) {
+    console.warn(`${tag} signature verification failed`);
+    return textResponse(403, "bad_signature");
+  }
+
+  if (evt.type === "payment.succeeded") {
+    await settleWebhookEvent(
+      {
+        orderId: evt.orderId,
+        upstreamTradeId: evt.upstreamTradeId,
+        amountActual: evt.amountActual,
+        status: "paid",
+      },
+      "dodo",
+    );
+  } else {
+    // payment.failed / refund.* / dispute.* — log for ops, no state change.
+    // A failed payment leaves the order pending; the user just retries.
+    console.info(`${tag} ignoring event`, { type: evt.type, orderId: evt.orderId });
+  }
+
+  return textResponse(200, "ok");
 };
 
 /**

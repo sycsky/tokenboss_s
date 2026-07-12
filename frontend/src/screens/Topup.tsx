@@ -26,22 +26,25 @@ function agentPrompt(denom: number): string {
   return `帮我给 TokenBoss 充值 ${denom} 元（支付宝 AI 付，按 skill.md 的 402 充值流程）`;
 }
 
-type Currency = 'cny' | 'usd';
+/** 支付方式决定路径（gh-6）：
+ *    a2m  → 人民币 · Agent 内支付宝（网页不收单）
+ *    usdt → 美元 · USDT 网页支付（epusdt）
+ *    dodo → 美元 · 银行卡/微信托管收银台（Dodo MoR）
+ *  xunhupay 已下线。 */
+type PayMethod = 'a2m' | 'usdt' | 'dodo';
 type UsdPreset = (typeof USD_PRESETS)[number] | 'custom';
 
 export default function Topup() {
   const navigate = useNavigate();
 
-  // 币种决定支付路径（gh-6）：人民币 → Agent 内支付宝 A2M（网页不收单）；
-  // 美元 → USDT 网页支付（epusdt）。xunhupay 已下线。
-  const [currency, setCurrency] = useState<Currency>('cny');
+  const [method, setMethod] = useState<PayMethod>('a2m');
 
   // —— 人民币 · Agent 充值 ——
   const [denom, setDenom] = useState<(typeof A2M_DENOMS)[number]>(A2M_DENOMS[1]);
   const [copied, setCopied] = useState(false);
 
-  // —— 美元 · USDT 网页充值 ——
-  const channel: BillingChannel = 'epusdt';
+  // —— 美元 · 网页充值（USDT / 卡·微信 共用金额区） ——
+  const channel: BillingChannel = method === 'dodo' ? 'dodo' : 'epusdt';
   const [preset, setPreset] = useState<UsdPreset>(USD_PRESETS[0]);
   const [customAmountStr, setCustomAmountStr] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -73,7 +76,7 @@ export default function Topup() {
   // Clear stale submit error as soon as the user edits any input.
   useEffect(() => {
     setError(null);
-  }, [currency, preset, customAmountStr]);
+  }, [method, preset, customAmountStr]);
 
   async function submit() {
     if (amount == null) {
@@ -119,25 +122,32 @@ export default function Topup() {
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
             支付方式
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <ChannelOption
-              active={currency === 'cny'}
-              onClick={() => setCurrency('cny')}
+              active={method === 'a2m'}
+              onClick={() => setMethod('a2m')}
               title="人民币 · 支付宝"
               subtitle="在你的 Agent 里完成充值"
               tag="推荐"
             />
             <ChannelOption
-              active={currency === 'usd'}
-              onClick={() => setCurrency('usd')}
+              active={method === 'usdt'}
+              onClick={() => setMethod('usdt')}
               title="美元 · 稳定币"
               subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
+            <ChannelOption
+              active={method === 'dodo'}
+              onClick={() => setMethod('dodo')}
+              title="银行卡 · 微信"
+              subtitle="Visa / Mastercard · 微信扫码"
+              tag="美元计价"
+            />
           </div>
         </section>
 
-        {currency === 'cny' ? (
+        {method === 'a2m' ? (
           /* —— 人民币：Agent 内支付宝充值（A2M 402） —— */
           <section className="mb-6">
             <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
@@ -253,14 +263,18 @@ export default function Topup() {
             {amount != null && (
               <div className="font-mono text-[12px] text-text-secondary">
                 → 到账 ${amount * USD_TO_CREDIT_RATE} 美金
-                <span className="text-ink-3"> · $1 USDT ≈ $7 额度（按汇率折算）</span>
+                <span className="text-ink-3">
+                  {method === 'dodo'
+                    ? ' · $1 ≈ $7 额度 · 结算时可能附加当地税费'
+                    : ' · $1 USDT ≈ $7 额度（按汇率折算）'}
+                </span>
               </div>
             )}
           </section>
         )}
 
         {/* Error（仅美元网页下单会产生） */}
-        {currency === 'usd' && error && (
+        {method !== 'a2m' && error && (
           <div className="mb-5 p-3 border-2 border-red-600 rounded-md bg-red-50 font-mono text-[12px] text-red-700">
             {error}
           </div>
@@ -274,7 +288,7 @@ export default function Topup() {
           >
             ← 返回控制台
           </Link>
-          {currency === 'usd' && (
+          {method !== 'a2m' && (
             <button
               onClick={submit}
               disabled={submitting || amount == null}

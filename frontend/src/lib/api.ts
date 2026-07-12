@@ -331,7 +331,7 @@ export interface DeepLinkResponse {
 // ---------- billing types ----------
 
 export type BillingPlanId = "plus" | "super" | "ultra";
-export type BillingChannel = "epusdt" | "xunhupay";
+export type BillingChannel = "epusdt" | "xunhupay" | "dodo";
 export type BillingStatus = "pending" | "paid" | "expired" | "failed";
 export type BillingCurrency = "CNY" | "USD";
 export type BillingSkuType = "plan_plus" | "plan_super" | "plan_ultra" | "topup";

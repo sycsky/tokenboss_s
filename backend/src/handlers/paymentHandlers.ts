@@ -24,6 +24,7 @@ import {
 } from "../lib/auth.js";
 import { epusdtFromEnv, EpusdtError } from "../lib/payment/epusdt.js";
 import { xunhupayFromEnv, XunhupayError } from "../lib/payment/xunhupay.js";
+import { dodoFromEnv, DodoError } from "../lib/payment/dodo.js";
 import type { PaymentChannel } from "../lib/payment/types.js";
 import {
   createOrder,
@@ -83,7 +84,7 @@ function parseJsonBody(event: APIGatewayProxyEventV2): Record<string, unknown> |
 }
 
 function isChannel(v: unknown): v is PaymentChannel {
-  return v === "epusdt" || v === "xunhupay";
+  return v === "epusdt" || v === "xunhupay" || v === "dodo";
 }
 
 /**
@@ -187,7 +188,7 @@ export const createOrderHandler = async (
   const type = rawType;
 
   if (!isChannel(body.channel))
-    return jsonError(400, "invalid_request_error", "channel must be epusdt|xunhupay.");
+    return jsonError(400, "invalid_request_error", "channel must be epusdt|dodo.");
   const channel = body.channel;
 
   // xunhupay 已下线（gh-6）：限流不可用，由 Agent 内支付宝 A2M 充值
@@ -205,9 +206,11 @@ export const createOrderHandler = async (
 
   // Channel determines pricing currency:
   //   epusdt   → USD (USDT-TRC20)
+  //   dodo     → USD (MoR hosted checkout: cards / Apple Pay / WeChat Pay)
   //   xunhupay → CNY (Alipay/WeChat fiat gateway, CNY only)
   // Server-derived; client-supplied currency is ignored.
-  const currency: "CNY" | "USD" = channel === "epusdt" ? "USD" : "CNY";
+  const currency: "CNY" | "USD" =
+    channel === "epusdt" || channel === "dodo" ? "USD" : "CNY";
 
   let skuType: OrderSkuType;
   let amount: number;
@@ -288,6 +291,16 @@ export const createOrderHandler = async (
         "epusdt_not_configured",
       );
     }
+  } else if (channel === "dodo") {
+    client = dodoFromEnv();
+    if (!client) {
+      return jsonError(
+        503,
+        "service_unavailable",
+        "dodo is not configured (set DODO_API_KEY / DODO_PRODUCT_ID).",
+        "dodo_not_configured",
+      );
+    }
   } else {
     client = xunhupayFromEnv();
     if (!client) {
@@ -322,7 +335,11 @@ export const createOrderHandler = async (
     });
   } catch (err) {
     const status =
-      err instanceof EpusdtError || err instanceof XunhupayError ? 502 : 500;
+      err instanceof EpusdtError ||
+      err instanceof XunhupayError ||
+      err instanceof DodoError
+        ? 502
+        : 500;
     return jsonError(
       status,
       "upstream_error",

@@ -10,7 +10,7 @@
  * one-shot redemption code on newapi admin and apply it to the user's quota.
  */
 
-export type PaymentChannel = "epusdt" | "xunhupay" | "alipay_a2m";
+export type PaymentChannel = "epusdt" | "xunhupay" | "alipay_a2m" | "dodo";
 
 export type OrderStatus = "pending" | "paid" | "expired" | "failed";
 
