@@ -189,7 +189,41 @@ describe('dodoWebhookHandler — amount integrity', () => {
     expect(mintSpy).toHaveBeenCalledWith({ name: orderId, quotaUsd: 340 });
   });
 
-  it('skips the numeric check when settlement currency differs (adaptive currency)', async () => {
+  it('holds settlement when the success event omits currency/amount (fail closed)', async () => {
+    const orderId = 'tb_ord_dodo_unverifiable';
+    await createOrder({
+      orderId,
+      userId,
+      skuType: 'topup',
+      channel: 'dodo',
+      amount: 50,
+      currency: 'USD',
+      topupAmountUsd: 340,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    const mintSpy = vi.spyOn(newapi, 'createRedemption');
+    // A signed success event with no currency and zero amount must NOT
+    // bypass the guard into a full grant.
+    stubDodo({
+      type: 'payment.succeeded',
+      orderId,
+      upstreamTradeId: 'pay_no_amount',
+      amountActual: 0,
+      currency: '',
+    });
+
+    const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+
+    const back = await getOrder(orderId);
+    expect(back?.status).toBe('paid');
+    expect(back?.settleStatus).toBe('failed');
+    expect(mintSpy).not.toHaveBeenCalled();
+  });
+
+  it('credits when settlement currency differs but amount is positive (adaptive currency)', async () => {
     const orderId = 'tb_ord_dodo_adaptive';
     await createOrder({
       orderId,

@@ -207,34 +207,50 @@ async function settleWebhookEvent(
         skuType: order.skuType,
         amountActual: verified.amountActual,
       });
-      // Amount-integrity guard: only grant credit when the amount the
-      // gateway actually collected matches the order. We can only compare
-      // safely when the event's settlement currency equals the order's own
-      // currency — adaptive currency (Dodo) can report a presentment
-      // currency we can't FX-compare here, so those skip the numeric check
-      // (the order amount is one we set server-side and gateways don't let
-      // buyers lower it without a discount code, which we don't enable).
-      // A same-currency shortfall (e.g. an unexpected discount) must NOT
-      // receive full credits: hold as settleStatus='failed' + alert ops.
-      if (
-        verified.currency &&
-        verified.currency === order.currency &&
-        verified.amountActual > 0 &&
-        verified.amountActual < order.amount - 0.01
-      ) {
-        await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
-        reportSettleFailure({
-          stage: 'amount_mismatch',
-          channel,
-          orderId: order.orderId,
-          userId: order.userId,
-          extra: {
-            expectedAmount: order.amount,
-            paidAmount: verified.amountActual,
-            currency: verified.currency,
-          },
-        });
-        return;
+      // Amount-integrity guard (Dodo only — epusdt/xunhupay carry no
+      // `currency` and their amount units differ, so they'd all false-hold).
+      // Fail CLOSED: never grant on an unverifiable amount. A hold is
+      // recoverable (money arrived, ops reviews + credits manually), whereas
+      // an auto-grant on a bad amount is not. Hold when:
+      //   • currency missing or paid amount ≤ 0 (can't verify at all), or
+      //   • same-currency shortfall (e.g. an unexpected discount).
+      // Different-currency-with-positive-amount is Dodo adaptive currency
+      // (presentment ≠ our USD base); we can't FX-compare, but the order
+      // amount is server-set and discount-code input is disabled on our
+      // checkout, so we credit and log for visibility rather than block
+      // every foreign-currency payment.
+      if (channel === 'dodo') {
+        const paid = verified.amountActual;
+        const cur = verified.currency ?? '';
+        const unverifiable = !cur || paid <= 0;
+        const sameCurrencyShort =
+          cur === order.currency && paid < order.amount - 0.01;
+        if (unverifiable || sameCurrencyShort) {
+          await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+          reportSettleFailure({
+            stage: 'amount_mismatch',
+            channel,
+            orderId: order.orderId,
+            userId: order.userId,
+            extra: {
+              expectedAmount: order.amount,
+              orderCurrency: order.currency,
+              paidAmount: paid,
+              paidCurrency: cur || null,
+              reason: unverifiable ? 'unverifiable' : 'shortfall',
+            },
+          });
+          return;
+        }
+        if (cur !== order.currency) {
+          console.warn(`${tag} crediting foreign-currency payment (adaptive)`, {
+            orderId: order.orderId,
+            paidAmount: paid,
+            paidCurrency: cur,
+            orderAmount: order.amount,
+            orderCurrency: order.currency,
+          });
+        }
       }
       if (order.skuType === 'topup') {
         await applyTopupToUser(order, channel);
