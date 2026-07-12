@@ -112,7 +112,7 @@ flowchart TD
 
 agent 写完 `repo-reality.md` 后，人工 1-2 min 过一遍：
 
-1. **PM 描述对得上吗？** 你以为 backend 跑 SQLite，其实是 DynamoDB / 你以为 X 在 main 上但还在 feature/* 等
+1. **PM 描述对得上吗？** 你以为某模块在 A 其实在 B / 你以为 X 在 main 上但还在 feature/* 等
 2. **跨分支依赖怎么处理？** 等 X 合 main / fork off X / cherry-pick X / 基于 main 起
 3. **Lint baseline 怎么处理？** baseline 有 N 个预存 warning 时，Stage 3 dispatch 写"不引入 NEW warning"而不是"全 clean"
 4. **三 stream 边界判断对吗？** REQ 真的只动 frontend 吗？是否涉及 backend API 改动 / ClawRouter 路由更新？
@@ -135,7 +135,7 @@ agent 写完 `repo-reality.md` 后，人工 1-2 min 过一遍：
 - 相关未 merge feature: （列出）
 
 ## 数据层
-- backend 当前用 <DynamoDB / better-sqlite3 / 其他>（grep 验证）
+- backend 用 better-sqlite3（`src/lib/store.ts`；grep 验证）
 - 表/集合 schema: <列出>
 - 本期需要新建表？是 / 否
 
@@ -219,7 +219,7 @@ proposal.md 和 specs/ 生成后审查 4 件事：
 
 agent 读 specs/ 后自动生成 design.md + tasks.md：
 
-- 技术选型 + 架构图 + 认证策略 + 数据模型（DynamoDB 表设计 / API 契约）
+- 技术选型 + 架构图 + 认证策略 + 数据模型（SQLite 表设计 / API 契约）
 - tasks.md 颗粒到文件级 / 代码级步骤
 - **禁止 TBD / 占位符** — 任何未决项 inline 解决
 
@@ -233,7 +233,7 @@ writing-plans 写完后**不要**直接进 Stage 2.5。5 min 把 plan 里所有 
 | 每个 `Modify: <path>:<line>` 文件存在？line 附近真有 plan 描述的代码？ | `sed -n '<line-3>,<line+10>p' <path>` | implementer 找不到改点 |
 | Plan 里每个 fn / class / type ref 当前真存在？签名是 plan 假设的样子吗？ | `grep -nE "function <name>\|class <name>\|type <name>" frontend/src backend/src ClawRouter/src` | implementer 写出不能编译的代码 |
 | Plan 里粘的代码片段编译片段层面 reasonable？ | 读一遍找 obvious mismatches | implementer 复制粘贴出编译错误 |
-| Plan 里每个 route / API path / DynamoDB key / config key 跟现有约定一致？ | `grep -rn "<key>"` | implementer 凭假设写出找不到的 key |
+| Plan 里每个 route / API path / DB 表字段 / config key 跟现有约定一致？ | `grep -rn "<key>"` | implementer 凭假设写出找不到的 key |
 
 发现问题 → **改 plan**（不是 implementer 阶段才改）。
 
@@ -321,7 +321,7 @@ Stage 2.5 通过后进**全自主执行模式（持续 1-4h）**：
 | 只动 ClawRouter | 1 |
 | frontend + backend 不重叠 | 2 |
 | 三端都动且不重叠 | 3 |
-| 跨端 contract 改动（API schema / DynamoDB schema） | 1 个 worktree 顺序做（避免 schema race） |
+| 跨端 contract 改动（API schema / DB schema） | 1 个 worktree 顺序做（避免 schema race） |
 
 | Stream | 范围 | 加载约定 |
 |---|---|---|
@@ -408,7 +408,7 @@ Stage 3 完整版按原计划跑（其余 stream subagent + TDD + Lint Hook 并�
 
 | 1 单元测试 | 2 集成测试 | 3 E2E 测试 | 4 安全测试 | 5 UI 测试 |
 |---|---|---|---|---|
-| 各 stream vitest | vitest（DynamoDB local / API） | playwright | `npm audit` + secrets scan | playwright screenshot diff |
+| 各 stream vitest | vitest（SQLite in-memory / API） | playwright | `npm audit` + secrets scan | playwright screenshot diff |
 
 ### 🟢 自动 — Superpowers verification-before-completion
 

@@ -10,8 +10,8 @@
  * newapi, which is the source of truth for both auth and billing.
  *
  * All public functions are async (returning Promises) even though
- * better-sqlite3 is synchronous, so call-site signatures stay identical
- * to the old DynamoDB version.
+ * better-sqlite3 is synchronous — a legacy signature choice kept so callers
+ * (which all `await`) don't need touching. Harmless; not worth a churn pass.
  */
 
 import Database from "better-sqlite3";
