@@ -445,6 +445,14 @@ export default function Landing() {
                 { text: '快速接入', to: '/install/manual' },
               ]}
             />
+            <FooterCol
+              label="LEGAL"
+              links={[
+                { text: '服务条款', to: '/terms' },
+                { text: '隐私政策', to: '/privacy' },
+                { text: '退款政策', to: '/refund' },
+              ]}
+            />
           </div>
           <div className="pt-6 border-t border-white/10 font-mono text-[10.5px] text-white/35">
             © 2026 TokenBoss · All rights reserved.

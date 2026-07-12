@@ -340,7 +340,14 @@ export default function Topup() {
 
         <div className="mt-10 font-mono text-[11.5px] text-ink-3 leading-relaxed">
           · 充值后立即到账，永不过期，全模型可用<br />
-          · 充值不支持退款<br />
+          ·{' '}
+          <Link
+            to="/refund"
+            className="text-ink-3 hover:text-ink underline underline-offset-4 decoration-1"
+          >
+            充值不支持退款
+          </Link>
+          <br />
           ·{' '}
           <button
             type="button"
