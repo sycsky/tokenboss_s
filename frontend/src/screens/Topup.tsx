@@ -126,23 +126,23 @@ export default function Topup() {
             <ChannelOption
               active={method === 'a2m'}
               onClick={() => setMethod('a2m')}
-              title="人民币 · 支付宝"
-              subtitle="在你的 Agent 里完成充值"
+              title="支付宝"
+              subtitle="人民币 · 在你的 Agent 里完成充值"
               tag="推荐"
             />
             <ChannelOption
               active={method === 'usdt'}
               onClick={() => setMethod('usdt')}
-              title="美元 · 稳定币"
+              title="稳定币"
               subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
             <ChannelOption
               active={method === 'dodo'}
               onClick={() => setMethod('dodo')}
-              title="银行卡 · 微信"
-              subtitle="Visa / Mastercard · 微信扫码"
-              tag="美元计价"
+              title="卡 · 微信"
+              subtitle="Visa / 银联 / 微信扫码 · 美元计价"
+              tag="USD"
             />
           </div>
         </section>

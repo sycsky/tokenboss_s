@@ -34,6 +34,7 @@ function isTopup(order: BillingOrder): boolean {
 const CHANNEL_LABEL: Record<string, string> = {
   xunhupay: '支付宝',
   epusdt: '稳定币',
+  dodo: '银行卡 / 微信',
 };
 
 export default function OrderStatus() {
@@ -154,7 +155,7 @@ export default function OrderStatus() {
   if (!order) return null;
 
   return (
-    <Shell>
+    <Shell topup={isTopup(order)}>
       <div className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-[#A89A8D] font-bold mb-3">
         BILLING · 订单状态
       </div>
@@ -258,7 +259,7 @@ function isTerminal(s: BillingStatus): boolean {
   return s === 'paid' || s === 'expired' || s === 'failed';
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, topup = true }: { children: React.ReactNode; topup?: boolean }) {
   return (
     <div className="min-h-screen bg-bg pb-12">
       <AppNav current="console" />
@@ -266,7 +267,9 @@ function Shell({ children }: { children: React.ReactNode }) {
         <Breadcrumb
           items={[
             { label: '控制台', to: '/console' },
-            { label: '套餐', to: '/pricing' },
+            topup
+              ? { label: '充值', to: '/billing/topup' }
+              : { label: '套餐', to: '/pricing' },
             { label: '订单' },
           ]}
         />

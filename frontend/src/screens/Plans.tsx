@@ -164,6 +164,8 @@ export default function Plans() {
                   <PayBadge dotColor="#26A17B" label="USDT" />
                   <span aria-hidden="true" className="text-ink-4">·</span>
                   <PayBadge dotColor="#2775CA" label="USDC" />
+                  <span aria-hidden="true" className="text-ink-4">·</span>
+                  <PayBadge dotColor="#07C160" label="卡 / 微信" />
                 </>
               )}
             </div>
