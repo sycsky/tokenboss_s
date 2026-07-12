@@ -36,12 +36,23 @@ type PayMethod = 'a2m' | 'usdt' | 'dodo';
 /** 支付宝 AI 收款（A2M）因商户风控暂时下线整条 UI 链路；解封后改回
  *  true 即恢复（后端 402 端点保持在线，老订单不受影响）。 */
 const SHOW_ALIPAY_A2M = false;
+
+/** Dodo（卡/微信）渠道网关：正式环境的 DODO_* 变量配齐、Dodo 商户
+ *  审核通过前保持 false，避免用户点了「卡·微信」却拿到 503。上线时
+ *  改回 true 即可（后端缺变量本身也会 503 兜底，这里是不给坏入口）。 */
+const SHOW_DODO = false;
+
+/** 币种自由充值渠道里，永远可用的那个（USDT）——A2M/Dodo 都隐藏时
+ *  兜底选它，保证充值页始终有一条能走通的路。 */
+const DEFAULT_METHOD: PayMethod = SHOW_ALIPAY_A2M
+  ? 'a2m'
+  : 'usdt';
 type UsdPreset = (typeof USD_PRESETS)[number] | 'custom';
 
 export default function Topup() {
   const navigate = useNavigate();
 
-  const [method, setMethod] = useState<PayMethod>(SHOW_ALIPAY_A2M ? 'a2m' : 'dodo');
+  const [method, setMethod] = useState<PayMethod>(DEFAULT_METHOD);
 
   // —— 人民币 · Agent 充值 ——
   const [denom, setDenom] = useState<(typeof A2M_DENOMS)[number]>(A2M_DENOMS[1]);
@@ -126,7 +137,13 @@ export default function Topup() {
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
             支付方式
           </div>
-          <div className={`grid grid-cols-1 gap-3 ${SHOW_ALIPAY_A2M ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+          <div
+            className={`grid grid-cols-1 gap-3 ${
+              { 1: '', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3' }[
+                [SHOW_ALIPAY_A2M, true, SHOW_DODO].filter(Boolean).length
+              ] ?? 'sm:grid-cols-2'
+            }`}
+          >
             {SHOW_ALIPAY_A2M && (
               <ChannelOption
                 active={method === 'a2m'}
@@ -143,13 +160,15 @@ export default function Topup() {
               subtitle="USDT / USDC · 多链可选"
               tag="海外友好"
             />
-            <ChannelOption
-              active={method === 'dodo'}
-              onClick={() => setMethod('dodo')}
-              title="卡 · 微信"
-              subtitle="Visa / 银联 / 微信扫码 · 美元计价"
-              tag="USD"
-            />
+            {SHOW_DODO && (
+              <ChannelOption
+                active={method === 'dodo'}
+                onClick={() => setMethod('dodo')}
+                title="卡 · 微信"
+                subtitle="Visa / 银联 / 微信扫码 · 美元计价"
+                tag="USD"
+              />
+            )}
           </div>
         </section>
 
