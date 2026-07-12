@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useCurrency } from '../lib/currency';
 import { TIERS, STANDARD_RATE, tierPricePeriod } from '../lib/pricing';
+import { SHOW_ALIPAY_A2M, SHOW_DODO } from '../lib/paymentVisibility';
 import { ULTRA_DROP } from '../lib/dropSchedule';
 import { TierCard } from '../components/TierCard';
 import { SectionHeader } from '../components/SectionHeader';
@@ -157,17 +158,33 @@ export default function Plans() {
             <CurrencySwitcher />
             <div className="flex items-center gap-2 font-mono text-[10.5px] text-ink-3 leading-none">
               <span>支持</span>
+              {/* 徽章只列 checkout 真能走通的渠道（SHOW_* 见
+                  ../lib/paymentVisibility）。RMB 档在支付宝/Dodo 都隐藏时
+                  回落到稳定币——那是永远可用的真实充值路径，而非空着或
+                  宣传拿不到的入口。 */}
               {currency === 'rmb' ? (
-                /* 支付宝 AI 付风控解封前隐藏；恢复时换回
-                   <PayBadge dotColor="#1677FF" label="支付宝 AI 付" /> */
-                <PayBadge dotColor="#07C160" label="微信 / 银行卡" />
+                SHOW_ALIPAY_A2M ? (
+                  <PayBadge dotColor="#1677FF" label="支付宝 AI 付" />
+                ) : SHOW_DODO ? (
+                  <PayBadge dotColor="#07C160" label="微信 / 银行卡" />
+                ) : (
+                  <>
+                    <PayBadge dotColor="#26A17B" label="USDT" />
+                    <span aria-hidden="true" className="text-ink-4">·</span>
+                    <PayBadge dotColor="#2775CA" label="USDC" />
+                  </>
+                )
               ) : (
                 <>
                   <PayBadge dotColor="#26A17B" label="USDT" />
                   <span aria-hidden="true" className="text-ink-4">·</span>
                   <PayBadge dotColor="#2775CA" label="USDC" />
-                  <span aria-hidden="true" className="text-ink-4">·</span>
-                  <PayBadge dotColor="#07C160" label="卡 / 微信" />
+                  {SHOW_DODO && (
+                    <>
+                      <span aria-hidden="true" className="text-ink-4">·</span>
+                      <PayBadge dotColor="#07C160" label="卡 / 微信" />
+                    </>
+                  )}
                 </>
               )}
             </div>

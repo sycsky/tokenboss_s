@@ -5,6 +5,7 @@ import { ChannelOption } from '../components/ChannelOption';
 import { RedeemCodeModal } from '../components/RedeemCodeModal';
 import { dispatchCheckout } from '../lib/checkoutFlow';
 import { api, type BillingChannel } from '../lib/api';
+import { SHOW_ALIPAY_A2M, SHOW_DODO } from '../lib/paymentVisibility';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -38,14 +39,8 @@ function agentPrompt(denom: number): string {
  *  xunhupay 已下线。 */
 type PayMethod = 'a2m' | 'usdt' | 'dodo';
 
-/** 支付宝 AI 收款（A2M）因商户风控暂时下线整条 UI 链路；解封后改回
- *  true 即恢复（后端 402 端点保持在线，老订单不受影响）。 */
-const SHOW_ALIPAY_A2M = false;
-
-/** Dodo（卡/微信）渠道网关：正式环境的 DODO_* 变量配齐、Dodo 商户
- *  审核通过前保持 false，避免用户点了「卡·微信」却拿到 503。上线时
- *  改回 true 即可（后端缺变量本身也会 503 兜底，这里是不给坏入口）。 */
-const SHOW_DODO = false;
+/** SHOW_ALIPAY_A2M / SHOW_DODO 现在来自 ../lib/paymentVisibility（单一来源，
+ *  Plans 徽章也读它），避免各屏各写一份导致宣传与 checkout 不一致。 */
 
 /** 币种自由充值渠道里，永远可用的那个（USDT）——A2M/Dodo 都隐藏时
  *  兜底选它，保证充值页始终有一条能走通的路。 */
