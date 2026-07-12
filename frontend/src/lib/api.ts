@@ -332,6 +332,13 @@ export interface DeepLinkResponse {
 
 export type BillingPlanId = "plus" | "super" | "ultra";
 export type BillingChannel = "epusdt" | "xunhupay" | "dodo";
+
+/** 后端 /v1/billing/config 返回的充值配置（倍率的权威源）。 */
+export interface BillingConfig {
+  creditRates: { epusdt: number; dodo: number };
+  minTopup: number;
+  maxTopup: number;
+}
 export type BillingStatus = "pending" | "paid" | "expired" | "failed";
 export type BillingCurrency = "CNY" | "USD";
 export type BillingSkuType = "plan_plus" | "plan_super" | "plan_ultra" | "topup";
@@ -517,6 +524,11 @@ export const api = {
   },
 
   // billing
+  /** 公开充值配置（倍率、起充/上限）—— 权威源在后端 creditConfig，充值
+   *  页拉它来显示「付 $X → 到账 $Y」，避免前后端各写一份倍率。 */
+  billingConfig(): Promise<BillingConfig> {
+    return request<BillingConfig>("/v1/billing/config", { token: null });
+  },
   createOrder(input: CreateOrderInput): Promise<CreateOrderResponse> {
     return request<CreateOrderResponse>("/v1/billing/orders", {
       method: "POST",

@@ -15,16 +15,16 @@ const A2M_DENOMS = [10, 50] as const;
 
 /** 美元渠道（USDT / 卡·微信）充值档位，$10 起充、整数。 */
 const USD_PRESETS = [10, 20, 50, 100] as const;
-const MIN_AMOUNT = 10;
-const MAX_AMOUNT = 99999;
-/** 付 $1 → 到账 $X 额度的倍率，必须与后端 CREDIT_RATE（缺省 6.8）
- *  一致。本质是美元兑人民币结算汇率减去支付手续费缓冲。改后端环境
- *  变量时同步改这里。 */
-const USD_TO_CREDIT_RATE = 6.8;
 
-/** ×6.8 后可能出现浮点尾巴（11×6.8=74.8000…1），显示时 round 到分。 */
-function creditFor(usd: number): number {
-  return Math.round(usd * USD_TO_CREDIT_RATE * 100) / 100;
+/** fetch 失败/加载中的兜底默认；权威值来自后端 /v1/billing/config，
+ *  正常情况下会被拉到的配置覆盖，不再前后端各写一份倍率。 */
+const FALLBACK_RATE = 6.8;
+const FALLBACK_MIN = 10;
+const FALLBACK_MAX = 99999;
+
+/** ×倍率后可能有浮点尾巴（11×6.8=74.8000…1），显示 round 到分。 */
+function creditFor(usd: number, rate: number): number {
+  return Math.round(usd * rate * 100) / 100;
 }
 
 function agentPrompt(denom: number): string {
@@ -70,6 +70,31 @@ export default function Topup() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
+
+  // 充值配置（倍率/起充/上限）从后端拉，权威源单一。拉到前用兜底默认，
+  // 到账额度实际以后端结算为准，短暂显示兜底值不影响正确性。
+  const [cfg, setCfg] = useState<{
+    rates: { epusdt: number; dodo: number };
+    min: number;
+    max: number;
+  }>({ rates: { epusdt: FALLBACK_RATE, dodo: FALLBACK_RATE }, min: FALLBACK_MIN, max: FALLBACK_MAX });
+  useEffect(() => {
+    let alive = true;
+    api
+      .billingConfig()
+      .then((c) => {
+        if (alive) setCfg({ rates: c.creditRates, min: c.minTopup, max: c.maxTopup });
+      })
+      .catch(() => {
+        /* 拉取失败保持兜底默认；结算仍以后端为准 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const rate = method === 'dodo' ? cfg.rates.dodo : cfg.rates.epusdt;
+  const MIN_AMOUNT = cfg.min;
+  const MAX_AMOUNT = cfg.max;
 
   async function copyAgentPrompt() {
     try {
@@ -292,10 +317,10 @@ export default function Topup() {
 
             {amount != null && (
               <div className="font-mono text-[12px] text-text-secondary">
-                → 到账 <span className="font-bold text-ink">${creditFor(amount)}</span> 额度
+                → 到账 <span className="font-bold text-ink">${creditFor(amount, rate)}</span> 额度
                 <span className="text-ink-3">
                   {method === 'dodo'
-                    ? ` · 付 $${amount}（微信/卡按人民币结算约 ¥${Math.round(amount * USD_TO_CREDIT_RATE)}）`
+                    ? ` · 付 $${amount}（微信/卡按人民币结算约 ¥${Math.round(amount * rate)}）`
                     : ` · 付 $${amount} USDT`}
                 </span>
               </div>

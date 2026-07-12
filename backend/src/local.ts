@@ -86,6 +86,7 @@ import {
 } from "./handlers/paymentHandlers.js";
 import { epusdtWebhookHandler, xunhupayWebhookHandler, dodoWebhookHandler } from "./handlers/paymentWebhook.js";
 import { a2mTopupHandler } from "./handlers/a2mHandlers.js";
+import { billingConfigHandler } from "./handlers/billingConfig.js";
 import { redeemHandler } from "./handlers/redeemHandler.js";
 import { routerTiersHandler } from "./handlers/routerConfigHandler.js";
 import { catalogJsonHandler } from "./handlers/catalogJson.js";
@@ -164,6 +165,7 @@ const routes: Route[] = [
   { method: "GET", path: "/v1/buckets", handler: listBucketsHandler as LambdaHandler },
   { method: "GET", path: "/v1/models", handler: modelsHandler },
   { method: "GET", path: "/v1/router/tiers", handler: routerTiersHandler },
+  { method: "GET", path: "/v1/billing/config", handler: billingConfigHandler },
   { method: "POST", path: "/v1/billing/orders", handler: createOrderHandler },
   { method: "GET", path: "/v1/billing/orders", handler: listOrdersHandler },
   { method: "GET", path: "/v1/billing/orders/{orderId}", handler: getOrderHandler },
