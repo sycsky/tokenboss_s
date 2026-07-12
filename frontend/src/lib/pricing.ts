@@ -91,7 +91,7 @@ export const STANDARD_RATE: Record<Currency, StandardRate> = {
   rmb: {
     unit: '¥1',
     quota: '$1',
-    minTopup: '¥10 起充 · 永不过期 · 全模型解锁',
+    minTopup: '微信 / 银行卡 / USDT · 永不过期 · 全模型解锁',
     trialPill: '试用 / 24h',
   },
   usd: {

@@ -158,7 +158,9 @@ export default function Plans() {
             <div className="flex items-center gap-2 font-mono text-[10.5px] text-ink-3 leading-none">
               <span>支持</span>
               {currency === 'rmb' ? (
-                <PayBadge dotColor="#1677FF" label="支付宝 AI 付" />
+                /* 支付宝 AI 付风控解封前隐藏；恢复时换回
+                   <PayBadge dotColor="#1677FF" label="支付宝 AI 付" /> */
+                <PayBadge dotColor="#07C160" label="微信 / 银行卡" />
               ) : (
                 <>
                   <PayBadge dotColor="#26A17B" label="USDT" />

@@ -1,10 +1,10 @@
 ---
 name: tokenboss
-version: 0.8.2
+version: 0.8.3
 description: TokenBoss — one API key, one OpenAI-compatible Chat Completions endpoint. Configure as a custom provider for Hermes Agent, OpenClaw, Codex CLI, or any other agent that supports OpenAI-compatible /v1/chat/completions.
 homepage: https://tokenboss.co
 api_endpoint: https://api.tokenboss.co/v1
-last_updated: 2026-04-30
+last_updated: 2026-07-12
 metadata:
   api_key:
     required: true
@@ -446,106 +446,26 @@ OK
 # Topping up balance (充值)
 
 When any chat request returns `402` with `"type": "insufficient_balance"`, the
-account is out of credits. Two ways to top up; the in-agent path is preferred —
-the user never has to leave the conversation.
+account is out of credits.
 
-## In-agent topup via Alipay (HTTP 402 protocol, preferred)
+<!-- 支付宝 AI 付（A2M 402 in-agent topup）因商户风控暂时下线；解封后从
+     git history 恢复本节（commit 前版本含完整 in-agent 流程与 Codex CLI 直驱）。 -->
 
-TokenBoss speaks the Alipay A2M agentic-payment protocol (支付宝 AI 付). The
-paying side is handled by Alipay's agent payment skill — if your agent has it
-installed, the whole flow is: request → 402 → user pays in Alipay → retry.
+## Web topup
 
-If the Alipay payment skill is NOT installed yet, install it first (official
-one-liner, runs inside the user's agent environment):
-
-```bash
-npx -y @alipay/agent-payment@latest install
-```
-
-Then say 开启支付宝支付功能 to complete the one-time wallet authorization.
-Docs: https://a2a.alipay.com/wallet-guide
-
-**Step 1 — request a topup** (same API key you use for chat):
-
-```bash
-curl -s -D - https://api.tokenboss.co/v1/billing/a2m/topup?amount=50 \
-  -H "Authorization: Bearer $TOKENBOSS_API_KEY"
-```
-
-Allowed amounts are fixed denominations in CNY: `10` or `50` (max ¥50 per
-payment — for larger topups, repeat the flow). ¥1 = $1 credit.
-
-The response is `HTTP 402 Payment Required` with a `Payment-Needed` header
-(base64url JSON bill, RSA2-signed by TokenBoss).
-
-**Step 2 — pay.** Hand the `Payment-Needed` value to the Alipay agent payment
-skill. It produces an Alipay cashier push/link; the human confirms the payment
-in their Alipay app (fingerprint/PIN, ~10 seconds).
-
-**Step 3 — retry with proof.** The Alipay skill returns a `Payment-Proof`
-value. Retry the SAME URL with it:
-
-```bash
-curl -s https://api.tokenboss.co/v1/billing/a2m/topup?amount=50 \
-  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
-  -H "Payment-Proof: <value from the Alipay skill>"
-```
-
-`200` with `"fulfillment_confirmed": true` means the balance is credited
-immediately. The same `Payment-Proof` is safe to retry on `409`/`5xx` — the
-order settles exactly once, never double-charges.
-
-Check the new balance with `GET /v1/buckets`.
-
-## Web topup (USDT, fallback)
-
-If the agent has no Alipay payment skill, or the user wants a single large
-topup (> ¥50), send them to https://tokenboss.co/billing/topup — stablecoin
-(USDT/USDC) checkout, credited on confirmation.
+Send the user to https://tokenboss.co/billing/topup — pay by card / WeChat Pay
+(USD-denominated hosted checkout) or stablecoin (USDT / USDC). Credits arrive
+right after the payment confirms; check with `GET /v1/buckets`.
 
 ## Emergency free model (zero-balance escape hatch)
 
 When the balance is empty, an agent whose ONLY model source is TokenBoss
-loses its brain — it can't even run the topup flow. To escape the deadlock,
+loses its brain — it can't even relay the topup link. To escape the deadlock,
 switch the request `model` to `free`: TokenBoss maps it to one of the free
 OpenRouter models on the gateway, which cost 0 and therefore work at zero
-balance. Use it to keep the conversation alive, complete the topup
+balance. Use it to keep the conversation alive, hand the user the topup link
 above, then switch back to your normal model. Do not use it for real work —
 it is slow, rate-limited, and may be a small model.
-
-## Codex and other agents without the Alipay skill package
-
-The Alipay installer only packages the skill for OpenClaw / Claude Code /
-Hermes, but the underlying `alipay-bot` CLI is framework-agnostic — any
-agent that can run shell commands (Codex included) can drive the same flow
-directly:
-
-```bash
-# one-time: install the CLI (also works when no framework is detected)
-npx -y @alipay/agent-payment@latest install
-
-# one-time: authorize the wallet (prints a QR + link; the human scans it
-# in Alipay, then re-run check-wallet to confirm)
-alipay-bot check-wallet
-alipay-bot apply-wallet --agent-name "Codex"
-
-# per topup: capture the Payment-Needed header into a file
-curl -s -D - -o /dev/null "https://api.tokenboss.co/v1/billing/a2m/topup?amount=10" \
-  -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
-  | grep -i '^payment-needed:' | sed 's/^[Pp]ayment-[Nn]eeded: //' | tr -d '\r\n' > 402_needed.txt
-
-# pay: pushes the cashier to the human's Alipay app; retries with
-# Payment-Proof automatically once paid
-alipay-bot 402-buyer-pay --session-id "<any-stable-id>" \
-  -f 402_needed.txt \
-  -r "https://api.tokenboss.co/v1/billing/a2m/topup?amount=10" \
-  -m GET -H "Authorization: Bearer $TOKENBOSS_API_KEY" \
-  --intent-summary "原始请求：给 TokenBoss 充值 10 元"
-```
-
-If `402-buyer-pay` returns 支付待确认, ask the human to confirm in Alipay,
-then query with the `tradeNo` from the output:
-`alipay-bot 402-query-payment-status -t '<tradeNo>' -r '<same-url>' -m GET -H '<same-auth>'`.
 
 ---
 

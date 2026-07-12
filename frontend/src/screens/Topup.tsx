@@ -32,12 +32,16 @@ function agentPrompt(denom: number): string {
  *    dodo → 美元 · 银行卡/微信托管收银台（Dodo MoR）
  *  xunhupay 已下线。 */
 type PayMethod = 'a2m' | 'usdt' | 'dodo';
+
+/** 支付宝 AI 收款（A2M）因商户风控暂时下线整条 UI 链路；解封后改回
+ *  true 即恢复（后端 402 端点保持在线，老订单不受影响）。 */
+const SHOW_ALIPAY_A2M = false;
 type UsdPreset = (typeof USD_PRESETS)[number] | 'custom';
 
 export default function Topup() {
   const navigate = useNavigate();
 
-  const [method, setMethod] = useState<PayMethod>('a2m');
+  const [method, setMethod] = useState<PayMethod>(SHOW_ALIPAY_A2M ? 'a2m' : 'dodo');
 
   // —— 人民币 · Agent 充值 ——
   const [denom, setDenom] = useState<(typeof A2M_DENOMS)[number]>(A2M_DENOMS[1]);
@@ -122,14 +126,16 @@ export default function Topup() {
           <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-[#A89A8D] font-bold mb-3">
             支付方式
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <ChannelOption
-              active={method === 'a2m'}
-              onClick={() => setMethod('a2m')}
-              title="支付宝"
-              subtitle="人民币 · 在你的 Agent 里完成充值"
-              tag="推荐"
-            />
+          <div className={`grid grid-cols-1 gap-3 ${SHOW_ALIPAY_A2M ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+            {SHOW_ALIPAY_A2M && (
+              <ChannelOption
+                active={method === 'a2m'}
+                onClick={() => setMethod('a2m')}
+                title="支付宝"
+                subtitle="人民币 · 在你的 Agent 里完成充值"
+                tag="推荐"
+              />
+            )}
             <ChannelOption
               active={method === 'usdt'}
               onClick={() => setMethod('usdt')}

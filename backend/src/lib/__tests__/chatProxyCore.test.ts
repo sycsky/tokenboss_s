@@ -174,14 +174,32 @@ describe('maybeInterceptUpstreamError', () => {
     const parsed = JSON.parse(writer.body);
     expect(parsed.error.type).toBe('insufficient_balance');
     // gh-6: message 只给人读的三步（详情在 topup 结构块 + skill.md）。
+    // A2M 风控隐藏期（SHOW_A2M_TOPUP 未设）：不引导支付宝，只给网页充值。
     expect(parsed.error.message).toContain('余额已用完');
-    expect(parsed.error.message).toContain('/skill.md');
-    expect(parsed.error.message).toContain('https://tokenboss.co/console');
+    expect(parsed.error.message).toContain('https://tokenboss.co/billing/topup');
+    expect(parsed.error.message).not.toContain('支付宝');
     // Machine-readable twin of the message.
-    expect(parsed.error.topup.a2m.protocol).toBe('http-402-alipay-a2m');
-    expect(parsed.error.topup.a2m.endpoint).toMatch(/\/v1\/billing\/a2m\/topup$/);
-    expect(parsed.error.topup.a2m.amounts_cny.length).toBeGreaterThan(0);
-    expect(parsed.error.topup.web).toBe('https://tokenboss.co/console');
+    expect(parsed.error.topup.a2m).toBeUndefined();
+    expect(parsed.error.topup.web).toBe('https://tokenboss.co/billing/topup');
+  });
+
+  it('re-exposes the A2M alipay topup path when SHOW_A2M_TOPUP=1', async () => {
+    process.env.SHOW_A2M_TOPUP = '1';
+    try {
+      const upstream = new Response(JSON.stringify({ error: '用户额度不足' }), {
+        status: 403, headers: { 'content-type': 'application/json' },
+      });
+      const writer = makeFakeWriter();
+      await maybeInterceptUpstreamError(upstream, writer);
+      const parsed = JSON.parse(writer.body);
+      expect(parsed.error.message).toContain('支付宝');
+      expect(parsed.error.message).toContain('/skill.md');
+      expect(parsed.error.topup.a2m.protocol).toBe('http-402-alipay-a2m');
+      expect(parsed.error.topup.a2m.endpoint).toMatch(/\/v1\/billing\/a2m\/topup$/);
+      expect(parsed.error.topup.a2m.amounts_cny.length).toBeGreaterThan(0);
+    } finally {
+      delete process.env.SHOW_A2M_TOPUP;
+    }
   });
 
   it('names the concrete free model in the hint when FREE_FALLBACK_MODEL is set', async () => {
