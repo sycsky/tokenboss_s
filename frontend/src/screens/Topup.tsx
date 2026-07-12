@@ -13,14 +13,19 @@ const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C191
  *  单笔上限 ¥50）。0.01 验证档是运维用的，不对用户展示。 */
 const A2M_DENOMS = [10, 50] as const;
 
-/** 美元走 USDT 网页充值（epusdt），金额自由。 */
-const USD_PRESETS = [50, 100, 500] as const;
-const MIN_AMOUNT = 1;
+/** 美元渠道（USDT / 卡·微信）充值档位，$10 起充、整数。 */
+const USD_PRESETS = [10, 20, 50, 100] as const;
+const MIN_AMOUNT = 10;
 const MAX_AMOUNT = 99999;
-/** Must match backend USD_TO_CREDIT_RATE in paymentHandlers.ts.
- *  USDT 渠道下付 $1 → 到账 $7 等价额度（按汇率把美金折算回人民币等价，
- *  再用 ¥1 = $1 baseline 转额度）。 */
-const USD_TO_CREDIT_RATE = 7;
+/** 付 $1 → 到账 $X 额度的倍率，必须与后端 CREDIT_RATE（缺省 6.8）
+ *  一致。本质是美元兑人民币结算汇率减去支付手续费缓冲。改后端环境
+ *  变量时同步改这里。 */
+const USD_TO_CREDIT_RATE = 6.8;
+
+/** ×6.8 后可能出现浮点尾巴（11×6.8=74.8000…1），显示时 round 到分。 */
+function creditFor(usd: number): number {
+  return Math.round(usd * USD_TO_CREDIT_RATE * 100) / 100;
+}
 
 function agentPrompt(denom: number): string {
   return `帮我给 TokenBoss 充值 ${denom} 元（支付宝 AI 付，按 skill.md 的 402 充值流程）`;
@@ -287,11 +292,11 @@ export default function Topup() {
 
             {amount != null && (
               <div className="font-mono text-[12px] text-text-secondary">
-                → 到账 ${amount * USD_TO_CREDIT_RATE} 美金
+                → 到账 <span className="font-bold text-ink">${creditFor(amount)}</span> 额度
                 <span className="text-ink-3">
                   {method === 'dodo'
-                    ? ' · $1 ≈ $7 额度 · 结算时可能附加当地税费'
-                    : ' · $1 USDT ≈ $7 额度（按汇率折算）'}
+                    ? ` · 付 $${amount}（微信/卡按人民币结算约 ¥${Math.round(amount * USD_TO_CREDIT_RATE)}）`
+                    : ` · 付 $${amount} USDT`}
                 </span>
               </div>
             )}

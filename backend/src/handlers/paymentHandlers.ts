@@ -159,11 +159,25 @@ function shapeOrder(rec: OrderRecord) {
 // ---------- POST /v1/billing/orders ----------
 
 const MAX_TOPUP_AMOUNT = 99999;
-/** USD-paying channels (epusdt) credit FX-converted USD额度 to the user.
- *  ¥1 = $1 baseline still holds for RMB; USD payments effectively pay
- *  the spot CNY/USD rate and get credited at the same baseline.
- *  Hardcoded for v1; bump on noticeable FX drift. */
-const USD_TO_CREDIT_RATE = 7;
+const MIN_TOPUP_AMOUNT = 10;
+
+/** 美元渠道的「付 $1 → 到账 $X 额度」倍率。X 本质是美元兑人民币结算
+ *  汇率减去该渠道支付手续费的缓冲（上游按人民币结算，额度即人民币
+ *  用量）。可用环境变量按渠道分别调，汇率明显漂移时改一个数即可，
+ *  不接实时汇率源。缺省 6.8：≈当前汇率 7.1 扣手续费缓冲。 */
+const DEFAULT_CREDIT_RATE = 6.8;
+
+function creditRateFor(channel: PaymentChannel): number {
+  const perChannel =
+    channel === 'dodo'
+      ? process.env.CREDIT_RATE_DODO
+      : channel === 'epusdt'
+        ? process.env.CREDIT_RATE_EPUSDT
+        : undefined;
+  const raw = perChannel ?? process.env.CREDIT_RATE;
+  const n = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CREDIT_RATE;
+}
 
 function isOrderType(v: unknown): v is 'plan' | 'topup' {
   return v === 'plan' || v === 'topup';
@@ -252,22 +266,26 @@ export const createOrderHandler = async (
       typeof rawAmount !== 'number' ||
       !Number.isFinite(rawAmount) ||
       !Number.isInteger(rawAmount) ||
-      rawAmount < 1 ||
+      rawAmount < MIN_TOPUP_AMOUNT ||
       rawAmount > MAX_TOPUP_AMOUNT
     ) {
       return jsonError(
         400,
         "invalid_request_error",
-        `amount must be an integer between 1 and ${MAX_TOPUP_AMOUNT}.`,
+        `amount must be an integer between ${MIN_TOPUP_AMOUNT} and ${MAX_TOPUP_AMOUNT}.`,
         "invalid_amount",
       );
     }
     skuType = 'topup';
     amount = rawAmount;
-    // ¥1 = $1 baseline (spec credits-economy § 4) for RMB; USD pays spot
-    // FX so $1 USDT → $7 credited. Stored independently of amount/currency
-    // so settle is decoupled from FX drift between order and webhook.
-    topupAmountUsd = currency === 'USD' ? rawAmount * USD_TO_CREDIT_RATE : rawAmount;
+    // 上游按人民币结算、额度即人民币用量。USD 渠道付的美元按 creditRateFor
+    // 倍率（≈汇率扣手续费缓冲）折成额度；RMB 渠道 1:1。round 到分，避免
+    // 6.8×整数的浮点尾巴（如 11×6.8=74.8000…1）落进 DB。存独立字段，让结算
+    // 与下单/回调之间的汇率漂移解耦。
+    topupAmountUsd =
+      currency === 'USD'
+        ? Math.round(rawAmount * creditRateFor(channel) * 100) / 100
+        : rawAmount;
     skuLabel = 'topup';
   }
 
