@@ -192,13 +192,6 @@ async function settleWebhookEvent(
     return;
   }
 
-  if (verified.status === "failed") {
-    // markOrderStatus only touches pending orders, so a late failure event
-    // can never revert an order that already settled as paid.
-    await markOrderStatus({ orderId: order.orderId, status: "failed" });
-    return;
-  }
-
   if (verified.status === "paid") {
     const settled = await markOrderPaidIfPending({
       orderId: order.orderId,
@@ -343,23 +336,19 @@ export const dodoWebhookHandler = async (
         amountActual: evt.amountActual,
       },
     });
-  } else if (evt.type === "payment.failed") {
-    // Definitive failure — flip the still-pending order to 'failed' so the
-    // status page shows the retry flow immediately instead of spinning
-    // "正在处理" until the 30-minute poll timeout.
-    await settleWebhookEvent(
-      {
-        orderId: evt.orderId,
-        upstreamTradeId: evt.upstreamTradeId,
-        amountActual: evt.amountActual,
-        status: "failed",
-      },
-      "dodo",
-    );
   } else {
-    // Other informational events (payment.processing etc.) — log only, the
-    // order stays pending until a terminal succeeded/failed arrives.
-    console.info(`${tag} ignoring event`, { type: evt.type, orderId: evt.orderId });
+    // payment.failed and other non-terminal events — log only, do NOT mark
+    // the order failed. A Dodo checkout session lets the buyer retry after a
+    // declined attempt, so payment.failed is per-ATTEMPT, not per-order: a
+    // later payment.succeeded can still arrive for the same orderId. Since
+    // markOrderPaidIfPending only transitions pending orders, terminating
+    // here would silently drop a retried, genuinely-paid payment (codex
+    // review P1). The order stays pending; the checkout's own TTL plus the
+    // status page's 30-min poll cap bound the wait on a truly-abandoned one.
+    console.info(`${tag} non-terminal event, order stays pending`, {
+      type: evt.type,
+      orderId: evt.orderId,
+    });
   }
 
   return textResponse(200, "ok");

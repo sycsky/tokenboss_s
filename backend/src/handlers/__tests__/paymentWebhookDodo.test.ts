@@ -6,13 +6,7 @@ process.env.SQLITE_PATH = ':memory:';
 process.env.NEWAPI_BASE_URL = 'http://newapi.test.local';
 process.env.NEWAPI_ADMIN_TOKEN = 'admin-token-test';
 
-import {
-  init,
-  putUser,
-  createOrder,
-  getOrder,
-  markOrderPaidIfPending,
-} from '../../lib/store.js';
+import { init, putUser, createOrder, getOrder } from '../../lib/store.js';
 import * as dodoMod from '../../lib/payment/dodo.js';
 import type { DodoWebhookEvent } from '../../lib/payment/dodo.js';
 import { newapi } from '../../lib/newapi.js';
@@ -50,8 +44,8 @@ function stubDodo(evt: DodoWebhookEvent) {
   } as unknown as ReturnType<typeof dodoMod.dodoFromEnv>);
 }
 
-describe('dodoWebhookHandler — payment.failed', () => {
-  it('flips a pending order to failed so the user gets the retry flow', async () => {
+describe('dodoWebhookHandler — payment.failed keeps the order retryable', () => {
+  it('leaves the order pending (a single failed attempt is not terminal)', async () => {
     const orderId = 'tb_ord_dodo_failed';
     await createOrder({
       orderId,
@@ -77,11 +71,11 @@ describe('dodoWebhookHandler — payment.failed', () => {
     expect(res.statusCode).toBe(200);
 
     const back = await getOrder(orderId);
-    expect(back?.status).toBe('failed');
+    expect(back?.status).toBe('pending');
   });
 
-  it('never reverts an already-paid order (late failure event)', async () => {
-    const orderId = 'tb_ord_dodo_late_fail';
+  it('still credits when a retry succeeds after a failed attempt on the same order', async () => {
+    const orderId = 'tb_ord_dodo_retry_ok';
     await createOrder({
       orderId,
       userId,
@@ -93,17 +87,27 @@ describe('dodoWebhookHandler — payment.failed', () => {
       status: 'pending',
       createdAt: new Date().toISOString(),
     });
-    await markOrderPaidIfPending({
-      orderId,
-      paidAt: new Date().toISOString(),
-      amountActual: 340,
-    });
 
+    // Attempt 1 fails.
     stubDodo({
       type: 'payment.failed',
       orderId,
-      upstreamTradeId: 'pay_failed_late',
+      upstreamTradeId: 'pay_attempt_1',
       amountActual: 0,
+      currency: 'USD',
+    });
+    await dodoWebhookHandler(event());
+    expect((await getOrder(orderId))?.status).toBe('pending');
+
+    // Attempt 2 (retry) succeeds — must settle, not be dropped.
+    const mintSpy = vi.spyOn(newapi, 'createRedemption').mockResolvedValue('CODE-RETRY');
+    vi.spyOn(newapi, 'loginUser').mockResolvedValue({ cookie: 'c', userId: 77 });
+    vi.spyOn(newapi, 'redeemCode').mockResolvedValue({ quotaAdded: 340 * 500_000 });
+    stubDodo({
+      type: 'payment.succeeded',
+      orderId,
+      upstreamTradeId: 'pay_attempt_2',
+      amountActual: 50,
       currency: 'USD',
     });
 
@@ -112,6 +116,8 @@ describe('dodoWebhookHandler — payment.failed', () => {
 
     const back = await getOrder(orderId);
     expect(back?.status).toBe('paid');
+    expect(back?.settleStatus).toBe('settled');
+    expect(mintSpy).toHaveBeenCalledWith({ name: orderId, quotaUsd: 340 });
   });
 });
 
