@@ -83,7 +83,7 @@ gh auth switch --user stablehunter-dev
 
 > Backend 唯一部署路径是 Zeabur 跑 `node dist/local.js`，路由全在 `backend/src/local.ts`。历史的 AWS SAM 配置（`template.yaml` + `sam` 系列脚本）已于 2026-07 清理删除。
 
-> `frontend/vercel.json` 是历史遗留，不是当前部署路径（前端走 Zeabur nginx）。仍被 `openspec/changes/add-seo-baseline` 引用，待该 change 收尾时一并处置。
+> 前端 SPA fallback 由 `frontend/nginx.conf`（`try_files … /index.html`）处理，走 Zeabur nginx。历史的 `frontend/vercel.json` 已于 2026-07 清理删除。
 
 ## 工作风格约定
 

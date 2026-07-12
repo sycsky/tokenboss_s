@@ -101,7 +101,7 @@ flowchart TD
 |---|---|---|
 | **结构** | 三 stream 边界：`frontend/`（React + Vite · Zeabur）· `backend/`（Node + TypeScript · Zeabur）· `ClawRouter/`（独立 npm package，wallet auth + x402） | `ls`, `git ls-files \| head -50` |
 | **分支** | 默认 `main` · 当前 HEAD · 相关 `feature/*` 未 merge | `git branch -a`, `git log origin/main --oneline \| head -20` |
-| **数据层** | backend 当前用的存储（grep 实际 import：`@aws-sdk/client-dynamodb` / `better-sqlite3` / 其他）· 表/集合 schema · 是否需要新表 | `grep -rn "from '@aws-sdk\\|better-sqlite3'" backend/src` |
+| **数据层** | backend 用 better-sqlite3（`src/lib/store.ts`）· 表 schema · 是否需要新表 | `grep -rn "better-sqlite3\\|CREATE TABLE" backend/src` |
 | **Test infra** | backend/frontend: vitest · ClawRouter: vitest + resilience suites · E2E: playwright (`.playwright-mcp/`) · `npm test` 各端能跑吗 | 实际跑一遍 |
 | **Lint / type baseline** | `npm run typecheck` 现在过吗？每个 stream 单独跑 · baseline warning 多少？ | 三个 stream 各跑一次 |
 | **OpenSpec 状态** | `openspec/changes/` 已有未 archive 的 REQ？跟本次冲突吗？ | `ls openspec/changes/` |
@@ -590,7 +590,7 @@ PR 合并到 main 后**自动触发**：
 | ClawRouter | npm publish（独立 package `@blockrun/clawrouter`） |
 | Stage 4.5 Live Demo gate | **本期未启用**；后期 Zeabur preview 开通后再补 |
 
-> 历史 AWS SAM 配置（`template.yaml` + `sam` 脚本）已于 2026-07 清理删除。实际数据层以 `backend/src/` 的真实 import 为准（better-sqlite3；`src/lib/ddb.ts` 的 DynamoDB SDK 是尚未清理的历史死代码）。
+> 历史 AWS 遗留（`template.yaml` + `sam` 脚本、`src/lib/ddb.ts` + DynamoDB SDK）已于 2026-07 清理删除。数据层是 better-sqlite3（`backend/src/lib/store.ts`），部署跑 `node dist/local.js`。
 
 ---
 
