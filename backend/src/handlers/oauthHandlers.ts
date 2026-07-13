@@ -29,7 +29,11 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
-import { createVerifiedUser, ProvisionError } from "../lib/accountProvisioning.js";
+import {
+  createVerifiedUser,
+  ProvisionError,
+  revokeTakeoverCredentials,
+} from "../lib/accountProvisioning.js";
 import { signSession } from "../lib/authTokens.js";
 import {
   getOauthUserId,
@@ -37,7 +41,6 @@ import {
   getUserIdByEmail,
   markEmailVerified,
   putOauthIdentity,
-  revokePasswordCredentials,
 } from "../lib/store.js";
 
 const STATE_COOKIE = "tb_oauth_state";
@@ -273,10 +276,10 @@ export const oauthCallbackHandler = async (
       if (existing && !existing.emailVerified) {
         // The row's email was NEVER verified: whoever registered it (and
         // set its password) hasn't proven inbox ownership, but the GitHub
-        // user just did. Pre-registration takeover guard — strip the
-        // password and revoke outstanding sessions before handing the
-        // account to the proven owner.
-        revokePasswordCredentials(userId);
+        // user just did. Pre-registration takeover guard — revoke the
+        // password, outstanding sessions AND any api keys minted from the
+        // registration session before handing the account over.
+        await revokeTakeoverCredentials(userId);
       }
       markEmailVerified(userId);
     } else {

@@ -14,14 +14,44 @@ import { randomBytes } from "node:crypto";
 
 import { isNewapiConfigured, newapi, NewapiError } from "./newapi.js";
 import {
+  deleteApiKeyIndex,
   getUser,
   getUserIdByEmail,
   insertUser,
   isUniqueConstraintError,
+  listApiKeyIndex,
   markEmailVerified,
   revokePasswordCredentials,
   type UserRecord,
 } from "./store.js";
+
+/**
+ * Full pre-registration takeover revocation: whoever held this
+ * never-verified account (password registrant) loses every capability the
+ * registration session could mint — password, browser sessions, AND api
+ * keys. Keys matter because the attacker could have created `sk-...`
+ * tokens before the real inbox owner showed up; those would silently
+ * spend the victim's future balance.
+ *
+ * Local key-index rows are ALWAYS removed (our chat proxy rejects a key
+ * the moment its index row is gone). The upstream newapi token delete is
+ * best-effort — a newapi hiccup must not block the victim's login, and
+ * with the index row gone the token is unreachable through TokenBoss.
+ */
+export async function revokeTakeoverCredentials(userId: string): Promise<void> {
+  revokePasswordCredentials(userId);
+  for (const { newapiTokenId } of listApiKeyIndex(userId)) {
+    try {
+      await newapi.deleteToken(newapiTokenId);
+    } catch (err) {
+      console.error(
+        `[takeover-guard] upstream token ${newapiTokenId} delete failed for ${userId}:`,
+        (err as Error).message,
+      );
+    }
+    deleteApiKeyIndex(userId, newapiTokenId);
+  }
+}
 
 /** Thrown when the newapi-side account could not be created. Callers map
  *  this to a 502 (JSON routes) or an error redirect (OAuth callback). */
@@ -101,7 +131,7 @@ export async function createVerifiedUser(input: {
         // registration) forfeits its password + sessions before this
         // proven inbox owner gets it.
         if (!winner.emailVerified) {
-          revokePasswordCredentials(winner.userId);
+          await revokeTakeoverCredentials(winner.userId);
           markEmailVerified(winner.userId);
           winner = await getUser(winner.userId) ?? winner;
         }

@@ -12,10 +12,12 @@ process.env.APP_URL = 'https://app.test.local';
 import {
   init,
   putUser,
+  putApiKeyIndex,
   putOauthIdentity,
   getUser,
   getOauthUserId,
   getUserIdByEmail,
+  listApiKeyIndex,
 } from '../../lib/store.js';
 import { createVerifiedUser } from '../../lib/accountProvisioning.js';
 import { newapi } from '../../lib/newapi.js';
@@ -187,6 +189,13 @@ describe('oauthCallbackHandler', () => {
       emailVerified: false,
       tokenVersion: 0,
     });
+    // ...and the registration session already minted an api key.
+    putApiKeyIndex({
+      userId: 'u_email_first',
+      newapiTokenId: 4242,
+      keyHash: 'deadbeef'.repeat(8),
+    });
+    const deleteTokenSpy = vi.spyOn(newapi, 'deleteToken').mockResolvedValue(undefined);
     mockGithub({
       user: { id: 777, login: 'linker', name: 'Linker' },
       emails: [{ email: 'linked@test.local', primary: true, verified: true }],
@@ -209,6 +218,10 @@ describe('oauthCallbackHandler', () => {
     // to the OAuth user is signed with the NEW version, so it stays valid.
     expect(merged?.passwordHash).toBeFalsy();
     expect(merged?.tokenVersion).toBe(1);
+    // ...and so are any api keys minted from the registration session —
+    // upstream token deleted, local index row gone (proxy rejects the key).
+    expect(deleteTokenSpy).toHaveBeenCalledWith(4242);
+    expect(listApiKeyIndex('u_email_first')).toEqual([]);
   });
 
   it('rejects when the state cookie is missing or does not match', async () => {

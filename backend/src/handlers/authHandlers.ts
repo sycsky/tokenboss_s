@@ -24,7 +24,10 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
-import { createVerifiedUser } from "../lib/accountProvisioning.js";
+import {
+  createVerifiedUser,
+  revokeTakeoverCredentials,
+} from "../lib/accountProvisioning.js";
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
 import { sendVerificationEmail, sendVerifyLinkEmail } from "../lib/emailService.js";
@@ -36,12 +39,12 @@ import {
   bumpUserTokenVersion,
   getUser,
   getUserIdByEmail,
+  insertUser,
+  isUniqueConstraintError,
   markEmailVerified,
   putEmailIndex,
-  putUser,
   recentCodeCount,
   recentEmailVerifyTokenCount,
-  revokePasswordCredentials,
   saveVerificationCode,
   type UserRecord,
 } from "../lib/store.js";
@@ -223,7 +226,28 @@ export const registerHandler = async (
     }
   }
 
-  putUser(user);
+  // Create-only insert: a concurrent signup (password, OTP or OAuth) that
+  // grabbed this email after our pre-check above must NOT be replaced —
+  // INSERT OR REPLACE would delete the winner row and orphan its newapi /
+  // oauth bindings. Surface the same 409 the pre-check would have.
+  try {
+    insertUser(user);
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      if (user.newapiUserId !== undefined) {
+        console.warn(
+          `[register] duplicate signup race for ${email}: newapi user ${user.newapiUserId} orphaned`,
+        );
+      }
+      return jsonError(
+        409,
+        "conflict",
+        "An account with this email already exists.",
+        "email_taken",
+      );
+    }
+    throw err;
+  }
   await putEmailIndex(email, userId);
 
   // Send the verification link. If delivery fails (Resend down, no DNS,
@@ -478,9 +502,9 @@ export async function verifyCodeHandler(
     if (existing && !existing.emailVerified) {
       // Never-verified row = whoever set its password didn't prove inbox
       // ownership, but this OTP consumer just did. Pre-registration
-      // takeover guard: strip the password + revoke outstanding sessions
-      // before handing the account over (same rule as the OAuth merge).
-      revokePasswordCredentials(userId);
+      // takeover guard: revoke password + sessions + api keys before
+      // handing the account over (same rule as the OAuth merge).
+      await revokeTakeoverCredentials(userId);
       markEmailVerified(userId);
     }
   }

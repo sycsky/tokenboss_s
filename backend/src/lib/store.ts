@@ -688,6 +688,14 @@ export function getUserIdByKeyHash(keyHash: string): string | null {
 }
 
 /** Drop the index row for a deleted token. Tolerant of missing rows. */
+/** All indexed API keys for a user — used to revoke them in bulk when a
+ *  verified inbox proof reclaims a never-verified (pre-registered) account. */
+export function listApiKeyIndex(userId: string): { newapiTokenId: number }[] {
+  return db
+    .prepare(`SELECT newapiTokenId FROM api_key_index WHERE userId = ?`)
+    .all(userId) as { newapiTokenId: number }[];
+}
+
 export function deleteApiKeyIndex(userId: string, newapiTokenId: number): void {
   db.prepare(
     `DELETE FROM api_key_index WHERE userId = ? AND newapiTokenId = ?`,
