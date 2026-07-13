@@ -18,6 +18,8 @@ import {
   getUserIdByEmail,
   insertUser,
   isUniqueConstraintError,
+  markEmailVerified,
+  revokePasswordCredentials,
   type UserRecord,
 } from "./store.js";
 
@@ -86,12 +88,22 @@ export async function createVerifiedUser(input: {
     // can clean up, but don't fail the login over it.
     if (isUniqueConstraintError(err)) {
       const winnerId = getUserIdByEmail(input.email);
-      const winner = winnerId ? await getUser(winnerId) : null;
+      let winner = winnerId ? await getUser(winnerId) : null;
       if (winner) {
         if (newapiUserId !== undefined) {
           console.warn(
             `[provision] duplicate signup race for ${input.email}: newapi user ${newapiUserId} orphaned, using ${winner.userId}`,
           );
+        }
+        // Callers treat our return value as "verified account" — so the
+        // winner must satisfy the same takeover guard as the callers'
+        // merge paths: a never-verified row (e.g. a concurrent password
+        // registration) forfeits its password + sessions before this
+        // proven inbox owner gets it.
+        if (!winner.emailVerified) {
+          revokePasswordCredentials(winner.userId);
+          markEmailVerified(winner.userId);
+          winner = await getUser(winner.userId) ?? winner;
         }
         return winner;
       }

@@ -257,6 +257,25 @@ describe('oauthCallbackHandler', () => {
     expect((await getUser(a.userId))?.email).toBe('race@test.local');
   });
 
+  it('race winner that is an unverified password row loses its credentials', async () => {
+    // A password registration slid in between the caller's byEmail check
+    // and our insert. The fallback must apply the same takeover guard the
+    // merge paths do — not hand back a row the attacker can still enter.
+    putUser({
+      userId: 'u_race_prereg',
+      email: 'race-prereg@test.local',
+      passwordHash: 'attacker-controlled-hash',
+      createdAt: new Date().toISOString(),
+      emailVerified: false,
+      tokenVersion: 0,
+    });
+    const won = await createVerifiedUser({ email: 'race-prereg@test.local' });
+    expect(won.userId).toBe('u_race_prereg');
+    expect(won.emailVerified).toBe(true);
+    expect(won.passwordHash).toBeFalsy();
+    expect(won.tokenVersion).toBe(1);
+  });
+
   it('maps a failed /user/emails call to exchange_failed, not no_verified_email', async () => {
     mockGithub({ user: { id: 31337, login: 'ratelimited' }, emailsError: true });
     const { state, cookie } = await startAndGetState();
