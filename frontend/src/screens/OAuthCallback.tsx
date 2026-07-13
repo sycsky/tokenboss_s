@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { takeOAuthFragment } from '../lib/oauthFragment';
 import { slockBtn } from '../lib/slockBtn';
 import { AuthShell } from '../components/AuthShell';
 
@@ -10,8 +11,10 @@ type State = { kind: 'signing-in' } | { kind: 'failed' };
  * Landing page for the backend's OAuth callback redirect. The session JWT
  * arrives in the URL FRAGMENT (`#token=...&isNew=0|1`) — fragments never
  * reach servers or Referer headers, so the token stays out of access logs.
- * We adopt it, scrub it from the address bar / history, and route new
- * users to onboarding, returning users to the console.
+ * main.tsx's captureOAuthFragment() has already moved it out of the URL
+ * (before Sentry.init, so no startup error can leak it); we consume the
+ * stash here and route new users to onboarding, returning users to the
+ * console.
  */
 export default function OAuthCallback() {
   const nav = useNavigate();
@@ -24,19 +27,13 @@ export default function OAuthCallback() {
     if (consumed.current) return;
     consumed.current = true;
 
-    const frag = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    const token = frag.get('token');
-    const isNew = frag.get('isNew') === '1';
-    // Drop the fragment immediately so the JWT never sits in the URL bar
-    // or survives into browser history / bookmarks.
-    window.history.replaceState(null, '', window.location.pathname);
-
-    if (!token) {
+    const frag = takeOAuthFragment();
+    if (!frag) {
       setState({ kind: 'failed' });
       return;
     }
-    loginWithToken(token)
-      .then(() => nav(isNew ? '/onboard/welcome' : '/console', { replace: true }))
+    loginWithToken(frag.token)
+      .then(() => nav(frag.isNew ? '/onboard/welcome' : '/console', { replace: true }))
       .catch(() => setState({ kind: 'failed' }));
   }, [loginWithToken, nav]);
 

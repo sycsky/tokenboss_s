@@ -5,7 +5,13 @@ import * as Sentry from "@sentry/react";
 import App from "./App.tsx";
 import { AuthProvider } from "./lib/auth.js";
 import { AdminAuthProvider } from "./lib/adminAuth.js";
+import { captureOAuthFragment } from "./lib/oauthFragment.js";
 import "./index.css";
+
+// MUST run before Sentry.init and before the first render: moves the OAuth
+// callback's `#token=...` fragment out of the URL so no startup error can
+// ship the bearer token to telemetry. No-op on every other page.
+captureOAuthFragment();
 
 // Frontend Sentry — separate project from backend so error counts /
 // affected-user metrics don't conflate the two layers. DSN is public
