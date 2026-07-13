@@ -6,7 +6,7 @@ import { RedeemCodeModal } from '../components/RedeemCodeModal';
 import { dispatchCheckout } from '../lib/checkoutFlow';
 import { api, type BillingChannel } from '../lib/api';
 import { SHOW_ALIPAY_A2M, SHOW_DODO } from '../lib/paymentVisibility';
-import { DEFAULT_CREDIT_RATE, MIN_TOPUP_USD, MAX_TOPUP_USD, creditFor } from '../lib/creditDefaults';
+import { DEFAULT_CREDIT_RATES, MIN_TOPUP_USD, MAX_TOPUP_USD, creditFor } from '../lib/creditDefaults';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -20,7 +20,6 @@ const USD_PRESETS = [1, 10, 50, 100] as const;
 
 /** 兜底默认与 creditFor 来自 ../lib/creditDefaults（后端 creditConfig 的前端
  *  镜像，pricing 文案也读它）；权威值仍是 /v1/billing/config，加载后覆盖。 */
-const FALLBACK_RATE = DEFAULT_CREDIT_RATE;
 const FALLBACK_MIN = MIN_TOPUP_USD;
 const FALLBACK_MAX = MAX_TOPUP_USD;
 
@@ -68,7 +67,7 @@ export default function Topup() {
     rates: { epusdt: number; dodo: number };
     min: number;
     max: number;
-  }>({ rates: { epusdt: FALLBACK_RATE, dodo: FALLBACK_RATE }, min: FALLBACK_MIN, max: FALLBACK_MAX });
+  }>({ rates: { epusdt: DEFAULT_CREDIT_RATES.epusdt, dodo: DEFAULT_CREDIT_RATES.dodo }, min: FALLBACK_MIN, max: FALLBACK_MAX });
   useEffect(() => {
     let alive = true;
     api
