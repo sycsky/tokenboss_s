@@ -19,4 +19,4 @@ export const SHOW_ALIPAY_A2M = false;
 /** Dodo（卡 / 微信）网关：Dodo 商户审核通过 + 正式 DODO_* 变量配齐前保持
  *  false，避免宣传了却拿到 503。上线时改回 true，并在后端设 SHOW_DODO_TOPUP=1、
  *  同步 skill.md 的 Web topup 文案。 */
-export const SHOW_DODO = false;
+export const SHOW_DODO = true;
