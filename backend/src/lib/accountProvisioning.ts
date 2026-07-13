@@ -13,6 +13,7 @@
 import { randomBytes } from "node:crypto";
 
 import { isNewapiConfigured, newapi, NewapiError } from "./newapi.js";
+import { newapiUsername } from "./newapiIdentity.js";
 import {
   deleteApiKeyIndex,
   getUser,
@@ -36,14 +37,30 @@ import {
  * The UPSTREAM delete is the only enforcement point: the chat proxy
  * forwards bearer keys straight to newapi (api_key_index is used for
  * attribution, not auth), so a key survives until newapi itself drops it.
- * Any upstream failure therefore THROWS and aborts the takeover — the
- * victim retries when newapi recovers; we never complete a takeover with
- * the attacker's key still live.
+ * Deletion goes through the OWNER's session (`deleteUserToken`) — the
+ * admin-scoped DELETE is silently ignored / soft-deletes on many newapi
+ * forks (see newapi.ts), which would report success while the attacker's
+ * key stays live. Any failure THROWS and aborts the takeover — the victim
+ * retries when newapi recovers; we never complete a takeover with the
+ * attacker's key still usable.
  */
 export async function revokeTakeoverCredentials(userId: string): Promise<void> {
   revokePasswordCredentials(userId);
-  for (const { newapiTokenId } of listApiKeyIndex(userId)) {
-    await newapi.deleteToken(newapiTokenId);
+  const keys = listApiKeyIndex(userId);
+  if (keys.length === 0) return;
+
+  const user = await getUser(userId);
+  if (!user?.newapiPassword) {
+    // Keys exist but we hold no owner credentials to revoke them with —
+    // we cannot PROVE revocation, so the takeover must not complete.
+    throw new Error(`cannot revoke api keys for ${userId}: no newapi credentials on file`);
+  }
+  const session = await newapi.loginUser({
+    username: newapiUsername(userId),
+    password: user.newapiPassword,
+  });
+  for (const { newapiTokenId } of keys) {
+    await newapi.deleteUserToken(session, newapiTokenId);
     deleteApiKeyIndex(userId, newapiTokenId);
   }
 }

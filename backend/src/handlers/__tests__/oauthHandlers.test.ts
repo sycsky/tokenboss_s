@@ -188,6 +188,8 @@ describe('oauthCallbackHandler', () => {
       createdAt: new Date().toISOString(),
       emailVerified: false,
       tokenVersion: 0,
+      newapiUserId: 64,
+      newapiPassword: 'stored-pw',
     });
     // ...and the registration session already minted an api key.
     putApiKeyIndex({
@@ -195,7 +197,13 @@ describe('oauthCallbackHandler', () => {
       newapiTokenId: 4242,
       keyHash: 'deadbeef'.repeat(8),
     });
-    const deleteTokenSpy = vi.spyOn(newapi, 'deleteToken').mockResolvedValue(undefined);
+    // Revocation must go through the OWNER's session — admin deleteToken is
+    // silently ignored on many newapi forks.
+    const ownerSession = { cookie: 'sid=owner', userId: 64 };
+    vi.spyOn(newapi, 'loginUser').mockResolvedValue(ownerSession);
+    const deleteTokenSpy = vi
+      .spyOn(newapi, 'deleteUserToken')
+      .mockResolvedValue(undefined);
     mockGithub({
       user: { id: 777, login: 'linker', name: 'Linker' },
       emails: [{ email: 'linked@test.local', primary: true, verified: true }],
@@ -219,8 +227,8 @@ describe('oauthCallbackHandler', () => {
     expect(merged?.passwordHash).toBeFalsy();
     expect(merged?.tokenVersion).toBe(1);
     // ...and so are any api keys minted from the registration session —
-    // upstream token deleted, local index row gone (proxy rejects the key).
-    expect(deleteTokenSpy).toHaveBeenCalledWith(4242);
+    // upstream token deleted via the owner session, local index row gone.
+    expect(deleteTokenSpy).toHaveBeenCalledWith({ cookie: 'sid=owner', userId: 64 }, 4242);
     expect(listApiKeyIndex('u_email_first')).toEqual([]);
   });
 
@@ -235,9 +243,12 @@ describe('oauthCallbackHandler', () => {
       createdAt: new Date().toISOString(),
       emailVerified: false,
       tokenVersion: 0,
+      newapiUserId: 65,
+      newapiPassword: 'stored-pw',
     });
     putApiKeyIndex({ userId: 'u_revoke_fail', newapiTokenId: 9001, keyHash: 'cafebabe'.repeat(8) });
-    vi.spyOn(newapi, 'deleteToken').mockRejectedValue(new Error('newapi down'));
+    vi.spyOn(newapi, 'loginUser').mockResolvedValue({ cookie: 'sid=owner', userId: 65 });
+    vi.spyOn(newapi, 'deleteUserToken').mockRejectedValue(new Error('newapi down'));
     mockGithub({
       user: { id: 888, login: 'revokefail' },
       emails: [{ email: 'revoke-fail@test.local', primary: true, verified: true }],
