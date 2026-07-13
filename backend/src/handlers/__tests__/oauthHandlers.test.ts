@@ -177,11 +177,15 @@ describe('oauthCallbackHandler', () => {
   });
 
   it('merges into an existing account when the verified email matches', async () => {
+    // Unverified row WITH a password — the pre-registration takeover shape:
+    // whoever set this password never proved they own the inbox.
     putUser({
       userId: 'u_email_first',
       email: 'linked@test.local',
+      passwordHash: 'attacker-controlled-hash',
       createdAt: new Date().toISOString(),
       emailVerified: false,
+      tokenVersion: 0,
     });
     mockGithub({
       user: { id: 777, login: 'linker', name: 'Linker' },
@@ -197,8 +201,14 @@ describe('oauthCallbackHandler', () => {
     expect(frag.get('isNew')).toBe('0');
     expect(verifySession(frag.get('token')!)?.sub).toBe('u_email_first');
     expect(getOauthUserId('github', '777')).toBe('u_email_first');
+    const merged = await getUser('u_email_first');
     // GitHub's verified email is inbox proof — the account gets verified.
-    expect((await getUser('u_email_first'))?.emailVerified).toBe(true);
+    expect(merged?.emailVerified).toBe(true);
+    // Takeover guard: the never-verified password is revoked and every
+    // outstanding session invalidated (tokenVersion bump). The JWT issued
+    // to the OAuth user is signed with the NEW version, so it stays valid.
+    expect(merged?.passwordHash).toBeFalsy();
+    expect(merged?.tokenVersion).toBe(1);
   });
 
   it('rejects when the state cookie is missing or does not match', async () => {

@@ -793,6 +793,20 @@ export function markEmailVerified(userId: string): void {
 }
 
 /**
+ * Strip the password and invalidate every outstanding session token.
+ * Used when a VERIFIED inbox proof (OAuth verified email / consumed OTP)
+ * claims an account whose email was never verified: whoever set that
+ * password never proved they own the inbox — classic pre-registration
+ * takeover — so their credentials must not survive the merge.
+ */
+export function revokePasswordCredentials(userId: string): void {
+  db.prepare(`
+    UPDATE users SET passwordHash = NULL, tokenVersion = tokenVersion + 1
+    WHERE userId = ?
+  `).run(userId);
+}
+
+/**
  * How many verify-token rows have been minted for this user in the past N
  * seconds. Used to rate-limit the resend endpoint (1 / 60s, 5 / hour).
  */

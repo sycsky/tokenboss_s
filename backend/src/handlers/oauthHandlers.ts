@@ -37,6 +37,7 @@ import {
   getUserIdByEmail,
   markEmailVerified,
   putOauthIdentity,
+  revokePasswordCredentials,
 } from "../lib/store.js";
 
 const STATE_COOKIE = "tb_oauth_state";
@@ -268,6 +269,15 @@ export const oauthCallbackHandler = async (
       // Same verified inbox on both sides — merge into the existing
       // account so balances/keys are preserved, and record the binding.
       userId = byEmail;
+      const existing = await getUser(userId);
+      if (existing && !existing.emailVerified) {
+        // The row's email was NEVER verified: whoever registered it (and
+        // set its password) hasn't proven inbox ownership, but the GitHub
+        // user just did. Pre-registration takeover guard — strip the
+        // password and revoke outstanding sessions before handing the
+        // account to the proven owner.
+        revokePasswordCredentials(userId);
+      }
       markEmailVerified(userId);
     } else {
       try {

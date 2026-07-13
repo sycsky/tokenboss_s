@@ -41,6 +41,7 @@ import {
   putUser,
   recentCodeCount,
   recentEmailVerifyTokenCount,
+  revokePasswordCredentials,
   saveVerificationCode,
   type UserRecord,
 } from "../lib/store.js";
@@ -475,6 +476,11 @@ export async function verifyCodeHandler(
     // UPDATE when it's a no-op to avoid a write per login.
     const existing = await getUser(userId);
     if (existing && !existing.emailVerified) {
+      // Never-verified row = whoever set its password didn't prove inbox
+      // ownership, but this OTP consumer just did. Pre-registration
+      // takeover guard: strip the password + revoke outstanding sessions
+      // before handing the account over (same rule as the OAuth merge).
+      revokePasswordCredentials(userId);
       markEmailVerified(userId);
     }
   }
