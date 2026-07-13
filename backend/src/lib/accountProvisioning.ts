@@ -67,9 +67,12 @@ export async function revokeTakeoverCredentials(userId: string): Promise<void> {
     password: user.newapiPassword,
   });
   // Delete-and-verify loop: each pass re-lists from the authoritative
-  // upstream; only an EMPTY listing completes the takeover. Bounded so a
-  // fork that resurrects tokens can't loop us forever.
-  for (let pass = 0; pass < 3; pass++) {
+  // upstream; only an EMPTY listing completes the takeover. listUserTokens
+  // pages at ~100 rows, so a pass may drain only one page — 10 passes
+  // cover any plausible key count while still bounding a fork that
+  // resurrects tokens. (createKeyHandler independently destroys keys
+  // minted by stale sessions, so this loop doesn't have to win races.)
+  for (let pass = 0; pass < 10; pass++) {
     const tokens = await newapi.listUserTokens(session);
     if (tokens.length === 0) {
       for (const { newapiTokenId } of listApiKeyIndex(userId)) {
