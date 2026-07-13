@@ -33,22 +33,17 @@ import {
  * tokens before the real inbox owner showed up; those would silently
  * spend the victim's future balance.
  *
- * Local key-index rows are ALWAYS removed (our chat proxy rejects a key
- * the moment its index row is gone). The upstream newapi token delete is
- * best-effort — a newapi hiccup must not block the victim's login, and
- * with the index row gone the token is unreachable through TokenBoss.
+ * The UPSTREAM delete is the only enforcement point: the chat proxy
+ * forwards bearer keys straight to newapi (api_key_index is used for
+ * attribution, not auth), so a key survives until newapi itself drops it.
+ * Any upstream failure therefore THROWS and aborts the takeover — the
+ * victim retries when newapi recovers; we never complete a takeover with
+ * the attacker's key still live.
  */
 export async function revokeTakeoverCredentials(userId: string): Promise<void> {
   revokePasswordCredentials(userId);
   for (const { newapiTokenId } of listApiKeyIndex(userId)) {
-    try {
-      await newapi.deleteToken(newapiTokenId);
-    } catch (err) {
-      console.error(
-        `[takeover-guard] upstream token ${newapiTokenId} delete failed for ${userId}:`,
-        (err as Error).message,
-      );
-    }
+    await newapi.deleteToken(newapiTokenId);
     deleteApiKeyIndex(userId, newapiTokenId);
   }
 }

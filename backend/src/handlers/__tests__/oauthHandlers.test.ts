@@ -224,6 +224,36 @@ describe('oauthCallbackHandler', () => {
     expect(listApiKeyIndex('u_email_first')).toEqual([]);
   });
 
+  it('aborts the takeover when upstream key revocation fails (fail closed)', async () => {
+    // The chat proxy forwards bearer keys straight to newapi, so a live
+    // upstream token = live attacker access. If newapi refuses the delete,
+    // the login must NOT complete and the account must NOT flip verified.
+    putUser({
+      userId: 'u_revoke_fail',
+      email: 'revoke-fail@test.local',
+      passwordHash: 'attacker-controlled-hash',
+      createdAt: new Date().toISOString(),
+      emailVerified: false,
+      tokenVersion: 0,
+    });
+    putApiKeyIndex({ userId: 'u_revoke_fail', newapiTokenId: 9001, keyHash: 'cafebabe'.repeat(8) });
+    vi.spyOn(newapi, 'deleteToken').mockRejectedValue(new Error('newapi down'));
+    mockGithub({
+      user: { id: 888, login: 'revokefail' },
+      emails: [{ email: 'revoke-fail@test.local', primary: true, verified: true }],
+    });
+
+    const { state, cookie } = await startAndGetState();
+    const res = (await oauthCallbackHandler(
+      event({ query: { code: 'c0de', state }, cookie }),
+    )) as APIGatewayProxyStructuredResultV2;
+
+    expect(headersOf(res).location).toContain('oauth_error=provision_failed');
+    const back = await getUser('u_revoke_fail');
+    expect(back?.emailVerified).toBe(false); // not handed over
+    expect(getOauthUserId('github', '888')).toBeNull(); // no binding written
+  });
+
   it('rejects when the state cookie is missing or does not match', async () => {
     mockGithub();
     const { state } = await startAndGetState();

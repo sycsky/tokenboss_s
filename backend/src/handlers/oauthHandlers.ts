@@ -278,8 +278,18 @@ export const oauthCallbackHandler = async (
         // set its password) hasn't proven inbox ownership, but the GitHub
         // user just did. Pre-registration takeover guard — revoke the
         // password, outstanding sessions AND any api keys minted from the
-        // registration session before handing the account over.
-        await revokeTakeoverCredentials(userId);
+        // registration session before handing the account over. Fail
+        // closed: if upstream key revocation fails, abort the login (the
+        // account must not change hands with the old keys still live).
+        try {
+          await revokeTakeoverCredentials(userId);
+        } catch (err) {
+          console.error(
+            `[oauth:${providerName}] takeover revocation failed for ${userId}:`,
+            (err as Error).message,
+          );
+          return loginError("provision_failed");
+        }
       }
       markEmailVerified(userId);
     } else {

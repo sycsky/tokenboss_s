@@ -503,8 +503,21 @@ export async function verifyCodeHandler(
       // Never-verified row = whoever set its password didn't prove inbox
       // ownership, but this OTP consumer just did. Pre-registration
       // takeover guard: revoke password + sessions + api keys before
-      // handing the account over (same rule as the OAuth merge).
-      await revokeTakeoverCredentials(userId);
+      // handing the account over (same rule as the OAuth merge). Fail
+      // closed on upstream key-revocation failure — the account must not
+      // change hands with the old keys still live.
+      try {
+        await revokeTakeoverCredentials(userId);
+      } catch (err) {
+        console.error(
+          `[verifyCode] takeover revocation failed for ${userId}:`,
+          (err as Error).message,
+        );
+        return jsonResponse(502, {
+          error: "revocation_failed",
+          message: "Could not secure the account on the metering service. Please try again.",
+        });
+      }
       markEmailVerified(userId);
     }
   }
