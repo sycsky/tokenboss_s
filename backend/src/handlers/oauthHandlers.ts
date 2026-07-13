@@ -123,16 +123,19 @@ const PROVIDERS: Record<string, OAuthProviderDef> = {
         headers: ghHeaders,
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
-      let email: string | null = null;
-      if (emailsRes.ok) {
-        const emails = (await emailsRes.json()) as {
-          email: string;
-          primary: boolean;
-          verified: boolean;
-        }[];
-        const verified = emails.filter((e) => e.verified && typeof e.email === "string");
-        email = (verified.find((e) => e.primary) ?? verified[0])?.email?.toLowerCase() ?? null;
-      }
+      // A failed emails call is an UPSTREAM error (rate limit, 5xx), not
+      // "this account has no verified email" — throw so the callback maps
+      // it to the retryable exchange_failed, not the dead-end
+      // no_verified_email that tells the user to go verify their inbox.
+      if (!emailsRes.ok) throw new Error(`github /user/emails failed: ${emailsRes.status}`);
+      const emails = (await emailsRes.json()) as {
+        email: string;
+        primary: boolean;
+        verified: boolean;
+      }[];
+      const verified = emails.filter((e) => e.verified && typeof e.email === "string");
+      const email =
+        (verified.find((e) => e.primary) ?? verified[0])?.email?.toLowerCase() ?? null;
 
       return {
         providerUserId: String(ghUser.id),

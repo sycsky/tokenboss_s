@@ -49,6 +49,7 @@ function mockGithub(opts: {
   user?: GhUser;
   emails?: GhEmail[];
   tokenError?: boolean;
+  emailsError?: boolean;
 } = {}) {
   const fetchMock = vi.fn(async (url: string | URL) => {
     const u = String(url);
@@ -60,6 +61,7 @@ function mockGithub(opts: {
         : json({ access_token: 'gho_test' });
     }
     if (u.includes('api.github.com/user/emails')) {
+      if (opts.emailsError) return json({ message: 'rate limited' }, false, 403);
       return json(opts.emails ?? [{ email: 'octo@test.local', primary: true, verified: true }]);
     }
     if (u.includes('api.github.com/user')) {
@@ -243,6 +245,15 @@ describe('oauthCallbackHandler', () => {
     const b = await createVerifiedUser({ email: 'race@test.local' });
     expect(b.userId).toBe(a.userId);
     expect((await getUser(a.userId))?.email).toBe('race@test.local');
+  });
+
+  it('maps a failed /user/emails call to exchange_failed, not no_verified_email', async () => {
+    mockGithub({ user: { id: 31337, login: 'ratelimited' }, emailsError: true });
+    const { state, cookie } = await startAndGetState();
+    const res = (await oauthCallbackHandler(
+      event({ query: { code: 'c0de', state }, cookie }),
+    )) as APIGatewayProxyStructuredResultV2;
+    expect(headersOf(res).location).toContain('oauth_error=exchange_failed');
   });
 
   it('surfaces a failed code exchange as oauth_error=exchange_failed', async () => {
