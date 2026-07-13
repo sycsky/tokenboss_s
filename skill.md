@@ -453,12 +453,9 @@ account is out of credits.
 
 ## Web topup
 
-Send the user to https://tokenboss.co/billing/topup — pay by stablecoin
-(USDT / USDC, multi-chain). Credits arrive right after the payment confirms;
-check with `GET /v1/buckets`.
-
-<!-- 卡 / 微信（Dodo 托管收银台，USD 计价）在 Dodo 商户审核通过后开放；
-     上线时把它加回这句，并同步前端 SHOW_DODO / 后端 SHOW_DODO_TOPUP=1。 -->
+Send the user to https://tokenboss.co/billing/topup — pay by card / WeChat Pay
+(USD-denominated hosted checkout) or stablecoin (USDT / USDC, multi-chain).
+Credits arrive right after the payment confirms; check with `GET /v1/buckets`.
 
 ## Emergency free model (zero-balance escape hatch)
 
