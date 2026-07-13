@@ -42,6 +42,12 @@ import {
 const STATE_COOKIE = "tb_oauth_state";
 const STATE_TTL_SECONDS = 600;
 
+/** Deadline for each upstream provider call. Without one, a stalled
+ *  GitHub connection pins the callback request (and the user's browser)
+ *  open indefinitely; an abort falls into the callback's catch and maps
+ *  to the exchange_failed redirect. */
+const UPSTREAM_TIMEOUT_MS = 10_000;
+
 /** What the callback needs to know about the signed-in provider account. */
 interface OAuthProfile {
   /** Provider-side stable user id (GitHub numeric id, as string). */
@@ -82,6 +88,7 @@ const PROVIDERS: Record<string, OAuthProviderDef> = {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
       const tokenBody = (await tokenRes.json()) as {
         access_token?: string;
@@ -97,7 +104,10 @@ const PROVIDERS: Record<string, OAuthProviderDef> = {
         // GitHub's API rejects requests without a User-Agent.
         "user-agent": "tokenboss-oauth",
       };
-      const userRes = await fetch("https://api.github.com/user", { headers: ghHeaders });
+      const userRes = await fetch("https://api.github.com/user", {
+        headers: ghHeaders,
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
       if (!userRes.ok) throw new Error(`github /user failed: ${userRes.status}`);
       const ghUser = (await userRes.json()) as {
         id?: number;
@@ -111,6 +121,7 @@ const PROVIDERS: Record<string, OAuthProviderDef> = {
       // account linking — an unverified one could be someone else's inbox.
       const emailsRes = await fetch("https://api.github.com/user/emails", {
         headers: ghHeaders,
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
       let email: string | null = null;
       if (emailsRes.ok) {

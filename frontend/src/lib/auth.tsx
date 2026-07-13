@@ -190,9 +190,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState({ user, token });
       return user;
     } catch (err) {
-      // Bad/expired token — don't leave it lying around in storage.
-      setStoredSession(null);
-      setState({ user: null, token: null });
+      if (err instanceof ApiError && err.status === 401) {
+        // Bad/expired token — don't leave it lying around in storage.
+        setStoredSession(null);
+        setState({ user: null, token: null });
+      } else {
+        // Transient /me failure (timeout, 5xx). The token itself may be
+        // perfectly valid — keep it stored so a reload / refresh() retries
+        // instead of forcing the user back through the OAuth consent flow.
+        setState({ user: null, token });
+      }
       throw err;
     }
   }, []);

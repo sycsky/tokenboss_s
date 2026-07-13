@@ -15,7 +15,7 @@ type State = { kind: 'signing-in' } | { kind: 'failed' };
  */
 export default function OAuthCallback() {
   const nav = useNavigate();
-  const { loginWithToken } = useAuth();
+  const { loginWithToken, user } = useAuth();
   const [state, setState] = useState<State>({ kind: 'signing-in' });
   // StrictMode double-fires effects in dev; adopt the token only once.
   const consumed = useRef(false);
@@ -53,17 +53,28 @@ export default function OAuthCallback() {
     );
   }
 
+  // A transient /v1/me failure keeps the (likely valid) token in storage —
+  // a page refresh re-hydrates and signs the user in. If that hydration
+  // already happened, offer the console instead of another OAuth round.
   return (
     <AuthShell>
       <h1 className="text-[24px] font-bold text-ink tracking-tight mb-3">
         登录没有完成
       </h1>
       <p className="text-[13.5px] text-[#6B5E52] mb-6 leading-relaxed">
-        第三方登录中途出了问题（链接失效或授权被取消）。回到登录页再试一次即可。
+        {user
+          ? '不过你的会话已经生效了，直接进入控制台即可。'
+          : '如果只是网络波动，刷新本页就能继续；否则回登录页再试一次。'}
       </p>
-      <Link to="/login" className={slockBtn('primary') + ' w-full text-center'}>
-        返回登录
-      </Link>
+      {user ? (
+        <Link to="/console" className={slockBtn('primary') + ' w-full text-center'}>
+          进入控制台
+        </Link>
+      ) : (
+        <Link to="/login" className={slockBtn('primary') + ' w-full text-center'}>
+          返回登录
+        </Link>
+      )}
     </AuthShell>
   );
 }
