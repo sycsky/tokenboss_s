@@ -238,6 +238,18 @@ export function init(): void {
     // Column already exists — ignore.
   }
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS oauth_identities (
+      provider       TEXT NOT NULL,
+      providerUserId TEXT NOT NULL,
+      userId         TEXT NOT NULL,
+      createdAt      TEXT NOT NULL,
+      PRIMARY KEY (provider, providerUserId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_oauth_identities_user
+      ON oauth_identities(userId);
+  `);
+
   // Drop legacy bucket / usage tables behind an env flag so prod admins
   // opt in explicitly. Locally / in tests, set MIGRATE_DROP_LEGACY=1 (or
   // when SQLITE_PATH=':memory:', this is auto-enabled since it's a fresh
@@ -749,6 +761,32 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
     WHERE userId = ? AND createdAt > ?
   `).get(userId, since) as { n: number };
   return row.n;
+}
+
+// ---------- Public API — OAuth identities ----------
+
+/**
+ * Resolve a third-party identity (e.g. GitHub user id) to our userId.
+ * Returns null when this provider account has never signed in before.
+ */
+export function getOauthUserId(provider: string, providerUserId: string): string | null {
+  const row = db.prepare(`
+    SELECT userId FROM oauth_identities
+    WHERE provider = ? AND providerUserId = ?
+  `).get(provider, providerUserId) as { userId: string } | undefined;
+  return row?.userId ?? null;
+}
+
+/**
+ * Bind a provider account to a user. INSERT OR IGNORE: a concurrent
+ * callback for the same identity keeps the first binding — identities
+ * must never be silently re-pointed at a different user.
+ */
+export function putOauthIdentity(provider: string, providerUserId: string, userId: string): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO oauth_identities (provider, providerUserId, userId, createdAt)
+    VALUES (?, ?, ?, ?)
+  `).run(provider, providerUserId, userId, new Date().toISOString());
 }
 
 // ---------- Public API — Orders ----------

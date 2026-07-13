@@ -71,6 +71,12 @@ interface AuthContextValue extends AuthState {
    * Returns the full AuthResponse (includes `isNew` flag for new accounts).
    */
   loginWithCode: (email: string, code: string) => Promise<import("./api.js").AuthResponse>;
+  /**
+   * Adopt a session token minted elsewhere (OAuth callback fragment).
+   * Persists it, then hydrates the profile via /v1/me — an invalid token
+   * throws and leaves the auth state signed-out.
+   */
+  loginWithToken: (token: string) => Promise<UserProfile>;
   logout: () => Promise<void>;
   /** Re-fetch the profile (e.g. after a chat call changes the balance). */
   refresh: () => Promise<void>;
@@ -177,6 +183,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res;
   }, []);
 
+  const loginWithToken = useCallback(async (token: string): Promise<UserProfile> => {
+    setStoredSession(token);
+    try {
+      const { user } = await api.me();
+      setState({ user, token });
+      return user;
+    } catch (err) {
+      // Bad/expired token — don't leave it lying around in storage.
+      setStoredSession(null);
+      setState({ user: null, token: null });
+      throw err;
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     // Clear local state synchronously FIRST so the UI flips to "logged
     // out" instantly and a network failure can't leave the JWT sitting
@@ -222,10 +242,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resendVerification,
       sendCode,
       loginWithCode,
+      loginWithToken,
       logout,
       refresh,
     }),
-    [state, register, login, verifyEmail, resendVerification, sendCode, loginWithCode, logout, refresh],
+    [state, register, login, verifyEmail, resendVerification, sendCode, loginWithCode, loginWithToken, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

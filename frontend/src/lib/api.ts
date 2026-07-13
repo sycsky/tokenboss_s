@@ -26,6 +26,12 @@ const CHAT_URL =
 
 export const CHAT_COMPLETIONS_URL = `${CHAT_URL.replace(/\/$/, "")}/v1/chat/completions`;
 
+/** Backend entry point for an OAuth login. A top-level navigation, not an
+ *  XHR — the backend 302s on to the provider's consent page. */
+export function oauthStartUrl(provider: "github" | "google"): string {
+  return `${API_URL.replace(/\/$/, "")}/v1/auth/oauth/${provider}/start`;
+}
+
 // ---------- session token storage ----------
 
 const SESSION_KEY = "tb_session";
