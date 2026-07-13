@@ -21,7 +21,7 @@ vi.mock("../../lib/newapi.js", async (orig) => {
 });
 
 import { deepLinkHandler } from "../deepLinkHandler.js";
-import { init, putUser } from "../../lib/store.js";
+import { init, putUser, bumpUserTokenVersion } from "../../lib/store.js";
 import { signSession } from "../../lib/authTokens.js";
 import { newapi, NewapiError } from "../../lib/newapi.js";
 
@@ -65,6 +65,27 @@ describe("deepLinkHandler POST /v1/deep-link", () => {
     expect(result.statusCode).toBe(401);
     const body = JSON.parse(result.body!);
     expect(body.error.type).toBe("authentication_error");
+  });
+
+  it("destroys the key and 401s when the session went stale mid-flight (takeover guard)", async () => {
+    // Same guard as createKeyHandler: an in-flight deep-link request whose
+    // session died mid-mint (takeover / logout-everywhere) must destroy
+    // its own token and never return the plaintext.
+    seedUser("u_dl_stale");
+    listUserTokensMock.mockResolvedValue([]);
+    deleteUserTokenMock.mockResolvedValue(undefined);
+    createAndRevealTokenMock.mockImplementation(async () => {
+      bumpUserTokenVersion("u_dl_stale"); // takeover lands mid-flight
+      return { tokenId: 77, apiKey: "sk-dl-late" };
+    });
+
+    const res = (await deepLinkHandler(
+      makeAuthedEvent("u_dl_stale"),
+    )) as APIGatewayProxyStructuredResultV2;
+
+    expect(res.statusCode).toBe(401);
+    expect(deleteUserTokenMock).toHaveBeenCalledWith({ cookie: "sid=x", userId: 42 }, 77);
+    expect(res.body).not.toContain("sk-dl-late");
   });
 
   it("deletes existing 'CC Switch' token before creating new one (D7 删旧建新)", async () => {

@@ -21,9 +21,10 @@ import type {
 import { createHash } from "node:crypto";
 
 import { isAuthFailure, verifySessionHeader, type AuthContext } from "../lib/auth.js";
+import { mintKeyGuarded, StaleSessionError } from "../lib/keyMinting.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
 import { newapiUsername } from "../lib/newapiIdentity.js";
-import { getUser, putApiKeyIndex, deleteApiKeyIndex } from "../lib/store.js";
+import { putApiKeyIndex, deleteApiKeyIndex } from "../lib/store.js";
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
@@ -209,41 +210,12 @@ export const createKeyHandler = async (
       username: newapiUsername(auth.userId),
       password: auth.user.newapiPassword as string,
     });
-    const { tokenId, apiKey } = await newapi.createAndRevealToken({
-      session,
+    // Guarded mint: destroys its own token and throws StaleSessionError if
+    // the session went stale mid-flight (takeover guard / logout-everywhere).
+    const { tokenId, apiKey } = await mintKeyGuarded(auth, session, {
       name: label,
-      unlimited_quota: true,
       expired_time: expiredTime,
-      // Pin every newly minted user token to newapi's "auto" group so the
-      // upstream router picks the auto-tier channel rather than whichever
-      // channel the user's account-level group resolves to.
-      group: "auto",
     });
-    // Post-creation session recheck: if the account's tokenVersion moved
-    // while this request was in flight (logout-everywhere, or the
-    // pre-registration takeover guard reclaiming this account), the
-    // session that authenticated us is no longer valid — and the takeover
-    // revocation sweep may already have run and missed this just-minted
-    // key. Destroy it ourselves and reject, so a stale session can never
-    // hand out a live key.
-    const freshUser = await getUser(auth.userId);
-    if ((freshUser?.tokenVersion ?? 0) !== (auth.user.tokenVersion ?? 0)) {
-      try {
-        await newapi.deleteUserToken(session, tokenId);
-      } catch (cleanupErr) {
-        console.error("[keys] stale-session key cleanup failed", {
-          userId: auth.userId,
-          tokenId,
-          err: (cleanupErr as Error).message,
-        });
-      }
-      return jsonError(
-        401,
-        "authentication_error",
-        "Session token invalid or expired. Please log in again.",
-        "invalid_session",
-      );
-    }
     // Index the raw key's hash so chatProxyCore can resolve sk-xxx → userId
     // without storing the plaintext or hitting newapi on every request.
     try {
@@ -272,6 +244,9 @@ export const createKeyHandler = async (
       expiresAt: expiresAtISO,
     });
   } catch (err) {
+    if (err instanceof StaleSessionError) {
+      return jsonError(401, "authentication_error", err.message, "invalid_session");
+    }
     return handleNewapiError(err);
   }
 };
