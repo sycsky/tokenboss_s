@@ -13,7 +13,13 @@
 import { randomBytes } from "node:crypto";
 
 import { isNewapiConfigured, newapi, NewapiError } from "./newapi.js";
-import { putUser, type UserRecord } from "./store.js";
+import {
+  getUser,
+  getUserIdByEmail,
+  insertUser,
+  isUniqueConstraintError,
+  type UserRecord,
+} from "./store.js";
 
 /** Thrown when the newapi-side account could not be created. Callers map
  *  this to a 502 (JSON routes) or an error redirect (OAuth callback). */
@@ -71,6 +77,26 @@ export async function createVerifiedUser(input: {
     newapiUserId,
     newapiPassword,
   };
-  putUser(user);
+  try {
+    insertUser(user);
+  } catch (err) {
+    // A concurrent signup for the same email won the race while we were
+    // provisioning. Their row is the account — return it instead of
+    // overwriting. Our newapi account (if any) is orphaned; log it so ops
+    // can clean up, but don't fail the login over it.
+    if (isUniqueConstraintError(err)) {
+      const winnerId = getUserIdByEmail(input.email);
+      const winner = winnerId ? await getUser(winnerId) : null;
+      if (winner) {
+        if (newapiUserId !== undefined) {
+          console.warn(
+            `[provision] duplicate signup race for ${input.email}: newapi user ${newapiUserId} orphaned, using ${winner.userId}`,
+          );
+        }
+        return winner;
+      }
+    }
+    throw err;
+  }
   return user;
 }

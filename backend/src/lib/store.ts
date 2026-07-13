@@ -486,6 +486,48 @@ export function putUser(rec: UserRecord): void {
   });
 }
 
+/**
+ * Create-only variant of putUser: plain INSERT, so a concurrent signup
+ * with the same email hits the UNIQUE index and THROWS instead of
+ * OR-REPLACE silently deleting the winner's row (which would orphan
+ * that user's newapi binding and any oauth identity pointing at it).
+ * Callers catch the constraint error and fall back to the existing row.
+ */
+export function insertUser(rec: UserRecord): void {
+  db.prepare(`
+    INSERT INTO users
+      (userId, displayName, email, phone, passwordHash, createdAt, emailVerified,
+       newapiUserId, newapiPassword, plan, subscriptionStartedAt, subscriptionExpiresAt,
+       dailyQuotaUsd, quotaNextResetAt, tokenVersion)
+    VALUES
+      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified,
+       @newapiUserId, @newapiPassword, @plan, @subscriptionStartedAt, @subscriptionExpiresAt,
+       @dailyQuotaUsd, @quotaNextResetAt, @tokenVersion)
+  `).run({
+    userId: rec.userId,
+    displayName: rec.displayName ?? null,
+    email: rec.email ?? null,
+    phone: rec.phone ?? null,
+    passwordHash: rec.passwordHash ?? null,
+    createdAt: rec.createdAt,
+    emailVerified: rec.emailVerified ? 1 : 0,
+    newapiUserId: rec.newapiUserId ?? null,
+    newapiPassword: rec.newapiPassword ?? null,
+    plan: rec.plan ?? null,
+    subscriptionStartedAt: rec.subscriptionStartedAt ?? null,
+    subscriptionExpiresAt: rec.subscriptionExpiresAt ?? null,
+    dailyQuotaUsd: rec.dailyQuotaUsd ?? null,
+    quotaNextResetAt: rec.quotaNextResetAt ?? null,
+    tokenVersion: rec.tokenVersion ?? 0,
+  });
+}
+
+/** True when `err` is SQLite telling us a UNIQUE constraint fired. */
+export function isUniqueConstraintError(err: unknown): boolean {
+  return typeof (err as { code?: string }).code === "string" &&
+    (err as { code: string }).code.startsWith("SQLITE_CONSTRAINT");
+}
+
 export function getUserIdByEmail(email: string): string | null {
   const norm = email.trim().toLowerCase();
   if (!norm) return null;

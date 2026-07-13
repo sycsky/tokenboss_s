@@ -9,7 +9,15 @@ process.env.GITHUB_CLIENT_ID = 'iv_test_client';
 process.env.GITHUB_CLIENT_SECRET = 'test_client_secret';
 process.env.APP_URL = 'https://app.test.local';
 
-import { init, putUser, getUser, getOauthUserId, getUserIdByEmail } from '../../lib/store.js';
+import {
+  init,
+  putUser,
+  putOauthIdentity,
+  getUser,
+  getOauthUserId,
+  getUserIdByEmail,
+} from '../../lib/store.js';
+import { createVerifiedUser } from '../../lib/accountProvisioning.js';
 import { newapi } from '../../lib/newapi.js';
 import { verifySession } from '../../lib/authTokens.js';
 import { oauthStartHandler, oauthCallbackHandler } from '../oauthHandlers.js';
@@ -141,10 +149,19 @@ describe('oauthCallbackHandler', () => {
   });
 
   it('logs an existing identity straight in (isNew=0), no re-provisioning', async () => {
-    mockGithub();
+    // Self-contained seed: a user already bound to GitHub id 555.
+    putUser({
+      userId: 'u_bound_already',
+      email: 'bound@test.local',
+      createdAt: new Date().toISOString(),
+      emailVerified: true,
+    });
+    putOauthIdentity('github', '555', 'u_bound_already');
+    mockGithub({
+      user: { id: 555, login: 'bound', name: 'Bound' },
+      emails: [{ email: 'bound@test.local', primary: true, verified: true }],
+    });
     const provisionSpy = vi.spyOn(newapi, 'provisionUser');
-    const existingUserId = getOauthUserId('github', '424242');
-    expect(existingUserId).not.toBeNull(); // from the previous test's signup
 
     const { state, cookie } = await startAndGetState();
     const res = (await oauthCallbackHandler(
@@ -153,7 +170,7 @@ describe('oauthCallbackHandler', () => {
 
     const frag = new URLSearchParams(headersOf(res).location.split('#')[1]);
     expect(frag.get('isNew')).toBe('0');
-    expect(verifySession(frag.get('token')!)?.sub).toBe(existingUserId);
+    expect(verifySession(frag.get('token')!)?.sub).toBe('u_bound_already');
     expect(provisionSpy).not.toHaveBeenCalled();
   });
 
@@ -216,6 +233,16 @@ describe('oauthCallbackHandler', () => {
       event({ query: { error: 'access_denied' } }),
     )) as APIGatewayProxyStructuredResultV2;
     expect(headersOf(res).location).toContain('oauth_error=denied');
+  });
+
+  it('duplicate-email signup race falls back to the winner row (no OR-REPLACE data loss)', async () => {
+    // Simulates two first-time flows provisioning the same email: the
+    // second insert hits the UNIQUE index and must return the existing
+    // account instead of replacing (and thereby deleting) the winner.
+    const a = await createVerifiedUser({ email: 'race@test.local' });
+    const b = await createVerifiedUser({ email: 'race@test.local' });
+    expect(b.userId).toBe(a.userId);
+    expect((await getUser(a.userId))?.email).toBe('race@test.local');
   });
 
   it('surfaces a failed code exchange as oauth_error=exchange_failed', async () => {

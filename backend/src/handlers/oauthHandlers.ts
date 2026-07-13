@@ -281,6 +281,15 @@ export const oauthCallbackHandler = async (
       }
     }
     putOauthIdentity(providerName, profile.providerUserId, userId);
+    // Two first-time callbacks for the same provider account can race past
+    // the getOauthUserId(null) check above; INSERT OR IGNORE keeps whichever
+    // binding landed first. Re-read and sign for the WINNER so both requests
+    // end up in the same account instead of one holding an unbound session.
+    const bound = getOauthUserId(providerName, profile.providerUserId);
+    if (bound && bound !== userId) {
+      userId = bound;
+      isNew = false;
+    }
   }
 
   const user = await getUser(userId);
