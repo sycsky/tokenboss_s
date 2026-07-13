@@ -15,8 +15,8 @@ const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C191
  *  单笔上限 ¥50）。0.01 验证档是运维用的，不对用户展示。 */
 const A2M_DENOMS = [10, 50] as const;
 
-/** 美元渠道（USDT / 卡·微信）充值档位，$10 起充、整数。 */
-const USD_PRESETS = [10, 20, 50, 100] as const;
+/** 美元渠道（USDT / 卡·微信）充值档位，$1 起充、整数。默认档 = 第一个。 */
+const USD_PRESETS = [1, 10, 50, 100] as const;
 
 /** 兜底默认与 creditFor 来自 ../lib/creditDefaults（后端 creditConfig 的前端
  *  镜像，pricing 文案也读它）；权威值仍是 /v1/billing/config，加载后覆盖。 */

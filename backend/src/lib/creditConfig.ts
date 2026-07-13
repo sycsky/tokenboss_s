@@ -12,7 +12,7 @@
 import type { PaymentChannel } from "./payment/types.js";
 
 export const DEFAULT_CREDIT_RATE = 6.8;
-export const MIN_TOPUP_AMOUNT = 10;
+export const MIN_TOPUP_AMOUNT = 1;
 export const MAX_TOPUP_AMOUNT = 99999;
 
 /** 只有 USD 计价渠道套用倍率；RMB 渠道（A2M）是 ¥1=$1，不经此表。 */

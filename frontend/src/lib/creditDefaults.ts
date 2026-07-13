@@ -10,7 +10,7 @@
  */
 
 export const DEFAULT_CREDIT_RATE = 6.8;
-export const MIN_TOPUP_USD = 10;
+export const MIN_TOPUP_USD = 1;
 export const MAX_TOPUP_USD = 99999;
 
 /** USD paid → call-quota credited. ×rate can leave a float tail
