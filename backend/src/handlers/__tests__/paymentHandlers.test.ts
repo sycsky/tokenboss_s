@@ -186,15 +186,17 @@ describe('createOrderHandler — type=topup validation', () => {
     }
   });
 
-  it('accepts amounts down to the $1 topup floor (proceeds past validation)', async () => {
+  it('400 invalid_amount below the $10 topup floor', async () => {
     for (const amount of [1, 5, 9]) {
       const res = await run({ type: 'topup', amount, channel: 'epusdt' });
-      expect(res.statusCode).not.toBe(400);
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body as string);
+      expect(body.error.code).toBe('invalid_amount');
     }
   });
 
-  it('accepts exactly the $1 floor (proceeds past validation)', async () => {
-    const res = await run({ type: 'topup', amount: 1, channel: 'epusdt' });
+  it('accepts exactly the $10 floor (proceeds past validation)', async () => {
+    const res = await run({ type: 'topup', amount: 10, channel: 'epusdt' });
     expect(res.statusCode).not.toBe(400);
   });
 

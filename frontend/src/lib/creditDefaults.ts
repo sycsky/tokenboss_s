@@ -16,7 +16,7 @@
 export const DEFAULT_CREDIT_RATES = { epusdt: 7, dodo: 6.88 } as const;
 /** Headline/fallback rate = the default channel (stablecoin). */
 export const DEFAULT_CREDIT_RATE = DEFAULT_CREDIT_RATES.epusdt;
-export const MIN_TOPUP_USD = 1;
+export const MIN_TOPUP_USD = 10;
 export const MAX_TOPUP_USD = 99999;
 
 /** USD paid → call-quota credited. ×rate can leave a float tail

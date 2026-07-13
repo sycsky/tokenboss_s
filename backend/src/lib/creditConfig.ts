@@ -17,7 +17,7 @@ import type { PaymentChannel } from "./payment/types.js";
 export const DEFAULT_CREDIT_RATES = { epusdt: 7, dodo: 6.88 } as const;
 /** 头条/兜底展示用的代表倍率 = 默认渠道（稳定币）。 */
 export const DEFAULT_CREDIT_RATE = DEFAULT_CREDIT_RATES.epusdt;
-export const MIN_TOPUP_AMOUNT = 1;
+export const MIN_TOPUP_AMOUNT = 10;
 export const MAX_TOPUP_AMOUNT = 99999;
 
 /** 只有 USD 计价渠道套用倍率；RMB 渠道（A2M）是 ¥1=$1，不经此表。 */
