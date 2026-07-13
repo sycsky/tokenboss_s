@@ -198,9 +198,13 @@ describe('oauthCallbackHandler', () => {
       keyHash: 'deadbeef'.repeat(8),
     });
     // Revocation must go through the OWNER's session — admin deleteToken is
-    // silently ignored on many newapi forks.
+    // silently ignored on many newapi forks — and enumerate from the
+    // authoritative upstream list, then verify it drained to empty.
     const ownerSession = { cookie: 'sid=owner', userId: 64 };
     vi.spyOn(newapi, 'loginUser').mockResolvedValue(ownerSession);
+    vi.spyOn(newapi, 'listUserTokens')
+      .mockResolvedValueOnce([{ id: 4242 }] as never)
+      .mockResolvedValue([] as never);
     const deleteTokenSpy = vi
       .spyOn(newapi, 'deleteUserToken')
       .mockResolvedValue(undefined);
@@ -248,6 +252,7 @@ describe('oauthCallbackHandler', () => {
     });
     putApiKeyIndex({ userId: 'u_revoke_fail', newapiTokenId: 9001, keyHash: 'cafebabe'.repeat(8) });
     vi.spyOn(newapi, 'loginUser').mockResolvedValue({ cookie: 'sid=owner', userId: 65 });
+    vi.spyOn(newapi, 'listUserTokens').mockResolvedValue([{ id: 9001 }] as never);
     vi.spyOn(newapi, 'deleteUserToken').mockRejectedValue(new Error('newapi down'));
     mockGithub({
       user: { id: 888, login: 'revokefail' },

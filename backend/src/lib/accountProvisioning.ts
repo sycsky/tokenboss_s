@@ -34,35 +34,54 @@ import {
  * tokens before the real inbox owner showed up; those would silently
  * spend the victim's future balance.
  *
- * The UPSTREAM delete is the only enforcement point: the chat proxy
- * forwards bearer keys straight to newapi (api_key_index is used for
- * attribution, not auth), so a key survives until newapi itself drops it.
- * Deletion goes through the OWNER's session (`deleteUserToken`) — the
- * admin-scoped DELETE is silently ignored / soft-deletes on many newapi
- * forks (see newapi.ts), which would report success while the attacker's
- * key stays live. Any failure THROWS and aborts the takeover — the victim
- * retries when newapi recovers; we never complete a takeover with the
- * attacker's key still usable.
+ * The UPSTREAM state is the only thing that matters: the chat proxy
+ * forwards bearer keys straight to newapi (api_key_index is attribution
+ * bookkeeping, and may be INCOMPLETE — createKeyHandler deliberately
+ * keeps the upstream key when the index write fails). So revocation
+ * enumerates the owner's tokens from newapi itself, deletes them through
+ * the OWNER's session (`deleteUserToken` — the admin-scoped DELETE is
+ * silently ignored / soft-deletes on many newapi forks, see newapi.ts),
+ * and then RE-LISTS to verify the set is empty. The verify pass also
+ * catches keys minted by a createKey request that was already in flight
+ * when the tokenVersion bump cut off new dashboard sessions. Any failure
+ * THROWS and aborts the takeover — we never complete a takeover while an
+ * attacker key could still be usable.
  */
 export async function revokeTakeoverCredentials(userId: string): Promise<void> {
+  // Bump FIRST: invalidates every outstanding dashboard session, so no
+  // NEW key-creation request can authenticate past this point.
   revokePasswordCredentials(userId);
-  const keys = listApiKeyIndex(userId);
-  if (keys.length === 0) return;
 
   const user = await getUser(userId);
-  if (!user?.newapiPassword) {
-    // Keys exist but we hold no owner credentials to revoke them with —
-    // we cannot PROVE revocation, so the takeover must not complete.
+  // No newapi account → nothing upstream to revoke. (Indexed rows without
+  // an account can't exist: createKeyHandler requires the link.)
+  if (user?.newapiUserId === undefined) return;
+  if (!user.newapiPassword) {
+    // Upstream account exists but we hold no owner credentials — we cannot
+    // PROVE revocation, so the takeover must not complete.
     throw new Error(`cannot revoke api keys for ${userId}: no newapi credentials on file`);
   }
+
   const session = await newapi.loginUser({
     username: newapiUsername(userId),
     password: user.newapiPassword,
   });
-  for (const { newapiTokenId } of keys) {
-    await newapi.deleteUserToken(session, newapiTokenId);
-    deleteApiKeyIndex(userId, newapiTokenId);
+  // Delete-and-verify loop: each pass re-lists from the authoritative
+  // upstream; only an EMPTY listing completes the takeover. Bounded so a
+  // fork that resurrects tokens can't loop us forever.
+  for (let pass = 0; pass < 3; pass++) {
+    const tokens = await newapi.listUserTokens(session);
+    if (tokens.length === 0) {
+      for (const { newapiTokenId } of listApiKeyIndex(userId)) {
+        deleteApiKeyIndex(userId, newapiTokenId);
+      }
+      return;
+    }
+    for (const t of tokens) {
+      await newapi.deleteUserToken(session, t.id);
+    }
   }
+  throw new Error(`api keys for ${userId} kept reappearing during takeover revocation`);
 }
 
 /** Thrown when the newapi-side account could not be created. Callers map
