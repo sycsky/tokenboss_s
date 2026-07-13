@@ -46,6 +46,12 @@ interface DodoConfig {
    *  the type level only for unit tests; verifyWebhook fails closed
    *  without it. */
   webhookSecret?: string;
+  /** Default presentment currency (ISO 4217) shown to the buyer on the
+   *  hosted checkout. Dodo adaptive currency otherwise picks by geo-IP,
+   *  which defaults non-CN visitors to e.g. JPY. We front a CN market, so
+   *  default CNY; the buyer can still switch (allow_currency_selection).
+   *  Only takes effect with adaptive pricing enabled on the Dodo account. */
+  billingCurrency?: string;
 }
 
 export interface DodoWebhookEvent {
@@ -86,6 +92,15 @@ export class DodoClient {
           },
         ],
         metadata: { orderId: input.orderId },
+        // Default the buyer's presentment currency (CNY) but let them switch;
+        // otherwise adaptive currency picks by geo-IP and non-CN visitors see
+        // JPY/USD/etc. Settlement to us is always USD regardless.
+        ...(this.cfg.billingCurrency
+          ? {
+              billing_currency: this.cfg.billingCurrency,
+              feature_flags: { allow_currency_selection: true },
+            }
+          : {}),
         ...(input.redirectUrl ? { return_url: input.redirectUrl } : {}),
       }),
     });
@@ -212,5 +227,8 @@ export function dodoFromEnv(): DodoClient | null {
       "",
     ),
     webhookSecret,
+    // Default buyers to CNY; override with DODO_BILLING_CURRENCY (ISO 4217),
+    // or set it empty to fall back to Dodo's geo-IP adaptive default.
+    billingCurrency: process.env.DODO_BILLING_CURRENCY ?? "CNY",
   });
 }

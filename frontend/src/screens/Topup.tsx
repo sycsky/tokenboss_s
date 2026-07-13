@@ -6,7 +6,7 @@ import { RedeemCodeModal } from '../components/RedeemCodeModal';
 import { dispatchCheckout } from '../lib/checkoutFlow';
 import { api, type BillingChannel } from '../lib/api';
 import { SHOW_ALIPAY_A2M, SHOW_DODO } from '../lib/paymentVisibility';
-import { DEFAULT_CREDIT_RATE, MIN_TOPUP_USD, MAX_TOPUP_USD, creditFor } from '../lib/creditDefaults';
+import { DEFAULT_CREDIT_RATES, MIN_TOPUP_USD, MAX_TOPUP_USD, creditFor } from '../lib/creditDefaults';
 
 const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917]';
 
@@ -15,12 +15,11 @@ const card = 'bg-white border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C191
  *  单笔上限 ¥50）。0.01 验证档是运维用的，不对用户展示。 */
 const A2M_DENOMS = [10, 50] as const;
 
-/** 美元渠道（USDT / 卡·微信）充值档位，$10 起充、整数。 */
+/** 美元渠道（USDT / 卡·微信）充值档位，$10 起充、整数。默认档 = 第一个。 */
 const USD_PRESETS = [10, 20, 50, 100] as const;
 
 /** 兜底默认与 creditFor 来自 ../lib/creditDefaults（后端 creditConfig 的前端
  *  镜像，pricing 文案也读它）；权威值仍是 /v1/billing/config，加载后覆盖。 */
-const FALLBACK_RATE = DEFAULT_CREDIT_RATE;
 const FALLBACK_MIN = MIN_TOPUP_USD;
 const FALLBACK_MAX = MAX_TOPUP_USD;
 
@@ -68,7 +67,7 @@ export default function Topup() {
     rates: { epusdt: number; dodo: number };
     min: number;
     max: number;
-  }>({ rates: { epusdt: FALLBACK_RATE, dodo: FALLBACK_RATE }, min: FALLBACK_MIN, max: FALLBACK_MAX });
+  }>({ rates: { epusdt: DEFAULT_CREDIT_RATES.epusdt, dodo: DEFAULT_CREDIT_RATES.dodo }, min: FALLBACK_MIN, max: FALLBACK_MAX });
   useEffect(() => {
     let alive = true;
     api
@@ -178,7 +177,7 @@ export default function Topup() {
               active={method === 'usdt'}
               onClick={() => setMethod('usdt')}
               title="稳定币"
-              subtitle="USDT / USDC · 多链可选"
+              subtitle={`USDT / USDC · $1 → $${cfg.rates.epusdt} 额度`}
               tag="海外友好"
             />
             {SHOW_DODO && (
@@ -186,7 +185,7 @@ export default function Topup() {
                 active={method === 'dodo'}
                 onClick={() => setMethod('dodo')}
                 title="卡 · 微信"
-                subtitle="Visa / 银联 / 微信扫码 · 美元计价"
+                subtitle={`Visa / 银联 / 微信 · $1 → $${cfg.rates.dodo} 额度`}
                 tag="USD"
               />
             )}
@@ -361,6 +360,15 @@ export default function Topup() {
 
         <div className="mt-10 font-mono text-[11.5px] text-ink-3 leading-relaxed">
           · 充值后立即到账，永不过期，全模型可用<br />
+          {SHOW_DODO && (
+            <>
+              ·{' '}
+              <span className="text-ink-2">
+                {`不同渠道到账比例不同：稳定币 $1→$${cfg.rates.epusdt} 额度、卡/微信 $1→$${cfg.rates.dodo} 额度，以所选渠道显示为准`}
+              </span>
+              <br />
+            </>
+          )}
           ·{' '}
           <Link
             to="/refund"
