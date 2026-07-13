@@ -23,6 +23,15 @@ vendor/
 *.png
 !frontend/src/assets/**/*.png
 !frontend/public/**/*.png
+!brand/**/*.png
+
+# JetBrains IDE config (per-developer, not project state)
+.idea/
+
+# npm pack output. The installer tarball served by the backend is committed
+# on purpose — it is built by `node pack-router.mjs`, not by the Dockerfile.
+*.tgz
+!backend/public/install/tokenboss-router.tgz
 
 # SQLite dev DB + WAL/SHM (schema is recreated at startup via store.ts init()).
 # Match both `backend/data/*.db` (when started from backend dir) and root-level
