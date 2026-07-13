@@ -99,6 +99,32 @@ describe('POST /v1/auth/verify-code', () => {
     expect(u?.emailVerified).toBe(true);
   });
 
+  it('revokes an unverified account\'s password when OTP claims it (pre-registration takeover guard)', async () => {
+    // Attacker registered victim@example.com with THEIR password but could
+    // never verify the inbox. The victim now logs in via OTP — the password
+    // must not survive, and outstanding sessions must be invalidated.
+    putUser({
+      userId: 'u_prereg_victim',
+      email: 'victim@example.com',
+      passwordHash: 'attacker-controlled-hash',
+      createdAt: new Date().toISOString(),
+      emailVerified: false,
+      tokenVersion: 0,
+    });
+
+    const code = await getCodeForEmail('victim@example.com');
+    const res = await verifyCodeHandler({
+      body: JSON.stringify({ email: 'victim@example.com', code }),
+    } as any) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body!).token).toBeTruthy();
+
+    const u = await getUser('u_prereg_victim');
+    expect(u?.emailVerified).toBe(true);
+    expect(u?.passwordHash).toBeFalsy(); // attacker's password revoked
+    expect(u?.tokenVersion).toBe(1); // attacker's sessions invalidated
+  });
+
   it('does not write when existing user is already verified (idempotency)', async () => {
     putUser({
       userId: 'u_already_verified',

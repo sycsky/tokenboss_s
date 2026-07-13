@@ -21,6 +21,7 @@ import type {
 import { createHash } from "node:crypto";
 
 import { isAuthFailure, verifySessionHeader, type AuthContext } from "../lib/auth.js";
+import { mintKeyGuarded, StaleSessionError } from "../lib/keyMinting.js";
 import { isNewapiConfigured, newapi, NewapiError } from "../lib/newapi.js";
 import { newapiUsername } from "../lib/newapiIdentity.js";
 import { putApiKeyIndex, deleteApiKeyIndex } from "../lib/store.js";
@@ -101,7 +102,13 @@ export function requireNewapiLink(
 
 export function handleNewapiError(err: unknown): APIGatewayProxyResultV2 {
   const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-  const status = err instanceof NewapiError ? err.status || 502 : 502;
+  // newapi's API convention is HTTP 200 + {success:false} — NewapiError
+  // then carries status 200 (or another 2xx/3xx). Passing that through
+  // would hand the browser a 200-with-error-body that typed fetch
+  // wrappers treat as success (Dashboard crashed on exactly this). An
+  // error response must be an error status: clamp anything below 400 to 502.
+  const upstream = err instanceof NewapiError ? err.status : 0;
+  const status = upstream >= 400 ? upstream : 502;
   // Translate the per-IP login rate-limit (newapi 429) into a clearer
   // 503 + retryable hint, instead of the raw "loginUser: ..." string,
   // so the dashboard can show "请稍后再试" rather than a noisy stack trace.
@@ -203,15 +210,11 @@ export const createKeyHandler = async (
       username: newapiUsername(auth.userId),
       password: auth.user.newapiPassword as string,
     });
-    const { tokenId, apiKey } = await newapi.createAndRevealToken({
-      session,
+    // Guarded mint: destroys its own token and throws StaleSessionError if
+    // the session went stale mid-flight (takeover guard / logout-everywhere).
+    const { tokenId, apiKey } = await mintKeyGuarded(auth, session, {
       name: label,
-      unlimited_quota: true,
       expired_time: expiredTime,
-      // Pin every newly minted user token to newapi's "auto" group so the
-      // upstream router picks the auto-tier channel rather than whichever
-      // channel the user's account-level group resolves to.
-      group: "auto",
     });
     // Index the raw key's hash so chatProxyCore can resolve sk-xxx → userId
     // without storing the plaintext or hitting newapi on every request.
@@ -241,6 +244,9 @@ export const createKeyHandler = async (
       expiresAt: expiresAtISO,
     });
   } catch (err) {
+    if (err instanceof StaleSessionError) {
+      return jsonError(401, "authentication_error", err.message, "invalid_session");
+    }
     return handleNewapiError(err);
   }
 };

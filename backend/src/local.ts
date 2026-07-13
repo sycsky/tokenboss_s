@@ -80,6 +80,10 @@ import {
   listKeysHandler,
 } from "./handlers/keysHandlers.js";
 import { deepLinkHandler } from "./handlers/deepLinkHandler.js";
+import {
+  oauthCallbackHandler,
+  oauthStartHandler,
+} from "./handlers/oauthHandlers.js";
 import { modelsHandler } from "./handlers/modelsHandler.js";
 import {
   createOrderHandler,
@@ -158,6 +162,8 @@ const routes: Route[] = [
   { method: "POST", path: "/v1/auth/resend-verification", handler: resendVerificationHandler },
   { method: "POST", path: "/v1/auth/send-code", handler: sendCodeHandler },
   { method: "POST", path: "/v1/auth/verify-code", handler: verifyCodeHandler },
+  { method: "GET", path: "/v1/auth/oauth/{provider}/start", handler: oauthStartHandler },
+  { method: "GET", path: "/v1/auth/oauth/{provider}/callback", handler: oauthCallbackHandler },
   { method: "GET", path: "/v1/me", handler: meHandler },
   { method: "GET", path: "/v1/keys", handler: listKeysHandler },
   { method: "POST", path: "/v1/keys", handler: createKeyHandler },

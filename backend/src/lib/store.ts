@@ -238,6 +238,18 @@ export function init(): void {
     // Column already exists — ignore.
   }
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS oauth_identities (
+      provider       TEXT NOT NULL,
+      providerUserId TEXT NOT NULL,
+      userId         TEXT NOT NULL,
+      createdAt      TEXT NOT NULL,
+      PRIMARY KEY (provider, providerUserId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_oauth_identities_user
+      ON oauth_identities(userId);
+  `);
+
   // Drop legacy bucket / usage tables behind an env flag so prod admins
   // opt in explicitly. Locally / in tests, set MIGRATE_DROP_LEGACY=1 (or
   // when SQLITE_PATH=':memory:', this is auto-enabled since it's a fresh
@@ -474,6 +486,48 @@ export function putUser(rec: UserRecord): void {
   });
 }
 
+/**
+ * Create-only variant of putUser: plain INSERT, so a concurrent signup
+ * with the same email hits the UNIQUE index and THROWS instead of
+ * OR-REPLACE silently deleting the winner's row (which would orphan
+ * that user's newapi binding and any oauth identity pointing at it).
+ * Callers catch the constraint error and fall back to the existing row.
+ */
+export function insertUser(rec: UserRecord): void {
+  db.prepare(`
+    INSERT INTO users
+      (userId, displayName, email, phone, passwordHash, createdAt, emailVerified,
+       newapiUserId, newapiPassword, plan, subscriptionStartedAt, subscriptionExpiresAt,
+       dailyQuotaUsd, quotaNextResetAt, tokenVersion)
+    VALUES
+      (@userId, @displayName, @email, @phone, @passwordHash, @createdAt, @emailVerified,
+       @newapiUserId, @newapiPassword, @plan, @subscriptionStartedAt, @subscriptionExpiresAt,
+       @dailyQuotaUsd, @quotaNextResetAt, @tokenVersion)
+  `).run({
+    userId: rec.userId,
+    displayName: rec.displayName ?? null,
+    email: rec.email ?? null,
+    phone: rec.phone ?? null,
+    passwordHash: rec.passwordHash ?? null,
+    createdAt: rec.createdAt,
+    emailVerified: rec.emailVerified ? 1 : 0,
+    newapiUserId: rec.newapiUserId ?? null,
+    newapiPassword: rec.newapiPassword ?? null,
+    plan: rec.plan ?? null,
+    subscriptionStartedAt: rec.subscriptionStartedAt ?? null,
+    subscriptionExpiresAt: rec.subscriptionExpiresAt ?? null,
+    dailyQuotaUsd: rec.dailyQuotaUsd ?? null,
+    quotaNextResetAt: rec.quotaNextResetAt ?? null,
+    tokenVersion: rec.tokenVersion ?? 0,
+  });
+}
+
+/** True when `err` is SQLite telling us a UNIQUE constraint fired. */
+export function isUniqueConstraintError(err: unknown): boolean {
+  return typeof (err as { code?: string }).code === "string" &&
+    (err as { code: string }).code.startsWith("SQLITE_CONSTRAINT");
+}
+
 export function getUserIdByEmail(email: string): string | null {
   const norm = email.trim().toLowerCase();
   if (!norm) return null;
@@ -634,6 +688,14 @@ export function getUserIdByKeyHash(keyHash: string): string | null {
 }
 
 /** Drop the index row for a deleted token. Tolerant of missing rows. */
+/** All indexed API keys for a user — used to revoke them in bulk when a
+ *  verified inbox proof reclaims a never-verified (pre-registered) account. */
+export function listApiKeyIndex(userId: string): { newapiTokenId: number }[] {
+  return db
+    .prepare(`SELECT newapiTokenId FROM api_key_index WHERE userId = ?`)
+    .all(userId) as { newapiTokenId: number }[];
+}
+
 export function deleteApiKeyIndex(userId: string, newapiTokenId: number): void {
   db.prepare(
     `DELETE FROM api_key_index WHERE userId = ? AND newapiTokenId = ?`,
@@ -739,6 +801,20 @@ export function markEmailVerified(userId: string): void {
 }
 
 /**
+ * Strip the password and invalidate every outstanding session token.
+ * Used when a VERIFIED inbox proof (OAuth verified email / consumed OTP)
+ * claims an account whose email was never verified: whoever set that
+ * password never proved they own the inbox — classic pre-registration
+ * takeover — so their credentials must not survive the merge.
+ */
+export function revokePasswordCredentials(userId: string): void {
+  db.prepare(`
+    UPDATE users SET passwordHash = NULL, tokenVersion = tokenVersion + 1
+    WHERE userId = ?
+  `).run(userId);
+}
+
+/**
  * How many verify-token rows have been minted for this user in the past N
  * seconds. Used to rate-limit the resend endpoint (1 / 60s, 5 / hour).
  */
@@ -749,6 +825,32 @@ export function recentEmailVerifyTokenCount(userId: string, sinceSeconds: number
     WHERE userId = ? AND createdAt > ?
   `).get(userId, since) as { n: number };
   return row.n;
+}
+
+// ---------- Public API — OAuth identities ----------
+
+/**
+ * Resolve a third-party identity (e.g. GitHub user id) to our userId.
+ * Returns null when this provider account has never signed in before.
+ */
+export function getOauthUserId(provider: string, providerUserId: string): string | null {
+  const row = db.prepare(`
+    SELECT userId FROM oauth_identities
+    WHERE provider = ? AND providerUserId = ?
+  `).get(provider, providerUserId) as { userId: string } | undefined;
+  return row?.userId ?? null;
+}
+
+/**
+ * Bind a provider account to a user. INSERT OR IGNORE: a concurrent
+ * callback for the same identity keeps the first binding — identities
+ * must never be silently re-pointed at a different user.
+ */
+export function putOauthIdentity(provider: string, providerUserId: string, userId: string): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO oauth_identities (provider, providerUserId, userId, createdAt)
+    VALUES (?, ?, ?, ?)
+  `).run(provider, providerUserId, userId, new Date().toISOString());
 }
 
 // ---------- Public API — Orders ----------

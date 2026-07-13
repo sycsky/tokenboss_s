@@ -15,24 +15,27 @@ vi.mock('../../lib/newapi.js', async (orig) => {
       loginUser: vi.fn(),
       createAndRevealToken: vi.fn(),
       listUserTokens: vi.fn(),
+      deleteUserToken: vi.fn(),
     },
   };
 });
 
 import { createKeyHandler, listKeysHandler } from '../keysHandlers.js';
-import { init, putUser } from '../../lib/store.js';
+import { init, putUser, bumpUserTokenVersion } from '../../lib/store.js';
 import { signSession } from '../../lib/authTokens.js';
 import { newapi } from '../../lib/newapi.js';
 
 const loginUserMock = newapi.loginUser as unknown as ReturnType<typeof vi.fn>;
 const createAndRevealTokenMock = newapi.createAndRevealToken as unknown as ReturnType<typeof vi.fn>;
 const listUserTokensMock = newapi.listUserTokens as unknown as ReturnType<typeof vi.fn>;
+const deleteUserTokenMock = newapi.deleteUserToken as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   init();
   loginUserMock.mockReset();
   createAndRevealTokenMock.mockReset();
   listUserTokensMock.mockReset();
+  deleteUserTokenMock.mockReset();
   loginUserMock.mockResolvedValue({ cookie: 'sid=x' });
 });
 
@@ -88,6 +91,29 @@ describe('POST /v1/keys', () => {
     expect(res.statusCode).toBe(201);
     expect(createAndRevealTokenMock.mock.calls[0][0].expired_time).toBe(-1);
     expect(JSON.parse(res.body!).expiresAt).toBeNull();
+  });
+
+  it('destroys the key and 401s when the session went stale mid-flight (takeover guard)', async () => {
+    // An attacker's createKey request authenticates, then the account's
+    // tokenVersion is bumped (logout-everywhere / pre-registration
+    // takeover) while the upstream call is in flight. The handler must
+    // notice post-creation, destroy the key it just minted, and reject —
+    // otherwise a stale session hands out a live key the revocation
+    // sweep may never see.
+    seedUser('u_stale');
+    deleteUserTokenMock.mockResolvedValue(undefined);
+    createAndRevealTokenMock.mockImplementation(async () => {
+      bumpUserTokenVersion('u_stale'); // takeover lands mid-flight
+      return { tokenId: 99, apiKey: 'sk-late' };
+    });
+
+    const res = await createKeyHandler(
+      makeAuthedEvent('u_stale', { label: 'sneaky' }),
+    ) as APIGatewayProxyStructuredResultV2;
+
+    expect(res.statusCode).toBe(401);
+    expect(deleteUserTokenMock).toHaveBeenCalledWith({ cookie: 'sid=x' }, 99);
+    expect(res.body).not.toContain('sk-late'); // plaintext never leaves
   });
 
   it('rejects expiresInDays = 0 with 400', async () => {

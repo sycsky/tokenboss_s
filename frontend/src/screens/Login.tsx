@@ -1,6 +1,6 @@
-import { ApiError } from '../lib/api';
+import { ApiError, oauthStartUrl } from '../lib/api';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { slockBtn } from '../lib/slockBtn';
 import {
@@ -28,6 +28,22 @@ import { useDocumentMeta } from '../lib/useDocumentMeta';
  * power-users to optimize for, and email-code shaves the "think up a
  * password" task off the signup funnel.
  */
+/** Map the backend's ?oauth_error=<code> to a user-facing line. */
+function oauthErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  switch (code) {
+    case 'denied':
+      return '你取消了第三方授权，可以再试一次或改用邮箱登录。';
+    case 'no_verified_email':
+      return '你的 GitHub 账号没有已验证的邮箱，请先在 GitHub 验证邮箱，或改用邮箱验证码登录。';
+    case 'not_configured':
+      return '该登录方式暂未开放，请改用邮箱验证码登录。';
+    default:
+      // state_mismatch / exchange_failed / provision_failed — transient.
+      return '第三方登录失败，请再试一次；持续失败可改用邮箱验证码登录。';
+  }
+}
+
 export default function Login() {
   useDocumentMeta({
     title: '登录 · TokenBoss',
@@ -36,12 +52,16 @@ export default function Login() {
     ogImage: 'https://tokenboss.co/og-cover.png',
   });
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const { sendCode, loginWithCode } = useAuth();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the backend's OAuth callback bounced us back with a failure
+  // (?oauth_error=<code>). Distinct from `error`, which is the email flow's.
+  const oauthError = oauthErrorMessage(params.get('oauth_error'));
 
   async function handleSendCode(e: React.FormEvent) {
     e.preventDefault();
@@ -136,17 +156,28 @@ export default function Login() {
         </div>
 
         <div className="space-y-2.5">
+          <button
+            type="button"
+            className={authOAuthBtnCls}
+            onClick={() => {
+              // Top-level navigation: the backend 302s to GitHub's consent
+              // page and eventually redirects back to /oauth/callback.
+              window.location.href = oauthStartUrl('github');
+            }}
+          >
+            <GitHubIcon />
+            <span>Continue with GitHub</span>
+          </button>
           <button type="button" disabled className={authOAuthBtnCls} aria-disabled="true">
             <GoogleIcon />
             <span>Continue with Google</span>
             <ComingSoonBadge />
           </button>
-          <button type="button" disabled className={authOAuthBtnCls} aria-disabled="true">
-            <GitHubIcon />
-            <span>Continue with GitHub</span>
-            <ComingSoonBadge />
-          </button>
         </div>
+
+        {oauthError && (
+          <p className="text-[13px] text-red-ink font-medium mt-3">{oauthError}</p>
+        )}
       </AuthShell>
     );
   }

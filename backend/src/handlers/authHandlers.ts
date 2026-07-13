@@ -24,6 +24,10 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
+import {
+  createVerifiedUser,
+  revokeTakeoverCredentials,
+} from "../lib/accountProvisioning.js";
 import { verifySessionHeader, isAuthFailure } from "../lib/auth.js";
 import { hashPassword, signSession, verifyPassword } from "../lib/authTokens.js";
 import { sendVerificationEmail, sendVerifyLinkEmail } from "../lib/emailService.js";
@@ -35,9 +39,10 @@ import {
   bumpUserTokenVersion,
   getUser,
   getUserIdByEmail,
+  insertUser,
+  isUniqueConstraintError,
   markEmailVerified,
   putEmailIndex,
-  putUser,
   recentCodeCount,
   recentEmailVerifyTokenCount,
   saveVerificationCode,
@@ -221,7 +226,28 @@ export const registerHandler = async (
     }
   }
 
-  putUser(user);
+  // Create-only insert: a concurrent signup (password, OTP or OAuth) that
+  // grabbed this email after our pre-check above must NOT be replaced —
+  // INSERT OR REPLACE would delete the winner row and orphan its newapi /
+  // oauth bindings. Surface the same 409 the pre-check would have.
+  try {
+    insertUser(user);
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      if (user.newapiUserId !== undefined) {
+        console.warn(
+          `[register] duplicate signup race for ${email}: newapi user ${user.newapiUserId} orphaned`,
+        );
+      }
+      return jsonError(
+        409,
+        "conflict",
+        "An account with this email already exists.",
+        "email_taken",
+      );
+    }
+    throw err;
+  }
   await putEmailIndex(email, userId);
 
   // Send the verification link. If delivery fails (Resend down, no DNS,
@@ -451,51 +477,21 @@ export async function verifyCodeHandler(
   let userId = getUserIdByEmail(email);
   let isNew = false;
   if (!userId) {
-    userId = `u_${randomBytes(10).toString("hex")}`;
-
     // Provision the newapi-side account up front so this user can
-    // immediately create keys and call /v1/chat/completions. Stop-loss:
-    // OTP-created accounts must NOT auto-bind the Trial subscription or
-    // free credit. Existing users' balances/subscriptions are untouched.
-    let newapiUserId: number | undefined;
-    let newapiPassword: string | undefined;
-    if (isNewapiConfigured()) {
-      const newapiUsername = userId.slice(2);
-      newapiPassword = randomBytes(12).toString("base64url");
-      try {
-        const provisioned = await newapi.provisionUser({
-          username: newapiUsername,
-          password: newapiPassword,
-          display_name: newapiUsername,
-          email,
-          group: "default",
-          quota: 0,
-        });
-        newapiUserId = provisioned.newapiUserId;
-      } catch (err) {
-        const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-        console.error(`[verifyCode] newapi provisioning failed for ${userId}:`, msg);
-        return jsonResponse(502, {
-          error: "newapi_provision_failed",
-          message: "Could not provision account on metering service. Please try again.",
-        });
-      }
+    // immediately create keys and call /v1/chat/completions. Consuming
+    // the verify-code IS proof the user owns the inbox, so the account
+    // lands emailVerified. Stop-loss: OTP-created accounts must NOT
+    // auto-bind the Trial subscription or free credit.
+    try {
+      const created = await createVerifiedUser({ email });
+      userId = created.userId;
+    } catch (err) {
+      console.error(`[verifyCode] newapi provisioning failed for ${email}:`, (err as Error).message);
+      return jsonResponse(502, {
+        error: "newapi_provision_failed",
+        message: "Could not provision account on metering service. Please try again.",
+      });
     }
-
-    const createdAt = new Date().toISOString();
-    putUser({
-      userId,
-      email,
-      displayName: undefined,
-      phone: undefined,
-      passwordHash: undefined,
-      createdAt,
-      // The act of consuming the verify-code IS proof the user owns
-      // the inbox — mark verified so we don't pester them again.
-      emailVerified: true,
-      newapiUserId,
-      newapiPassword,
-    });
     isNew = true;
   } else {
     // Existing user re-logging via OTP. The act of consuming the code is
@@ -504,6 +500,24 @@ export async function verifyCodeHandler(
     // UPDATE when it's a no-op to avoid a write per login.
     const existing = await getUser(userId);
     if (existing && !existing.emailVerified) {
+      // Never-verified row = whoever set its password didn't prove inbox
+      // ownership, but this OTP consumer just did. Pre-registration
+      // takeover guard: revoke password + sessions + api keys before
+      // handing the account over (same rule as the OAuth merge). Fail
+      // closed on upstream key-revocation failure — the account must not
+      // change hands with the old keys still live.
+      try {
+        await revokeTakeoverCredentials(userId);
+      } catch (err) {
+        console.error(
+          `[verifyCode] takeover revocation failed for ${userId}:`,
+          (err as Error).message,
+        );
+        return jsonResponse(502, {
+          error: "revocation_failed",
+          message: "Could not secure the account on the metering service. Please try again.",
+        });
+      }
       markEmailVerified(userId);
     }
   }

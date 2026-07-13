@@ -128,8 +128,13 @@ export default function Dashboard() {
   async function reloadKeys() {
     try {
       const r = await api.listKeys();
-      setKeys(r.keys);
-      dashboardCache.keys = r.keys;
+      // Defensive: a malformed 2xx (e.g. an upstream error smuggled inside
+      // a 200 body) must degrade to "no keys", not crash the whole screen
+      // on `keys.length`. The CACHE gets the same normalized array — a raw
+      // non-array cached here would crash the next mount instead.
+      const list = Array.isArray(r.keys) ? r.keys : [];
+      setKeys(list);
+      dashboardCache.keys = list;
       setKeysError(null);
     } catch (e) {
       setKeysError((e as Error).message);

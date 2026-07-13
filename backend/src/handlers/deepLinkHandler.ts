@@ -25,6 +25,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 
 import { isAuthFailure, verifySessionHeader } from "../lib/auth.js";
+import { mintKeyGuarded, StaleSessionError } from "../lib/keyMinting.js";
 import { newapi } from "../lib/newapi.js";
 import { newapiUsername } from "../lib/newapiIdentity.js";
 import { buildCCSwitchUrl, CC_SWITCH_APPS } from "../lib/ccSwitchUrl.js";
@@ -66,12 +67,11 @@ export const deepLinkHandler = async (
       await newapi.deleteUserToken(session, existing.id);
     }
 
-    const created = await newapi.createAndRevealToken({
-      session,
+    // Guarded mint: destroys its own token and throws StaleSessionError if
+    // the session went stale mid-flight (takeover guard / logout-everywhere).
+    const created = await mintKeyGuarded(auth, session, {
       name: RESERVED_KEY_NAME,
-      unlimited_quota: true,
       expired_time: -1,
-      group: "auto",
     });
 
     const deep_links = CC_SWITCH_APPS.map(({ app, displayName }) => ({
@@ -94,6 +94,9 @@ export const deepLinkHandler = async (
       issued_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof StaleSessionError) {
+      return jsonError(401, "authentication_error", err.message, "invalid_session");
+    }
     return handleNewapiError(err);
   }
 };
