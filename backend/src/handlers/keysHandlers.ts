@@ -101,7 +101,13 @@ export function requireNewapiLink(
 
 export function handleNewapiError(err: unknown): APIGatewayProxyResultV2 {
   const msg = err instanceof NewapiError ? err.message : (err as Error).message;
-  const status = err instanceof NewapiError ? err.status || 502 : 502;
+  // newapi's API convention is HTTP 200 + {success:false} — NewapiError
+  // then carries status 200 (or another 2xx/3xx). Passing that through
+  // would hand the browser a 200-with-error-body that typed fetch
+  // wrappers treat as success (Dashboard crashed on exactly this). An
+  // error response must be an error status: clamp anything below 400 to 502.
+  const upstream = err instanceof NewapiError ? err.status : 0;
+  const status = upstream >= 400 ? upstream : 502;
   // Translate the per-IP login rate-limit (newapi 429) into a clearer
   // 503 + retryable hint, instead of the raw "loginUser: ..." string,
   // so the dashboard can show "请稍后再试" rather than a noisy stack trace.

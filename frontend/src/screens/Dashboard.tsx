@@ -128,7 +128,10 @@ export default function Dashboard() {
   async function reloadKeys() {
     try {
       const r = await api.listKeys();
-      setKeys(r.keys);
+      // Defensive: a malformed 2xx (e.g. an upstream error smuggled inside
+      // a 200 body) must degrade to "no keys", not crash the whole screen
+      // on `keys.length`.
+      setKeys(Array.isArray(r.keys) ? r.keys : []);
       dashboardCache.keys = r.keys;
       setKeysError(null);
     } catch (e) {
