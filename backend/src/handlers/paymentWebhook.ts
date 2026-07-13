@@ -34,7 +34,7 @@ import {
   setOrderRedemptionCode,
 } from "../lib/store.js";
 import { getNewapiPlanId, skuTypeToPlanId } from "../lib/plans.js";
-import { newapi, NewapiError } from "../lib/newapi.js";
+import { newapi, NewapiError, usdToNewapiQuota } from "../lib/newapi.js";
 import { newapiUsername } from "../lib/newapiIdentity.js";
 import * as Sentry from "@sentry/node";
 
@@ -542,12 +542,43 @@ export async function applyTopupToUser(
       username: newapiUsername(order.userId),
       password: user.newapiPassword,
     });
-    await newapi.redeemCode(session, code);
+    const { quotaAdded } = await newapi.redeemCode(session, code);
+    // Don't trust "no error" as proof of credit: verify the quota newapi
+    // actually added. If it's ≤0, the redeem was a no-op — DON'T mark
+    // 'settled' (that would tell the user 已到账 while the balance stayed
+    // flat). A mismatch that still added something is credited but alerted
+    // for manual reconcile rather than stranded.
+    const expectedQuota = usdToNewapiQuota(usd);
+    if (quotaAdded <= 0) {
+      reportSettleFailure({
+        stage: 'topup_redeem',
+        channel,
+        orderId: order.orderId,
+        userId: order.userId,
+        extra: { topupAmountUsd: usd, expectedQuota, quotaAdded },
+      });
+      await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'failed' });
+      return false;
+    }
+    if (quotaAdded !== expectedQuota) {
+      console.error(`${tag} quotaAdded != expected — credited but check`, {
+        orderId: order.orderId,
+        userId: order.userId,
+        expectedQuota,
+        quotaAdded,
+      });
+      Sentry.captureMessage('topup quota mismatch (credited)', {
+        level: 'warning',
+        tags: { kind: 'quota_mismatch', channel },
+        extra: { orderId: order.orderId, userId: order.userId, expectedQuota, quotaAdded },
+      });
+    }
     await markOrderSettleStatus({ orderId: order.orderId, settleStatus: 'settled' });
     console.info(`${tag} topup credited`, {
       orderId: order.orderId,
       userId: order.userId,
       topupAmountUsd: usd,
+      quotaAdded,
     });
     return true;
   } catch (err) {

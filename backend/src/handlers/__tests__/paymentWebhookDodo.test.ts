@@ -189,6 +189,41 @@ describe('dodoWebhookHandler — amount integrity', () => {
     expect(mintSpy).toHaveBeenCalledWith({ name: orderId, quotaUsd: 340 });
   });
 
+  it('does NOT mark settled when newapi redeem credits nothing (quotaAdded<=0)', async () => {
+    const orderId = 'tb_ord_dodo_zero_credit';
+    await createOrder({
+      orderId,
+      userId,
+      skuType: 'topup',
+      channel: 'dodo',
+      amount: 50,
+      currency: 'USD',
+      topupAmountUsd: 340,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    vi.spyOn(newapi, 'createRedemption').mockResolvedValue('CODE-ZERO');
+    vi.spyOn(newapi, 'loginUser').mockResolvedValue({ cookie: 'c', userId: 77 });
+    // Redeem returns success but adds 0 quota — must NOT be reported as 已到账.
+    vi.spyOn(newapi, 'redeemCode').mockResolvedValue({ quotaAdded: 0 });
+
+    stubDodo({
+      type: 'payment.succeeded',
+      orderId,
+      upstreamTradeId: 'pay_zero',
+      amountActual: 50,
+      currency: 'USD',
+    });
+
+    const res = (await dodoWebhookHandler(event())) as APIGatewayProxyStructuredResultV2;
+    expect(res.statusCode).toBe(200);
+
+    const back = await getOrder(orderId);
+    expect(back?.status).toBe('paid');
+    expect(back?.settleStatus).toBe('failed'); // held, not falsely settled
+  });
+
   it('holds settlement when the success event omits currency/amount (fail closed)', async () => {
     const orderId = 'tb_ord_dodo_unverifiable';
     await createOrder({

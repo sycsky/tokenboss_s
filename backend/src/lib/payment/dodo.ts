@@ -52,6 +52,10 @@ interface DodoConfig {
    *  default CNY; the buyer can still switch (allow_currency_selection).
    *  Only takes effect with adaptive pricing enabled on the Dodo account. */
   billingCurrency?: string;
+  /** Default billing-address country (ISO 3166-1 alpha-2, e.g. "CN"). Dodo
+   *  accepts a country-only billing_address; without it the checkout geo-IPs
+   *  the country (→ Japan for our test egress). Buyer can still change it. */
+  billingCountry?: string;
 }
 
 export interface DodoWebhookEvent {
@@ -100,6 +104,11 @@ export class DodoClient {
               billing_currency: this.cfg.billingCurrency,
               feature_flags: { allow_currency_selection: true },
             }
+          : {}),
+        // Default the billing-address country too (Dodo accepts country-only;
+        // otherwise it geo-IPs to e.g. Japan). Buyer can still edit it.
+        ...(this.cfg.billingCountry
+          ? { billing_address: { country: this.cfg.billingCountry } }
           : {}),
         ...(input.redirectUrl ? { return_url: input.redirectUrl } : {}),
       }),
@@ -230,5 +239,8 @@ export function dodoFromEnv(): DodoClient | null {
     // Default buyers to CNY; override with DODO_BILLING_CURRENCY (ISO 4217),
     // or set it empty to fall back to Dodo's geo-IP adaptive default.
     billingCurrency: process.env.DODO_BILLING_CURRENCY ?? "CNY",
+    // Default billing country to China; override with DODO_BILLING_COUNTRY
+    // (ISO 3166-1 alpha-2), or empty to let Dodo geo-IP it.
+    billingCountry: process.env.DODO_BILLING_COUNTRY ?? "CN",
   });
 }

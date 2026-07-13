@@ -127,7 +127,7 @@ describe("DodoClient.verifyWebhook", () => {
 describe("DodoClient.createOrder", () => {
   function clientWithFetch(
     captured: { body?: string },
-    cfg: Partial<{ billingCurrency: string }> = {},
+    cfg: Partial<{ billingCurrency: string; billingCountry: string }> = {},
   ) {
     const client = new DodoClient({
       apiKey: "test-key",
@@ -152,23 +152,28 @@ describe("DodoClient.createOrder", () => {
     return client;
   }
 
-  it("sends the PWYW amount in USD cents and defaults billing_currency to CNY", async () => {
+  it("sends PWYW cents + defaults billing_currency CNY and billing country CN", async () => {
     const captured: { body?: string } = {};
-    const client = clientWithFetch(captured, { billingCurrency: "CNY" });
+    const client = clientWithFetch(captured, {
+      billingCurrency: "CNY",
+      billingCountry: "CN",
+    });
     await client.createOrder({ orderId: "tb_ord_1", amount: 10 } as never);
     const body = JSON.parse(captured.body!);
     expect(body.product_cart[0].amount).toBe(1000); // $10 -> cents
     expect(body.billing_currency).toBe("CNY");
     expect(body.feature_flags.allow_currency_selection).toBe(true);
+    expect(body.billing_address).toEqual({ country: "CN" });
     expect(body.metadata.orderId).toBe("tb_ord_1");
   });
 
-  it("omits billing_currency when not configured (falls back to adaptive)", async () => {
+  it("omits billing_currency/address when not configured (falls back to adaptive)", async () => {
     const captured: { body?: string } = {};
     const client = clientWithFetch(captured, {});
     await client.createOrder({ orderId: "tb_ord_2", amount: 5 } as never);
     const body = JSON.parse(captured.body!);
     expect(body.billing_currency).toBeUndefined();
     expect(body.feature_flags).toBeUndefined();
+    expect(body.billing_address).toBeUndefined();
   });
 });
