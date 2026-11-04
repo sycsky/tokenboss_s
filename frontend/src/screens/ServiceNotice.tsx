@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BrandPlate } from '../components/TopNav';
-import { REFUND_EMAIL, REFUND_MAILTO, SERVICE_STOP_LABEL, useServicePauseStatus } from '../lib/servicePause';
+import { REFUND_EMAIL, REFUND_MAILTO, SERVICE_STOP_DATE_LABEL, SERVICE_STOP_LABEL, useServicePauseStatus } from '../lib/servicePause';
 import { slockBtn } from '../lib/slockBtn';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 
@@ -25,7 +25,7 @@ export default function ServiceNotice() {
         <p className="text-[14px] text-text-secondary leading-relaxed mb-6">感谢您使用 TokenBoss，以下是本次服务暂停安排。</p>
         <section aria-label="停服时间" className="bg-warning-subtle border-2 border-ink rounded-md shadow-[3px_3px_0_0_#1C1917] px-5 sm:px-6 py-5 mb-7">
           <p className="text-[12px] font-bold text-yellow-stamp-ink mb-3">{hasStopped ? '已暂停服务' : '服务暂停时间'}</p>
-          <p className="font-mono font-bold text-[23px] sm:text-[30px] leading-relaxed">2026 年 12 月 16 日<br />00:00</p>
+          <p className="font-mono font-bold text-[23px] sm:text-[30px] leading-relaxed">{SERVICE_STOP_DATE_LABEL}<br />00:00</p>
           <p className="text-[12px] text-yellow-stamp-ink mt-2">北京时间 · UTC+8</p>
         </section>
         <p className="text-[14px] leading-[1.9] mb-7">
