@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 
@@ -37,12 +38,12 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
   const onPrimitive = current === 'primitive';
 
   return (
-    <nav className="relative px-5 sm:px-9 py-5 flex items-center justify-between max-w-[1200px] mx-auto gap-3">
+    <nav className="relative px-5 sm:px-9 py-5 grid grid-cols-[auto_1fr] md:flex items-center justify-between max-w-[1200px] mx-auto gap-x-3 gap-y-5">
       <BrandPlate dark={dark} />
 
       {/* Center: Wallet ↔ Primitives toggle. Both always visible — clicking
           either switches between the two product surfaces. */}
-      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-5 sm:gap-7">
+      <div className="order-last col-span-2 flex items-center justify-center gap-5 sm:gap-7 md:order-none md:absolute md:left-1/2 md:-translate-x-1/2">
         <Link to="/" className={navLink(current === 'home')}>Wallet</Link>
         <Link to="/primitive" className={navLink(onPrimitive)}>Primitives</Link>
       </div>
@@ -51,13 +52,13 @@ export function TopNav({ current, theme = 'light' }: TopNavProps) {
           "接入" surfaces the CC Switch one-click flow at /install/manual so a
           curious visitor can see how it works before committing to register. */}
       {!onPrimitive ? (
-        <div className="flex items-center gap-5 sm:gap-7">
+        <div className="justify-self-end flex items-center gap-4 sm:gap-7">
           <Link to="/install/manual" className={navLink(false)}>接入</Link>
           <a href="/#pricing" className={navLink(false)}>套餐</a>
-          {isLoggedIn ? (
+          {isLoggedIn && !SERVICE_PAUSE_ENABLED ? (
             <Link to="/console" className={navLink(false)}>控制台</Link>
           ) : (
-            <Link to="/login" className={navLink(false)}>登录</Link>
+            <Link to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/login"} className={navLink(false)}>{SERVICE_PAUSE_ENABLED ? "停服说明" : "登录"}</Link>
           )}
         </div>
       ) : (

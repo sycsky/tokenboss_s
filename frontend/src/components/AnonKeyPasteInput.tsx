@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 /**
  * Anonymous "paste your key" fallback for users who land on
  * `/install/manual` without a TokenBoss session.
@@ -76,6 +77,9 @@ export function AnonKeyPasteInput() {
             Console route only shows masked key metadata — security
             policy never re-reveals plaintext; "没 Key" path mints a new
             one via /register. */}
+        {SERVICE_PAUSE_ENABLED ? (
+          <p className="text-[12px] text-ink-3">已有 Key 可在停服前继续配置。<a className="text-accent font-semibold underline ml-2" href={SERVICE_NOTICE_PATH}>停服说明</a></p>
+        ) : (
         <p className="text-[12px] text-ink-3">
           没 Key?
           <a
@@ -96,6 +100,7 @@ export function AnonKeyPasteInput() {
             登录看我的 Keys ↗
           </a>
         </p>
+        )}
       </div>
 
       {/* Grid is always visible so users see the 5 target CLIs up front

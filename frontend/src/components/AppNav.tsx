@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
@@ -52,7 +53,8 @@ export function AppNav({ current: _current }: { current?: AppNavCurrent } = {}) 
         )}
       </div>
       <div className="flex items-center gap-3">
-        {!onPricing && (
+        {SERVICE_PAUSE_ENABLED && <Link to={SERVICE_NOTICE_PATH} className="text-[13px] font-semibold underline underline-offset-4">停服说明</Link>}
+        {!onPricing && !SERVICE_PAUSE_ENABLED && (
           <Link
             to="/pricing"
             className={

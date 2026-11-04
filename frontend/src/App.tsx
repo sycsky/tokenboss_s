@@ -1,3 +1,7 @@
+import ServiceNotice from './screens/ServiceNotice';
+import { ServicePauseBanner } from './components/ServicePauseBanner';
+import { ServicePauseFooter } from './components/ServicePauseFooter';
+import { SERVICE_PAUSE_ENABLED } from './lib/servicePause';
 import { Routes, Route } from 'react-router-dom';
 import Landing from './screens/Landing';
 import Login from './screens/Login';
@@ -31,17 +35,19 @@ import { CurrencyProvider } from './lib/currency';
 export default function App() {
   return (
     <CurrencyProvider>
+    <ServicePauseBanner />
     <Routes>
+      <Route path="/service-notice" element={<ServiceNotice />} />
       <Route path="/" element={<Landing />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/login/magic" element={<MagicLogin />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/verify-email" element={<VerifyEmail />} />
-      <Route path="/oauth/callback" element={<OAuthCallback />} />
+      <Route path="/login" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <Login />} />
+      <Route path="/login/magic" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <MagicLogin />} />
+      <Route path="/register" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <Register />} />
+      <Route path="/verify-email" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <VerifyEmail />} />
+      <Route path="/oauth/callback" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <OAuthCallback />} />
 
-      <Route path="/onboard/welcome" element={<RequireAuth><OnboardWelcome /></RequireAuth>} />
-      <Route path="/onboard/install" element={<RequireAuth><OnboardInstall /></RequireAuth>} />
-      <Route path="/onboard/success" element={<RequireAuth><OnboardSuccess /></RequireAuth>} />
+      <Route path="/onboard/welcome" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <RequireAuth><OnboardWelcome /></RequireAuth>} />
+      <Route path="/onboard/install" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <RequireAuth><OnboardInstall /></RequireAuth>} />
+      <Route path="/onboard/success" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <RequireAuth><OnboardSuccess /></RequireAuth>} />
 
       <Route path="/console" element={<RequireAuth><Dashboard /></RequireAuth>} />
       <Route path="/console/history" element={<RequireAuth><UsageHistory /></RequireAuth>} />
@@ -54,8 +60,8 @@ export default function App() {
       <Route path="/terms" element={<Legal doc="terms" />} />
       <Route path="/privacy" element={<Legal doc="privacy" />} />
       <Route path="/refund" element={<Legal doc="refund" />} />
-      <Route path="/billing/pay" element={<RequireAuth><Payment /></RequireAuth>} />
-      <Route path="/billing/topup" element={<RequireAuth><Topup /></RequireAuth>} />
+      <Route path="/billing/pay" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <RequireAuth><Payment /></RequireAuth>} />
+      <Route path="/billing/topup" element={SERVICE_PAUSE_ENABLED ? <ServiceNotice /> : <RequireAuth><Topup /></RequireAuth>} />
       <Route path="/billing/orders/:id" element={<RequireAuth><OrderStatus /></RequireAuth>} />
       <Route path="/billing/success" element={<RequireAuth><OrderStatus /></RequireAuth>} />
 
@@ -72,6 +78,7 @@ export default function App() {
       <Route path="/admin/users" element={<RequireAdmin><AdminUsers /></RequireAdmin>} />
       <Route path="/admin/users/:userId" element={<RequireAdmin><AdminUserDetail /></RequireAdmin>} />
     </Routes>
+    <ServicePauseFooter />
     </CurrencyProvider>
   );
 }

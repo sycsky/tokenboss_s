@@ -1,5 +1,6 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import {
   api,
@@ -95,6 +96,7 @@ function shapeKeyStats(groups: UsageAggregateGroup[]): Map<string, KeyStats> {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { user } = useAuth();
 
   // Cross-account safety: if the cache holds another user's snapshot
@@ -434,30 +436,30 @@ export default function Dashboard() {
                     there's no wallet section below (first-topup entry). */}
                 {isTrial ? (
                   <Link
-                    to="/pricing"
+                    to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/pricing"}
                     className={
                       slockBtn('secondary') +
                       ' w-full text-center sm:w-auto sm:ml-auto'
                     }
                   >
-                    选个套餐 →
+                    {SERVICE_PAUSE_ENABLED ? '停服说明' : '选个套餐 →'}
                   </Link>
                 ) : (
                   <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto sm:ml-auto">
                     {!topupBucket && (
                       <Link
-                        to="/billing/topup"
+                        to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/billing/topup"}
                         className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0"
                       >
-                        充值额度
+                        {SERVICE_PAUSE_ENABLED ? '停服说明' : '充值额度'}
                       </Link>
                     )}
                     <button
                       type="button"
-                      onClick={() => setContactReason('renew')}
+                      onClick={() => SERVICE_PAUSE_ENABLED ? navigate(SERVICE_NOTICE_PATH) : setContactReason('renew')}
                       className={slockBtn('secondary') + ' flex-1 sm:flex-none'}
                     >
-                      续费 →
+                      {SERVICE_PAUSE_ENABLED ? '停服说明' : '续费 →'}
                     </button>
                   </div>
                 )}
@@ -499,17 +501,17 @@ export default function Dashboard() {
               <div className="flex flex-col-reverse items-stretch sm:flex-row sm:items-center gap-2 sm:gap-4 w-full sm:w-auto sm:ml-auto">
                 {!topupBucket && (
                   <Link
-                    to="/billing/topup"
+                    to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/billing/topup"}
                     className="font-mono text-[12px] py-2 px-1 -my-2 text-white/80 hover:text-white underline underline-offset-4 decoration-white/30 hover:decoration-white transition-colors flex-shrink-0 text-center sm:text-left"
                   >
-                    充值额度
+                    {SERVICE_PAUSE_ENABLED ? '停服说明' : '充值额度'}
                   </Link>
                 )}
                 <Link
-                  to="/pricing"
+                  to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/pricing"}
                   className={slockBtn('secondary') + ' w-full text-center sm:w-auto'}
                 >
-                  开通套餐 →
+                  {SERVICE_PAUSE_ENABLED ? '停服说明' : '开通套餐 →'}
                 </Link>
               </div>
             </div>
@@ -537,7 +539,7 @@ export default function Dashboard() {
                 </span>
               </div>
               <Link
-                to="/billing/topup"
+                to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/billing/topup"}
                 className={
                   'inline-flex items-center justify-center gap-1.5 ' +
                   'border-2 border-lime-stamp bg-lime-stamp text-lime-stamp-ink ' +
@@ -549,7 +551,7 @@ export default function Dashboard() {
                   'transition-all w-full sm:w-auto sm:ml-auto text-center'
                 }
               >
-                充值 →
+                {SERVICE_PAUSE_ENABLED ? '停服说明' : '充值 →'}
               </Link>
             </div>
           )}
@@ -699,7 +701,7 @@ export default function Dashboard() {
       </main>
 
       <ContactSalesModal
-        open={contactReason !== null}
+        open={!SERVICE_PAUSE_ENABLED && contactReason !== null}
         onClose={() => setContactReason(null)}
         reason={contactReason ?? undefined}
       />

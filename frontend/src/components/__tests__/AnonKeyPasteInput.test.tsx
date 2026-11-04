@@ -53,14 +53,11 @@ describe("AnonKeyPasteInput", () => {
     expect(screen.getByText(/^格式：/)).toBeInTheDocument();
   });
 
-  it("renders cold-start CTAs (register + login) opening in a new tab", () => {
+  it("replaces registration and login CTAs with the public service notice", () => {
     render(<AnonKeyPasteInput />);
-    const register = screen.getByRole("link", { name: /注册免费拿试用 token/ });
-    const login = screen.getByRole("link", { name: /登录看我的 Keys/ });
-    expect(register).toHaveAttribute("href", "/register");
-    expect(register).toHaveAttribute("target", "_blank");
-    expect(login).toHaveAttribute("href", "/login");
-    expect(login).toHaveAttribute("target", "_blank");
+    expect(screen.getByRole("link", { name: "停服说明" })).toHaveAttribute("href", "/service-notice");
+    expect(screen.queryByRole("link", { name: /注册免费拿试用 token/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /登录看我的 Keys/ })).not.toBeInTheDocument();
   });
 
   it("once a valid sk- + 48-char key is pasted, agent grid becomes enabled and per-card clicks fire ccswitch:// URLs", async () => {

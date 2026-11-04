@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AppNav, Breadcrumb } from '../components/AppNav';
@@ -165,13 +166,13 @@ export default function OrderStatus() {
       <Shell>
         <h1 className="text-[28px] font-bold mb-3">订单 ID 缺失</h1>
         <p className="text-[14px] text-text-secondary mb-6">
-          URL 看起来不完整，回到套餐页重新下单。
+          {SERVICE_PAUSE_ENABLED ? 'URL 看起来不完整，请返回控制台查看订单，或查看停服说明。' : 'URL 看起来不完整，回到套餐页重新下单。'}
         </p>
         <Link
-          to="/pricing"
+          to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : "/pricing"}
           className="inline-block px-5 py-2.5 bg-ink text-bg border-2 border-ink rounded-md text-[14px] font-bold shadow-[3px_3px_0_0_#1C1917]"
         >
-          前往套餐页
+          {SERVICE_PAUSE_ENABLED ? "停服说明" : "前往套餐页"}
         </Link>
       </Shell>
     );
@@ -305,10 +306,10 @@ export default function OrderStatus() {
           ← 返回控制台
         </Link>
         <Link
-          to={isTopup(order) ? '/billing/topup' : '/pricing'}
+          to={SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : isTopup(order) ? '/billing/topup' : '/pricing'}
           className="font-mono text-[12.5px] text-ink-2 hover:text-ink underline underline-offset-4 decoration-2"
         >
-          {isTopup(order) ? '再充一笔 →' : '重新选套餐 →'}
+          {SERVICE_PAUSE_ENABLED ? '停服说明' : isTopup(order) ? '再充一笔 →' : '重新选套餐 →'}
         </Link>
       </div>
     </Shell>
@@ -327,7 +328,7 @@ function Shell({ children, topup = true }: { children: React.ReactNode; topup?: 
         <Breadcrumb
           items={[
             { label: '控制台', to: '/console' },
-            topup
+            SERVICE_PAUSE_ENABLED ? { label: '停服说明', to: SERVICE_NOTICE_PATH } : topup
               ? { label: '充值', to: '/billing/topup' }
               : { label: '套餐', to: '/pricing' },
             { label: '订单' },
@@ -358,7 +359,7 @@ function StatusHero({
           等待支付
         </h1>
         <p className="text-[14px] text-text-secondary mb-8 max-w-[520px] leading-relaxed">
-          {hasQr
+          {SERVICE_PAUSE_ENABLED ? '此订单尚未支付。网站已关闭付款入口，请查看停服说明。' : hasQr
             ? '扫描下方二维码完成支付，付款完成后这里会在 1 分钟内自动跳回控制台。'
             : '已为你打开支付页面。完成付款后这里会在 1 分钟内自动跳转到控制台。如果支付页面被关闭了，下方点"重新打开"。'}
         </p>
@@ -451,6 +452,7 @@ function PendingActions({
   currency: BillingOrder['currency'];
   channel: BillingOrder['channel'];
 }) {
+  if (SERVICE_PAUSE_ENABLED) return <Link to={SERVICE_NOTICE_PATH} className="font-semibold underline underline-offset-4">停服说明</Link>;
   // Inline QR — only shown when the upstream gave us a direct image URL
   // (xunhupay does; epusdt doesn't). Hard refresh on this page loses
   // qrCodeUrl from navigation state, so we gracefully fall back to the
@@ -555,8 +557,8 @@ function SettleFailedActions() {
 }
 
 function FailedActions({ isTopup }: { isTopup: boolean }) {
-  const to = isTopup ? '/billing/topup' : '/pricing';
-  const text = isTopup ? '重新充值 →' : '重新下单 →';
+  const to = SERVICE_PAUSE_ENABLED ? SERVICE_NOTICE_PATH : isTopup ? '/billing/topup' : '/pricing';
+  const text = SERVICE_PAUSE_ENABLED ? '停服说明' : isTopup ? '重新充值 →' : '重新下单 →';
   return (
     <div className="flex items-center gap-3 mb-2">
       <Link
