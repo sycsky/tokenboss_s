@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { Link, useNavigate } from 'react-router-dom';
 import { CompatRow, AgentMark } from '../components/CompatRow';
 import { TerminalBlock } from '../components/TerminalBlock';
@@ -167,7 +168,7 @@ export default function Landing() {
   const plusPaused = isLoggedIn && !!plusTier.soldOut;
   const supPaused = isLoggedIn && !!superTier.soldOut;
   const ultraPaused = isLoggedIn && !!ultraTier.soldOut;
-  const anyPaused = plusPaused || supPaused || ultraPaused;
+  const anyPaused = !SERVICE_PAUSE_ENABLED && (plusPaused || supPaused || ultraPaused);
 
   // CTA 矩阵：
   //   访客              → "免费开始 →"      → /register
@@ -177,6 +178,7 @@ export default function Landing() {
     text: string;
     onClick: (() => void) | undefined;
   } {
+    if (SERVICE_PAUSE_ENABLED) return { text: '停服说明 →', onClick: () => navigate(SERVICE_NOTICE_PATH) };
     if (!isLoggedIn) return { text: '免费开始 →', onClick: goRegister };
     if (paused) return { text: MEMBERSHIP_PAUSED_COPY.ctaText, onClick: goTopup };
     return { text: '联系客服购买', onClick: undefined };
@@ -186,7 +188,9 @@ export default function Landing() {
   const ultraCta = ctaFor(ultraPaused);
   const standardCta:
     | { text: string; onClick: () => void; href?: undefined }
-    | { text: string; href: string; onClick?: undefined } = isLoggedIn
+    | { text: string; href: string; onClick?: undefined } = SERVICE_PAUSE_ENABLED
+    ? { text: '停服说明 →', href: SERVICE_NOTICE_PATH }
+    : isLoggedIn
     ? { text: '立即充值 →', href: '/billing/topup' }
     : { text: '免费开始 →', onClick: goRegister };
 
@@ -215,7 +219,9 @@ export default function Landing() {
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mt-8">
-              {isLoggedIn ? (
+              {SERVICE_PAUSE_ENABLED ? (
+                <Link to={SERVICE_NOTICE_PATH} className={slockBtn('primary')}>停服说明 →</Link>
+              ) : isLoggedIn ? (
                 <Link to="/console" className={slockBtn('primary')}>
                   去控制台 →
                 </Link>
@@ -325,9 +331,9 @@ export default function Landing() {
             onCtaClick={plusCta.onClick}
             ctaVariant={plusPaused ? 'muted' : 'secondary'}
             dimmed={plusPaused}
-            banner="副驾玩家"
+            banner={SERVICE_PAUSE_ENABLED ? "已停止销售" : "副驾玩家"}
             bannerVariant="subtle"
-            ctaHelper={plusPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
+            ctaHelper={!SERVICE_PAUSE_ENABLED && plusPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
           />
           <TierCard
             name={superTier.name}
@@ -341,9 +347,9 @@ export default function Landing() {
             ctaVariant={supPaused ? 'muted' : 'primary'}
             dimmed={supPaused}
             featured={!supPaused}
-            banner="主驾玩家"
+            banner={SERVICE_PAUSE_ENABLED ? "已停止销售" : "主驾玩家"}
             bannerVariant="strong"
-            ctaHelper={supPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
+            ctaHelper={!SERVICE_PAUSE_ENABLED && supPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
           />
           <TierCard
             name={ultraTier.name}
@@ -356,9 +362,9 @@ export default function Landing() {
             onCtaClick={ultraCta.onClick}
             ctaVariant={ultraPaused ? 'muted' : 'secondary'}
             dimmed={ultraPaused}
-            banner={ultraPaused ? '会员暂停' : '自动驾驶'}
+            banner={SERVICE_PAUSE_ENABLED ? '已停止销售' : ultraPaused ? '会员暂停' : '自动驾驶'}
             bannerVariant="dark"
-            ctaHelper={ultraPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
+            ctaHelper={!SERVICE_PAUSE_ENABLED && ultraPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
           />
         </div>
       </section>
@@ -399,7 +405,7 @@ export default function Landing() {
       </section>
 
       {/* Final CTA color band — full-bleed terracotta with hard borders */}
-      {!isLoggedIn && (
+      {!isLoggedIn && !SERVICE_PAUSE_ENABLED && (
         <section className="bg-accent text-white border-y-2 border-ink">
           <div className="max-w-[1100px] mx-auto px-6 md:px-14 py-20 md:py-24 text-center">
             <h2 className="font-sans text-[34px] md:text-[52px] font-extrabold leading-[1.05] tracking-tight mb-4">
@@ -451,11 +457,13 @@ export default function Landing() {
                 { text: '服务条款', to: '/terms' },
                 { text: '隐私政策', to: '/privacy' },
                 { text: '退款政策', to: '/refund' },
+                ...(SERVICE_PAUSE_ENABLED ? [{ text: '停服说明', to: SERVICE_NOTICE_PATH }] : []),
               ]}
             />
           </div>
           <div className="pt-6 border-t border-white/10 font-mono text-[10.5px] text-white/35">
             © 2026 TokenBoss · All rights reserved.
+            {SERVICE_PAUSE_ENABLED && <a className="block mt-3 text-white/80 underline text-[13px]" href="mailto:shawn@tokenboss.co">shawn@tokenboss.co</a>}
           </div>
         </div>
       </footer>

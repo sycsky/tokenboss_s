@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { api, type BucketRecord } from '../lib/api';
@@ -165,9 +166,9 @@ export default function Settings() {
         <SectionHeader num="03" cn="操作" en="Actions" size="lg" className="mb-4" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-12">
           <ActionCard
-            title="使用兑换码"
-            hint="朋友 / 渠道给你的码，直接到账"
-            onClick={() => setRedeemOpen(true)}
+            title={SERVICE_PAUSE_ENABLED ? "停服说明" : "使用兑换码"}
+            hint={SERVICE_PAUSE_ENABLED ? "查看停服安排与退款联系方式" : "朋友 / 渠道给你的码，直接到账"}
+            onClick={() => SERVICE_PAUSE_ENABLED ? window.location.assign(SERVICE_NOTICE_PATH) : setRedeemOpen(true)}
           />
           <ActionCard
             title="退出登录"
@@ -179,7 +180,7 @@ export default function Settings() {
       </main>
 
       <RedeemCodeModal
-        open={redeemOpen}
+        open={!SERVICE_PAUSE_ENABLED && redeemOpen}
         onClose={() => setRedeemOpen(false)}
       />
     </div>

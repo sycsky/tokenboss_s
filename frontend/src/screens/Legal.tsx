@@ -1,3 +1,4 @@
+import { REFUND_EMAIL, REFUND_MAILTO, SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { Link } from 'react-router-dom';
 import { useEffect } from 'react';
 
@@ -193,8 +194,16 @@ export default function Legal({ doc }: { doc: LegalDoc }) {
         <h1 className="text-[32px] md:text-[40px] font-bold tracking-tight leading-[1.1] mb-2">
           {d.title}
         </h1>
-        <p className="font-mono text-[11px] text-ink-3 mb-6">最后更新：{LAST_UPDATED}</p>
+        <p className="font-mono text-[11px] text-ink-3 mb-6">最后更新：{doc === 'refund' && SERVICE_PAUSE_ENABLED ? '2026-11-04' : LAST_UPDATED}</p>
 
+        {doc === 'refund' && SERVICE_PAUSE_ENABLED && (
+          <section aria-label="本次服务暂停的退款申请" className="bg-warning-subtle border-2 border-ink rounded-md p-5 mb-7 text-[14px] leading-[1.9]">
+            <h2 className="font-bold text-[18px] mb-2">本次服务暂停的退款申请</h2>
+            <p>有退款需求的用户，请将您的 TokenBoss 登录邮箱及联系微信发送至 <a className="font-bold underline break-all" href={REFUND_MAILTO}>{REFUND_EMAIL}</a>，我们将后续联系核实并处理。</p>
+            <p>提交申请无需登录。以下常规条款不影响本次停服退款申请的提交与核实。</p>
+            <Link to={SERVICE_NOTICE_PATH} className="font-semibold underline">停服说明 →</Link>
+          </section>
+        )}
         <p className="text-[14px] text-text-secondary leading-relaxed mb-8">{d.intro}</p>
 
         <div className="space-y-7">

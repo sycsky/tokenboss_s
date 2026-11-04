@@ -1,3 +1,4 @@
+import { SERVICE_NOTICE_PATH, SERVICE_PAUSE_ENABLED } from '../lib/servicePause';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -37,7 +38,7 @@ export default function Plans() {
   // active paid plan locks self-checkout until it expires naturally.
   const [paidSku, setPaidSku] = useState<BucketRecord['skuType'] | null>(null);
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || SERVICE_PAUSE_ENABLED) return;
     let cancelled = false;
     api.getBuckets()
       .then((res) => {
@@ -87,6 +88,7 @@ export default function Plans() {
     plan: 'plus' | 'super' | 'ultra',
     soldOut?: boolean,
   ): { text: string; onClick: () => void } | null => {
+    if (SERVICE_PAUSE_ENABLED) return { text: '停服说明 →', onClick: () => navigate(SERVICE_NOTICE_PATH) };
     if (!isLoggedIn) return { text: '免费开始 →', onClick: goRegister };
 
     if (paidSku) {
@@ -114,7 +116,9 @@ export default function Plans() {
   };
   const standardCta:
     | { text: string; onClick: () => void; href?: undefined }
-    | { text: string; href: string; onClick?: undefined } = isLoggedIn
+    | { text: string; href: string; onClick?: undefined } = SERVICE_PAUSE_ENABLED
+    ? { text: '停服说明 →', href: SERVICE_NOTICE_PATH }
+    : isLoggedIn
     ? { text: '立即充值 →', href: '/billing/topup' }
     : { text: '免费开始 →', onClick: goRegister };
 
@@ -126,7 +130,7 @@ export default function Plans() {
   const plusPaused = isLoggedIn && !!plus.soldOut;
   const supPaused = isLoggedIn && !!sup.soldOut;
   const ultraPaused = isLoggedIn && !!ultra.soldOut;
-  const anyPaused = plusPaused || supPaused || ultraPaused;
+  const anyPaused = !SERVICE_PAUSE_ENABLED && (plusPaused || supPaused || ultraPaused);
 
   const plusCta = tierCta('plus', plus.soldOut);
   const superCta = tierCta('super', sup.soldOut);
@@ -204,7 +208,7 @@ export default function Plans() {
         <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
           <SectionHeader num="01" cn="充值" en="Pay as you go" size="lg" />
           <span className="font-mono text-[11px] text-ink-3 tracking-tight">
-            充值不退 · 永久可用
+            {SERVICE_PAUSE_ENABLED ? '已停止销售' : '充值不退 · 永久可用'}
           </span>
         </div>
 
@@ -316,9 +320,9 @@ export default function Plans() {
             onCtaClick={plusCta?.onClick}
             ctaVariant={plusPaused ? 'muted' : 'secondary'}
             dimmed={plusPaused}
-            banner="副驾玩家"
+            banner={SERVICE_PAUSE_ENABLED ? "已停止销售" : "副驾玩家"}
             bannerVariant="subtle"
-            ctaHelper={plusPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
+            ctaHelper={!SERVICE_PAUSE_ENABLED && plusPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
             tooltipPanel={
               <TierTooltip
                 models={['GPT-5.5 · 5.4 · 5.4-mini']}
@@ -342,10 +346,10 @@ export default function Plans() {
             ctaVariant={supPaused ? 'muted' : 'primary'}
             dimmed={supPaused}
             featured={!supPaused}
-            banner="主驾玩家"
+            banner={SERVICE_PAUSE_ENABLED ? "已停止销售" : "主驾玩家"}
             bannerVariant="strong"
             ctaHelper={
-              supPaused
+              SERVICE_PAUSE_ENABLED ? undefined : supPaused
                 ? MEMBERSHIP_PAUSED_COPY.shortHint
                 : `+ Ultra 抢购优先权 · ${ULTRA_DROP.preemptHourCST}:${ULTRA_DROP.preemptMinuteCST} 提前 5 分钟`
             }
@@ -371,9 +375,9 @@ export default function Plans() {
             onCtaClick={ultraCta?.onClick}
             ctaVariant={ultraPaused ? 'muted' : 'secondary'}
             dimmed={ultraPaused}
-            banner={ultraPaused ? '会员暂停' : '自动驾驶'}
+            banner={SERVICE_PAUSE_ENABLED ? '已停止销售' : ultraPaused ? '会员暂停' : '自动驾驶'}
             bannerVariant="dark"
-            ctaHelper={ultraPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
+            ctaHelper={!SERVICE_PAUSE_ENABLED && ultraPaused ? MEMBERSHIP_PAUSED_COPY.shortHint : undefined}
             tooltipPanel={
               <TierTooltip
                 headline="在 Super 基础上增加"
@@ -414,7 +418,7 @@ export default function Plans() {
       </main>
 
       <ContactSalesModal
-        open={contactReason !== null}
+        open={!SERVICE_PAUSE_ENABLED && contactReason !== null}
         onClose={() => setContactReason(null)}
         reason={contactReason ?? 'general'}
       />
