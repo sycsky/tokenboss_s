@@ -5,7 +5,7 @@ import App from '../../App';
 import { api, type BillingOrder } from '../../lib/api';
 const auth = vi.hoisted(() => ({ user: null as { userId: string; email: string } | null, token: null, refresh: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../lib/auth', () => ({ useAuth: () => auth }));
-const cutoff = Date.parse('2026-12-16T00:00:00+08:00');
+const cutoff = Date.parse('2026-12-01T00:00:00+08:00');
 const show = (path: string) => render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
 beforeEach(() => { auth.user = null; vi.useFakeTimers(); vi.setSystemTime(cutoff - 1000); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllEnvs(); });
@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstub
 describe('service pause website', () => {
   it('shows one homepage banner without a new slogan-side status card', () => {
     show('/');
-    expect(screen.getByLabelText('服务暂停公告')).toHaveTextContent('2026 年 12 月 16 日 00:00');
+    expect(screen.getByLabelText('服务暂停公告')).toHaveTextContent('2026 年 12 月 1 日 00:00');
     expect(screen.getByLabelText('服务暂停公告')).toHaveTextContent('shawn@tokenboss.co');
     expect(screen.queryByText('当前服务状态')).not.toBeInTheDocument();
     expect(screen.queryByText('免费试用')).not.toBeInTheDocument();
@@ -23,6 +23,7 @@ describe('service pause website', () => {
     show(path);
     expect(screen.getByRole('heading', { name: '服务暂停与退款说明' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('停服时间')).toHaveTextContent('2026 年 12 月 1 日');
     const mail = screen.getByRole('link', { name: '发送退款申请邮件' });
     expect(mail.getAttribute('href')).toContain('mailto:shawn@tokenboss.co');
     expect(decodeURIComponent(mail.getAttribute('href')!)).toContain('联系微信');
